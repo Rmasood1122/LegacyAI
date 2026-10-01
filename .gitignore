@@ -31,3 +31,7 @@ exports/
 # test output
 .test-exports/
 services/api/.test-exports/
+
+# python
+services/ai/.venv/
+.pytest_cache/
