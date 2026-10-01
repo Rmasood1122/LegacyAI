@@ -1,0 +1,29 @@
+# secrets and local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.age
+age-key*.txt
+
+# dependencies and build output
+node_modules/
+dist/
+coverage/
+__pycache__/
+.venv/
+*.pyc
+
+# terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!example.tfvars
+crash.log
+
+# local data
+backups/
+exports/
+.DS_Store
