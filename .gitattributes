@@ -1,0 +1,2 @@
+# Keep LF line endings everywhere: shell scripts and Dockerfiles break with CRLF.
+* text=auto eol=lf

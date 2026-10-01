@@ -134,7 +134,7 @@ export async function verifyChain(tx: Tx, tenantId: string, fromSeq = 1, toSeq?:
   for (;;) {
     const upper = toSeq ?? Number.MAX_SAFE_INTEGER;
     const { rows } = await tx.query<AuditRow>(
-      `SELECT ${ROW_COLUMNS} FROM audit_log WHERE tenant_id = $1 AND seq > $2 AND seq <= $3 ORDER BY seq ASC LIMIT $4`,
+      `SELECT ${ROW_COLUMNS} FROM audit_log WHERE tenant_id = $1 AND seq > $2 AND seq <= $3 ORDER BY audit_log.seq ASC LIMIT $4`,
       [tenantId, lastSeq, upper, BATCH],
     );
     if (rows.length === 0) break;
@@ -166,7 +166,7 @@ export async function verifyChain(tx: Tx, tenantId: string, fromSeq = 1, toSeq?:
   }
 
   const anchor = await tx.query<{ seq: string; row_hash: Buffer; anchored_at: Date }>(
-    'SELECT seq::text AS seq, row_hash, anchored_at FROM audit_anchors WHERE tenant_id = $1 ORDER BY seq DESC, anchored_at DESC LIMIT 1',
+    'SELECT seq::text AS seq, row_hash, anchored_at FROM audit_anchors WHERE tenant_id = $1 ORDER BY audit_anchors.seq DESC, anchored_at DESC LIMIT 1',
     [tenantId],
   );
   if (anchor.rows[0]) {
@@ -214,7 +214,7 @@ export async function queryAudit(
         AND ($5::text IS NULL OR resource_id = $5)
         AND ($6::text IS NULL OR decision = $6)
         AND ($7::bigint IS NULL OR seq < $7::bigint)
-      ORDER BY seq DESC LIMIT $8`,
+      ORDER BY audit_log.seq DESC LIMIT $8`,
     [
       tenantId, filters.actor_card_id ?? null, filters.action ?? null, filters.resource_type ?? null,
       filters.resource_id ?? null, filters.decision ?? null, beforeSeq, limit,

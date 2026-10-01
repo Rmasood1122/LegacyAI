@@ -1,0 +1,233 @@
+// Every route must go through the policy decision point. This file proves it four ways:
+// registration refuses unprotected routes, the public list is pinned, a deny really blocks
+// every protected operation, and handlers contain no access decisions of their own.
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CONTRACT_PATH } from '../../src/app.ts';
+import {
+  createHttpServer, createLogger, loadConfig, PLATFORM_TENANT_ID, PostgresIdempotencyStore,
+  type AuthPort, type HttpServer, type RouteDef,
+} from '../../src/modules/platform/index.ts';
+import { systemClock } from '../../src/shared/clock.ts';
+import type { Decision, Obligation, Subject } from '../../src/shared/policy-types.ts';
+import { TEST_ORIGIN, testEnv } from '../helpers/env.ts';
+import { addMember, createTenant, startApp, superuser, type TestApp, type TestMember, type TestTenant } from '../helpers/harness.ts';
+
+let t: TestApp;
+let tenant: TestTenant;
+let successor: TestMember;
+beforeAll(async () => {
+  t = await startApp();
+  tenant = await createTenant(t, 'coverage');
+  successor = await addMember(t, tenant.owner, [{ role_key: 'successor' }]);
+});
+afterAll(async () => t.close());
+
+const FAKE_TOKEN = `v1.${PLATFORM_TENANT_ID}.${'A'.repeat(43)}`;
+const fakeSubject = (): Subject => ({
+  kind: 'card', tenant_id: PLATFORM_TENANT_ID, card_id: randomUUID(), card_number: '0000000000000000', person_id: null, department_id: null,
+  card_state: 'active', activated_at: new Date(), expires_at: new Date(Date.now() + 1e9), grace_until: new Date(Date.now() + 2e9),
+  renewal_due: new Date(), locked: false, roles: [], is_platform_tenant: true, session_id: randomUUID(),
+  session_idle_expires_at: new Date(), session_absolute_expires_at: new Date(),
+});
+
+/** A bare HTTP layer with a scripted policy decision point, to test the layer itself. */
+async function bareServer(decision: Decision, calls: string[] = []): Promise<HttpServer> {
+  const auth: AuthPort = {
+    tenantOfToken: () => PLATFORM_TENANT_ID,
+    resolveSession: async () => ({ subject: fakeSubject(), csrfToken: 'csrf' }),
+    authorize: async (_tx, _s, action) => {
+      calls.push(action);
+      return decision;
+    },
+  };
+  return createHttpServer({
+    config: loadConfig(testEnv()), db: t.app.db, log: createLogger('silent'), clock: systemClock, auth,
+    rateLimiter: { hit: async () => ({ allowed: true, retryAfterSeconds: 0 }) }, idempotency: new PostgresIdempotencyStore(),
+    contractPath: CONTRACT_PATH,
+  });
+}
+const allow = (obligations: Obligation[] = []): Decision => ({ effect: 'allow', reason_code: 'ALLOW', obligations });
+const tenantRoute = (handler: () => Promise<{ body: unknown }>): RouteDef => ({
+  operationId: 'getCurrentTenant', kind: 'session',
+  policy: { resource: async () => ({ type: 'tenant', tenant_id: PLATFORM_TENANT_ID }) },
+  handler,
+});
+const tenantBody = { id: PLATFORM_TENANT_ID, name: 'x', slug: 'x', status: 'active', plan_code: 'pilot', region: 'us', created_at: new Date().toISOString() };
+
+describe('a route cannot exist without policy metadata', () => {
+  it('registering a route directly on Fastify makes the server refuse to start (seen firing)', async () => {
+    const server = await bareServer(allow());
+    expect(() => server.app.get('/v1/rogue', async () => ({ leaked: true }))).toThrow(/without defineRoutes\(\); it has no policy check/);
+    expect(() => server.app.post('/v1/rogue', async () => ({}))).toThrow(/no policy check/);
+    expect(() => server.app.route({ method: 'DELETE', url: '/v1/rogue', handler: async () => ({}) })).toThrow(/no policy check/);
+    await server.app.close();
+  });
+
+  it('defineRoutes refuses: unknown operation, duplicate, public flag that disagrees with the contract, public without a reason', async () => {
+    const server = await bareServer(allow());
+    const ok = async (): Promise<{ body: unknown }> => ({ body: {} });
+    expect(() => server.defineRoutes([{ operationId: 'notInTheContract', kind: 'public', policy: { public: true, reason: 'made up for the test' }, handler: ok }])).toThrow(/not an operation in openapi.yaml/);
+    // a protected operation declared public in code:
+    expect(() => server.defineRoutes([{ operationId: 'listCards', kind: 'public', policy: { public: true, reason: 'trying to open it up' }, handler: ok }])).toThrow(/differs from openapi.yaml/);
+    // a public operation declared protected in code is also a mismatch:
+    expect(() => server.defineRoutes([{ operationId: 'getHealth', kind: 'session', policy: { resource: async () => null }, handler: ok }])).toThrow(/differs from openapi.yaml/);
+    expect(() => server.defineRoutes([{ operationId: 'getHealth', kind: 'public', policy: { public: true, reason: 'short' }, handler: ok }])).toThrow(/needs a written reason/);
+    server.defineRoutes([tenantRoute(ok)]);
+    expect(() => server.defineRoutes([tenantRoute(ok)])).toThrow(/registered twice/);
+    await server.app.close();
+  });
+
+  it('the contract itself cannot declare a protected operation without a permission', () => {
+    const yaml = readFileSync(CONTRACT_PATH, 'utf8');
+    for (const op of t.app.http.contract.operations.values()) {
+      if (!op.isPublic) expect(op.permission, op.operationId).toMatch(/^[a-z_]+:[a-z_]+$/);
+    }
+    expect(yaml).toContain('x-permission');
+  });
+});
+
+describe('the list of routes that skip the session check is short and pinned', () => {
+  it('public = exactly these six; service-to-service = exactly this one', () => {
+    const routes = t.app.http.registeredRoutes();
+    expect(routes.filter((r) => r.kind === 'public').map((r) => r.operationId).sort()).toEqual(
+      ['enrollmentBegin', 'enrollmentComplete', 'getHealth', 'getReady', 'loginBegin', 'loginVerify']);
+    expect(routes.filter((r) => r.kind === 'service').map((r) => r.operationId)).toEqual(['internalPolicyCheck']);
+    for (const r of routes.filter((x) => x.kind === 'public')) expect(r.publicReason!.length).toBeGreaterThan(20);
+  });
+
+  it('every other route (38) is a session route with a permission that exists in the permission table', async () => {
+    const su = await superuser();
+    const known = new Set((await su.query('SELECT permission_key FROM permissions')).rows.map((r) => r.permission_key as string));
+    await su.end();
+    const session = t.app.http.registeredRoutes().filter((r) => r.kind === 'session');
+    expect(session).toHaveLength(38);
+    for (const r of session) expect(known.has(r.permission!), `${r.operationId} uses unknown permission ${r.permission}`).toBe(true);
+  });
+
+  it('routes registered in the server == operations in openapi.yaml (45, no more, no fewer)', () => {
+    const registered = t.app.http.registeredRoutes().map((r) => `${r.method} ${r.path}`).sort();
+    const contract = [...t.app.http.contract.operations.values()].map((o) => `${o.method} ${o.path}`).sort();
+    expect(registered).toEqual(contract);
+    expect(registered).toHaveLength(45);
+    // and Fastify itself knows no route beyond those (HEAD/OPTIONS helpers aside)
+    const printed = t.app.http.app.printRoutes({ commonPrefix: false });
+    expect(printed).not.toMatch(/rogue/);
+  });
+});
+
+describe('the handler never runs unless the policy decision point said allow', () => {
+  it('deny -> 403, handler not called, decision was asked for the contract permission', async () => {
+    const calls: string[] = [];
+    let ran = 0;
+    const server = await bareServer({ effect: 'deny', reason_code: 'DENY_DEFAULT', obligations: [] }, calls);
+    server.defineRoutes([tenantRoute(async () => { ran += 1; return { body: tenantBody }; })]);
+    const res = await server.app.inject({ method: 'GET', url: '/v1/tenants/current', cookies: { '__Host-lai_session': FAKE_TOKEN } });
+    expect(res.statusCode).toBe(403);
+    expect(ran).toBe(0);
+    expect(calls).toEqual(['tenant:read']);
+    await server.app.close();
+  });
+
+  it('allow -> handler runs exactly once', async () => {
+    let ran = 0;
+    const server = await bareServer(allow());
+    server.defineRoutes([tenantRoute(async () => { ran += 1; return { body: tenantBody }; })]);
+    const res = await server.app.inject({ method: 'GET', url: '/v1/tenants/current', cookies: { '__Host-lai_session': FAKE_TOKEN } });
+    expect(res.statusCode).toBe(200);
+    expect(ran).toBe(1);
+    await server.app.close();
+  });
+
+  it.each([
+    ['an effect that is neither allow nor deny', { effect: 'maybe', reason_code: 'X', obligations: [] }],
+    ['an allow carrying an obligation this layer does not understand', { effect: 'allow', reason_code: 'ALLOW', obligations: [{ type: 'require_blood_sample' }] }],
+  ])('%s -> refused, handler not called', async (_name, decision) => {
+    let ran = 0;
+    const server = await bareServer(decision as unknown as Decision);
+    server.defineRoutes([tenantRoute(async () => { ran += 1; return { body: tenantBody }; })]);
+    const res = await server.app.inject({ method: 'GET', url: '/v1/tenants/current', cookies: { '__Host-lai_session': FAKE_TOKEN } });
+    expect(res.statusCode).toBe(403);
+    expect(ran).toBe(0);
+    await server.app.close();
+  });
+
+  it('a policy point that throws -> 500, handler not called', async () => {
+    let ran = 0;
+    const server = await bareServer(allow());
+    (server as any); // same server type; replace authorize via a new server with a throwing port:
+    await server.app.close();
+    const auth: AuthPort = {
+      tenantOfToken: () => PLATFORM_TENANT_ID,
+      resolveSession: async () => ({ subject: fakeSubject(), csrfToken: 'csrf' }),
+      authorize: async () => { throw new Error('policy store unavailable'); },
+    };
+    const s2 = await createHttpServer({
+      config: loadConfig(testEnv()), db: t.app.db, log: createLogger('silent'), clock: systemClock, auth,
+      rateLimiter: { hit: async () => ({ allowed: true, retryAfterSeconds: 0 }) }, idempotency: new PostgresIdempotencyStore(), contractPath: CONTRACT_PATH,
+    });
+    s2.defineRoutes([tenantRoute(async () => { ran += 1; return { body: tenantBody }; })]);
+    const res = await s2.app.inject({ method: 'GET', url: '/v1/tenants/current', cookies: { '__Host-lai_session': FAKE_TOKEN } });
+    expect(res.statusCode).toBe(500);
+    expect(ran).toBe(0);
+    await s2.app.close();
+  });
+});
+
+describe('real app: a card with almost no permissions cannot get a 2xx from anything it is not granted', () => {
+  it('walks all 38 protected operations as a Successor', async () => {
+    const su = await superuser();
+    const granted = new Set((await su.query(`SELECT permission_key FROM role_permissions WHERE role_key = 'successor'`)).rows.map((r) => r.permission_key as string));
+    await su.end();
+    expect([...granted].sort()).toEqual(['card:list', 'card:read', 'card_events:read', 'card_roles:read', 'department:read', 'knowledge:read',
+      'person:read', 'role:read', 'self:credential_remove', 'self:logout', 'self:read']);
+
+    const bodies: Record<string, unknown> = {
+      issueCard: { person_id: successor.personId, roles: [{ role_key: 'expert' }] },
+      suspendCard: { reason: 'x' }, revokeCard: { reason: 'x' }, replaceCard: { reason: 'lost' }, renewCard: {}, issueEnrollmentToken: {},
+      putCardRestrictions: { restrictions: [] }, assignCardRole: { role_key: 'expert' }, replaceCardRoles: { roles: [{ role_key: 'expert' }] },
+      createPerson: { display_name: 'x' }, updatePerson: { display_name: 'x' }, createDepartment: { name: 'x' },
+      createTenant: { name: 'x', slug: 'x-tenant', owner_display_name: 'x' }, updateTenantSettings: { grace_days: 1 }, verifyAuditChain: {},
+    };
+    let denied = 0;
+    for (const op of t.app.http.contract.operations.values()) {
+      if (op.isPublic || op.isService || granted.has(op.permission!)) continue;
+      // Target a REAL resource in the same tenant (the Owner's card / the Successor's own person), so that
+      // "not found" cannot be what stops the request.
+      const url = op.path.replace('{card_id}', tenant.ownerCard.id).replace('{person_id}', successor.personId)
+        .replace('{role_key}', 'company_owner').replace('{export_id}', randomUUID()).replace('{credential_id}', randomUUID());
+      const res = await successor.client.request(op.method, url, bodies[op.operationId], { idem: op.idempotent ? `walk-${randomUUID()}` : false });
+      expect([403, 404], `${op.operationId} answered ${res.status}: ${res.raw}`).toContain(res.status);
+      if (res.status === 404) expect(op.operationId).toBe('getExport'); // the only one whose target does not exist
+      denied += 1;
+    }
+    expect(denied).toBe(26); // 38 protected operations minus the 12 that the Successor's 11 permissions reach
+  });
+});
+
+describe('handlers contain no access decisions of their own (source check)', () => {
+  const src = (p: string): string => readFileSync(path.resolve(import.meta.dirname, '..', '..', 'src', p), 'utf8');
+
+  it('route files never read the caller\'s roles or compare role names', () => {
+    for (const file of ['modules/identity-access/internal/routes.ts', 'modules/platform/internal/routes.ts']) {
+      const text = src(file);
+      expect(text, file).not.toMatch(/subject\.roles/);
+      expect(text, file).not.toMatch(/subject\.is_platform_tenant/);
+      expect(text, file).not.toMatch(/role_key\s*===\s*['"](admin|company_owner|expert|auditor)['"]\s*\)\s*(return|throw)/);
+      expect(text, file).not.toMatch(/problems\.forbidden\(/);
+    }
+  });
+
+  it('only the HTTP layer turns a decision into a 403', () => {
+    expect(src('modules/platform/internal/http.ts')).toMatch(/problems\.forbidden\(\)/);
+    for (const file of ['modules/identity-access/internal/cards.ts', 'modules/identity-access/internal/auth.ts', 'modules/platform/internal/tenants.ts']) {
+      expect(src(file), file).not.toMatch(/problems\.forbidden\(/);
+    }
+  });
+
+  it('request Origin used by tests is the allow-listed one (sanity)', () => {
+    expect(loadConfig(testEnv()).allowedOrigins).toEqual([TEST_ORIGIN]);
+  });
+});

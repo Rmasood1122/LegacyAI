@@ -35,6 +35,7 @@ export class SecretCodeHasher {
   #running = 0;
   readonly #waiting: Array<() => void> = [];
   #dummyHash: string | null = null;
+  #computations = 0;
 
   constructor(keyring: Keyring, params: Argon2Params) {
     if (
@@ -48,6 +49,11 @@ export class SecretCodeHasher {
     if (!keyring.keys.has(keyring.currentId)) throw new Error('SC pepper keyring has no current key');
     this.#keyring = keyring;
     this.#params = params;
+  }
+
+  /** Number of Argon2 computations performed. Tests use it to prove every login path does exactly one. */
+  get computations(): number {
+    return this.#computations;
   }
 
   get currentPepperId(): string {
@@ -65,6 +71,7 @@ export class SecretCodeHasher {
       await new Promise<void>((resolve) => this.#waiting.push(resolve));
     }
     this.#running += 1;
+    this.#computations += 1;
     try {
       return await fn();
     } finally {

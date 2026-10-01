@@ -17,8 +17,15 @@ const REDACTED = '[redacted]';
 // 16 digits, optionally grouped with spaces or dashes and prefixed LGY-.
 const CARD_NUMBER_RE = /(?:LGY[- ]?)?\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b/gi;
 
+// A database URL carries a password. Error messages from drivers sometimes include one.
+// Every quantifier is bounded so the pattern runs in linear time: log content can be
+// attacker-influenced, and an unbounded pattern here was a real denial-of-service (found by test).
+const CONNECTION_STRING_RE = /\b[a-z][a-z0-9+.-]{0,15}:\/\/[^\s"'@/]{1,128}:[^\s"'@/]{1,256}@[^\s"']{1,512}/gi;
+const MAX_LOGGED_STRING = 8_000;
+
 export function scrubString(value: string): string {
-  return value.replace(CARD_NUMBER_RE, '[card-number]');
+  const bounded = value.length > MAX_LOGGED_STRING ? `${value.slice(0, MAX_LOGGED_STRING)}[truncated]` : value;
+  return bounded.replace(CONNECTION_STRING_RE, '[connection-string]').replace(CARD_NUMBER_RE, '[card-number]');
 }
 
 /** Returns a deep copy with sensitive values removed. Never mutates its input. */

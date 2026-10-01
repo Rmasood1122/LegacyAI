@@ -25,7 +25,7 @@ import {
 } from './factors.ts';
 import { effectiveState } from './lifecycle.ts';
 import type { ScProof, SecretCodeHasher } from './secret-code.ts';
-import { createSession, resolveSession, revokeSession, VerifiedLogin } from './sessions.ts';
+import { createSession, resolveSession, revokeSession, subjectForCard, VerifiedLogin } from './sessions.ts';
 
 export interface AuthLimits {
   loginPerIp: { limit: number; windowSeconds: number };
@@ -211,15 +211,19 @@ export class AuthService {
       const effective = effectiveState(card, ctx.now);
       if (card.kind !== 'person' || (effective !== 'active' && effective !== 'expired')) return fail('state', card);
 
+      // Would this card be allowed to do anything at all? The policy decision point answers
+      // (e.g. no: the card or the company card is past its grace window and this is not an Owner).
+      const candidate = await subjectForCard(tx, tenantId, card.id);
+      const allowed = candidate
+        ? await this.#d.authorizer.decideOnly(tx, candidate, 'self:read', { type: 'session', tenant_id: tenantId, owner_card_id: card.id }, ctx)
+        : null;
+      if (allowed?.effect !== 'allow') return fail('expired', card);
+
       // 6. Session. createSession accepts nothing but a VerifiedLogin (strong factor + SC).
       const settings = await getSettings(tx, tenantId);
       const { token, sessionId } = await createSession(tx, new VerifiedLogin(tenantId, strong, sc), ctx, settings, this.#d.hmacKey);
       const session = await resolveSession(tx, token, ctx);
-      const decision = session
-        ? await this.#d.authorizer.decideOnly(tx, session.subject, 'self:read', { type: 'session', tenant_id: tenantId, owner_card_id: card.id }, ctx)
-        : null;
-      if (!session || decision?.effect !== 'allow') {
-        // e.g. the card (or the company card) is past its grace window and this is not an Owner.
+      if (!session) {
         await revokeSession(tx, sessionId, 'card_expired', ctx.now);
         return fail('expired', card);
       }

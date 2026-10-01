@@ -113,6 +113,9 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
 
   const app = Fastify({
     loggerInstance: log as FastifyBaseLogger,
+    // Fastify's built-in request log is replaced by the one-line access log below, which
+    // records the route PATTERN (no ids, no query string) and nothing from the body.
+    disableRequestLogging: true,
     bodyLimit: 64 * 1024,
     requestTimeout: 30_000,
     trustProxy: config.trustProxy,
@@ -146,6 +149,12 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
   app.addHook('onSend', async (req, reply) => {
     reply.header('x-request-id', req.id);
     reply.header('cache-control', 'no-store');
+  });
+  app.addHook('onResponse', async (req, reply) => {
+    req.log.info({
+      request_id: req.id, method: req.method, route: req.routeOptions?.url ?? 'unmatched', status: reply.statusCode,
+      duration_ms: Math.round(reply.elapsedTime),
+    }, 'request');
   });
 
   const sendProblem = (req: FastifyRequest, reply: FastifyReply, err: ProblemError): FastifyReply => {

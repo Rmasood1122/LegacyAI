@@ -65,21 +65,108 @@ async function roles() {
   console.log('db-setup: roles ready (legacyai_migrator, legacyai_app, legacyai_backup)');
 }
 
-function dbmate(args) {
-  const bin = require.resolve('dbmate/dist/cli.js');
+// ---------------------------------------------------------------------------
+// Migrations. The files are in dbmate format ("-- migrate:up" / "-- migrate:down").
+// dbmate itself is used when its binary can run (CI, Linux, Docker). On machines where
+// the operating system refuses to execute the downloaded binary (seen on Windows with
+// endpoint protection: EPERM), the small built-in runner below applies the SAME files
+// with the SAME bookkeeping table, so nothing else changes.
+// Set MIGRATION_ENGINE=dbmate or MIGRATION_ENGINE=builtin to force one.
+
+const migrationsDir = path.join(repoRoot, 'db', 'migrations');
+
+function dbmateBinary() {
+  try {
+    const { resolveBinary } = require('dbmate/dist/resolveBinary.js');
+    return resolveBinary();
+  } catch {
+    return null;
+  }
+}
+
+/** Returns true if dbmate ran (and exits the process if it ran and failed); false if it could not be started. */
+function tryDbmate(args) {
+  const bin = dbmateBinary();
+  if (bin === null) return false;
   const url = new URL(need('DATABASE_URL_ADMIN'));
   if (!url.searchParams.has('sslmode') && ['localhost', '127.0.0.1'].includes(url.hostname)) {
     url.searchParams.set('sslmode', 'disable');
   }
-  const res = spawnSync(
-    process.execPath,
-    [bin, '--url', url.toString(), '--migrations-dir', path.join(repoRoot, 'db', 'migrations'), '--no-dump-schema', ...args],
-    { stdio: 'inherit' },
-  );
+  const res = spawnSync(bin, ['--url', url.toString(), '--migrations-dir', migrationsDir, '--no-dump-schema', ...args], { stdio: 'inherit' });
+  if (res.error || res.status === null) return false; // could not be executed at all
   if (res.status !== 0) {
     console.error(`db-setup: dbmate ${args.join(' ')} failed`);
-    process.exit(res.status ?? 1);
+    process.exit(res.status);
   }
+  return true;
+}
+
+function readMigrations() {
+  return readdirSync(migrationsDir).filter((f) => /^\d+_.+\.sql$/.test(f)).sort().map((file) => {
+    const text = readFileSync(path.join(migrationsDir, file), 'utf8');
+    const up = text.indexOf('-- migrate:up');
+    const down = text.indexOf('-- migrate:down');
+    if (up === -1 || down === -1 || down < up) {
+      console.error(`db-setup: ${file} must contain "-- migrate:up" followed by "-- migrate:down"`);
+      process.exit(2);
+    }
+    return { file, version: file.split('_')[0], up: text.slice(up, down), down: text.slice(down) };
+  });
+}
+
+async function builtin(direction) {
+  await withClient(need('DATABASE_URL_ADMIN'), async (c) => {
+    await c.query('CREATE TABLE IF NOT EXISTS schema_migrations (version varchar(128) PRIMARY KEY)');
+    const applied = new Set((await c.query('SELECT version FROM schema_migrations')).rows.map((r) => r.version));
+    const all = readMigrations();
+    const run = async (m, sql, record) => {
+      const started = Date.now();
+      await c.query('BEGIN');
+      try {
+        await c.query(sql);
+        await c.query(record, [m.version]);
+        await c.query('COMMIT');
+      } catch (err) {
+        await c.query('ROLLBACK');
+        console.error(`db-setup: ${m.file} failed: ${err.message}`);
+        process.exit(1);
+      }
+      return Date.now() - started;
+    };
+    if (direction === 'up') {
+      for (const m of all.filter((x) => !applied.has(x.version))) {
+        console.log(`Applying: ${m.file}`);
+        console.log(`Applied: ${m.file} in ${await run(m, m.up, 'INSERT INTO schema_migrations (version) VALUES ($1)')}ms`);
+      }
+    } else {
+      const last = all.filter((x) => applied.has(x.version)).pop();
+      if (!last) {
+        console.log('db-setup: nothing to roll back');
+        return;
+      }
+      console.log(`Rolling back: ${last.file}`);
+      console.log(`Rolled back: ${last.file} in ${await run(last, last.down, 'DELETE FROM schema_migrations WHERE version = $1')}ms`);
+    }
+  });
+}
+
+let announced = false;
+async function migrate(direction) {
+  const engine = process.env.MIGRATION_ENGINE ?? 'auto';
+  if (engine !== 'auto' && engine !== 'dbmate' && engine !== 'builtin') {
+    console.error('db-setup: MIGRATION_ENGINE must be auto, dbmate or builtin');
+    process.exit(2);
+  }
+  if (engine !== 'builtin' && tryDbmate([direction])) return;
+  if (engine === 'dbmate') {
+    console.error('db-setup: MIGRATION_ENGINE=dbmate but the dbmate binary could not be executed');
+    process.exit(1);
+  }
+  if (!announced && engine === 'auto') {
+    console.log('db-setup: dbmate could not be executed on this machine; using the built-in runner (same files, same table)');
+    announced = true;
+  }
+  await builtin(direction);
 }
 
 async function reset() {
@@ -100,16 +187,16 @@ async function reset() {
     await c.query(`CREATE DATABASE ${dbName}`);
   });
   await roles();
-  dbmate(['up']);
+  await migrate('up');
 }
 
 const cmd = process.argv[2];
 if (cmd === 'roles') await roles();
-else if (cmd === 'up') dbmate(['up']);
-else if (cmd === 'down') dbmate(['down']);
+else if (cmd === 'up') await migrate('up');
+else if (cmd === 'down') await migrate('down');
 else if (cmd === 'down-all') {
-  const count = readdirSync(path.join(repoRoot, 'db', 'migrations')).filter((f) => f.endsWith('.sql')).length;
-  for (let i = 0; i < count; i += 1) dbmate(['down']);
+  const count = readMigrations().length;
+  for (let i = 0; i < count; i += 1) await migrate('down');
 } else if (cmd === 'reset') await reset();
 else {
   console.error('db-setup: expected one of: roles | up | down | down-all | reset');

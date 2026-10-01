@@ -92,6 +92,11 @@ export class Client {
     }
     if (parsed && typeof parsed === 'object' && typeof (parsed as { csrf_token?: unknown }).csrf_token === 'string') {
       this.csrf = (parsed as { csrf_token: string }).csrf_token;
+    } else if (setCookie && this.cookie !== null) {
+      // The server rotated the session (privilege change). A real client re-reads its session
+      // to pick up the new CSRF token; so does this one.
+      const refreshed = await this.t.app.http.app.inject({ method: 'GET', url: '/v1/auth/session', remoteAddress: this.ip, cookies: { [SESSION_COOKIE]: this.cookie } });
+      if (refreshed.statusCode === 200) this.csrf = (refreshed.json() as { csrf_token: string }).csrf_token;
     }
     return { status: res.statusCode, body: parsed, headers: res.headers as Record<string, unknown>, raw: res.body };
   }
