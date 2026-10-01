@@ -44,13 +44,15 @@ Eight decisions I need from you. For each: the question in plain language, my re
 
 ---
 
-## 5. Should a fully verified user be told their card has expired?
+## 5. What should a card number look like?
 
-**The question.** Your prompt says an expired card must look identical to a wrong code. That is the safest rule. But it means a genuine user, who has just correctly presented card, SC and passkey, sees only "sign-in failed" and has no idea why.
+**The question.** Your two documents disagree. The Phase 1 prompt says 15 random digits + 1 check digit shown in groups of four — `4821 9376 0152 7730` — which is exactly the shape of a bank card. Your feature list shows `LGY-4821-9376-0152` (a prefix and 12 digits) and says "do not make the format look like a bank card".
 
-**Recommendation.** Follow your rule exactly in Phase 1 (generic failure in every case) and rely on **notifications before expiry** to the cardholder and admins. Revisit after the pilot: telling a user who has passed *all three* factors that the card expired leaks nothing to an attacker and would cut support requests.
+**Recommendation.** Keep the prompt's **16 digits** (15 random + 1 Damm check digit) but **always display them with the `LGY-` prefix and dashes: `LGY-4821-9376-0152-7730`**. The prefix is display-only; people may type the number with or without it. Together with the Damm check digit and the rule that we never issue a number that passes the bank-card (Luhn) check, no LegacyAI card can validate as a payment card.
 
-**Cost of being wrong.** Low. Generic → some confused users and support messages. Specific → a small design change later, no data impact.
+**The alternative.** 12 digits as in your example (`LGY-4821-9376-0152`): shorter to type on a shop-floor kiosk, and still 100 billion possible numbers. Because the card number is an identifier and not a secret, 12 would be acceptable. Say "12 digits" at Gate 1 if you prefer it.
+
+**Cost of being wrong.** Medium. The length is baked into every issued card, printed badge and QR code. Changing it after cards are issued means re-issuing them. Changing only the display (prefix, dashes) is free.
 
 ---
 
@@ -86,7 +88,10 @@ Eight decisions I need from you. For each: the question in plain language, my re
 
 ## Not decisions, but things you should know
 
-- **I need your 35-feature list** to complete `07-feature-map.md`. Only 14 features were named in the prompt.
+- **Your feature list has 30 features; the prompt says 35** and mentions a "feature 34". I mapped the prompt's numbers onto the 30 (table at the top of `07-feature-map.md`). Tell me if a 35-item list exists.
+- **Expired cards look like any other failed sign-in**, exactly as the prompt requires. A genuine user will not be told why; we rely on notifications before expiry. Worth revisiting after the pilot.
+- **Your list calls the audit log "tamper-proof".** What can honestly be delivered is tamper-evident. Please use that wording with buyers.
+- **Your list's first build group includes SSO/SCIM (16) and the answer quality monitor (22).** The prompt forbids both in Phase 1, so they are not built now.
 - **Legal review** of consent for capturing employee communications is untouched by Phase 1 (no capture is built), but it gates Phase 2.
 - **Neon's free plan and commercial use:** third-party pages say it is allowed; please read Neon's terms yourself before the first paying customer.
 - **A Google Cloud billing account needs a payment card** even for $0 usage.

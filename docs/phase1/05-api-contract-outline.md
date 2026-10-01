@@ -17,7 +17,7 @@ This is the list of things the API can be asked to do, who is allowed to ask, an
 | "Not yours" | A resource in another tenant returns **404**, not 403, so its existence is not revealed. |
 | Pagination | `?limit=` (1–100, default 25) and `?cursor=`. Response: `{ items: [...], next_cursor: string | null }`. Defined once, reused. |
 | Filtering | Simple equality filters as query parameters, listed per endpoint. Defined once as reusable parameters. |
-| Card numbers | Accepted with or without spaces; always returned grouped in fours. |
+| Card numbers | Accepted with or without the `LGY-` prefix, spaces or dashes; always returned in the one approved display format (decision 5 in `08`). |
 | One-time secrets | `sc` and `enrollment_token` appear **only** in the response of the call that created them. No endpoint ever returns them again. |
 | Rate limits | 429 with a uniform problem body and `Retry-After`. |
 
@@ -61,9 +61,9 @@ There is deliberately **no** endpoint that accepts only a card number and SC and
 | `POST /v1/cards/{card_id}/renew` **(idem)** | Owner, Admin [`card:renew`] | optional `validity_days` (cannot exceed the tenant setting) | 200: card with new dates + **new `sc` shown once**. Old SC dead immediately; sessions revoked. |
 | `POST /v1/cards/{card_id}/unlock` **(idem)** | Owner, Admin [`card:unlock`] | — | 200: card + new `sc` (once) |
 | `POST /v1/cards/{card_id}/enrollment-token` **(idem)** | Owner, Admin [`card:reset_credentials`] | `revoke_existing` (bool) | 201: `enrollment_token` (once), `expires_at` |
-| `GET /v1/cards/{card_id}/events` | Owner, Admin · own card [`card_events:read`] | filters: `event_type`, `from`, `to` | Page of usage-history events |
-| `GET /v1/cards/{card_id}/limits` | Owner, Admin [`card_limits:read`] | — | List of limits and current counters |
-| `PUT /v1/cards/{card_id}/limits` **(idem)** | Owner, Admin [`card_limits:update`] | list of `{limit_key, window_seconds, max_count}` | 200: limits |
+| `GET /v1/cards/{card_id}/events` | Owner, Admin · own card [`card_events:read`] | filters: `event_type`, `from`, `to` | Page of usage-history events: what, when, and which device (credential label + device fingerprint) |
+| `GET /v1/cards/{card_id}/restrictions` | Owner, Admin [`card_restrictions:read`] | — | List of restrictions and current usage counters |
+| `PUT /v1/cards/{card_id}/restrictions` **(idem)** | Owner, Admin [`card_restrictions:update`] | list of `{type, config, enabled}`; types: usage cap, allowed hours, network allow-list, read-only | 200: restrictions |
 
 Illegal lifecycle transitions return `409` with problem type `…/illegal-transition`.
 
@@ -86,7 +86,7 @@ Guard rules: not on your own card; not a role ranked above your own; not a role 
 | `POST /v1/people` **(idem)** | Owner, Admin [`person:create`] | `display_name`, optional `email`, optional `department_id` | 201: person |
 | `GET /v1/people` | Owner, Admin · others: self [`person:read`] | filters: `department_id`, `status` | Page of people |
 | `GET /v1/people/{person_id}` | as above | — | Person |
-| `PATCH /v1/people/{person_id}` | Owner, Admin [`person:update`] | any of `display_name`, `email`, `department_id`, `status` | Person |
+| `PATCH /v1/people/{person_id}` **(idem)** | Owner, Admin [`person:update`] | any of `display_name`, `email`, `department_id`, `status`. Setting `status: departed` (offboarding) also revokes the person's card and sessions. | Person |
 | `POST /v1/departments` **(idem)** | Owner, Admin [`department:create`] | `name` | 201: department |
 | `GET /v1/departments` | any signed-in card [`department:read`] | — | List |
 

@@ -52,7 +52,7 @@ Each step can only deny or narrow. Allow is reached only at the end.
 | 9 | **Sensitivity label:** `resource.sensitivity ≤ grant.max_sensitivity` | `DENY_SENSITIVITY` |
 | 10 | **Guard rules** (data-driven list): cannot act on your own card for suspend / revoke / role changes; cannot grant or remove a role ranked above your own highest role; cannot remove the last active Company Owner | `DENY_SELF_ACTION`, `DENY_RANK`, `DENY_LAST_OWNER` |
 | 11 | **Plan limits hook:** `billing.checkLimit(tenant, action)` — the Phase 1 stub always answers "within limits" | `DENY_PLAN_LIMIT` |
-| 12 | **Card-level usage limits (feature 5):** if a `card_limits` row applies to this action and the counter for the current window is at its maximum | `DENY_CARD_LIMIT` |
+| 12 | **Card-level restrictions (feature 5):** each enabled `card_restrictions` row is checked — usage cap reached; outside the allowed hours; request from a network not on the card's allow-list; write attempted on a read-only card | `DENY_CARD_LIMIT`, `DENY_CARD_HOURS`, `DENY_CARD_NETWORK`, `DENY_CARD_READ_ONLY` |
 | 13 | Otherwise | `ALLOW` (+ obligations collected above) |
 
 **Deny by default** is structural: the function starts with `effect = deny, reason = DENY_DEFAULT` and only step 13 can change it.
@@ -64,7 +64,7 @@ Each step can only deny or narrow. Allow is reached only at the end.
 | Roles, permissions, role→permission matrix with scope and sensitivity | Tables `roles`, `permissions`, `role_permissions` (seeded by migration) | A migration (reviewed, versioned). Not by tenants in Phase 1. |
 | Which roles a tenant uses; the pilot reviewer grant; lockout threshold; validity and grace days | `tenant_settings` | Company Owner |
 | Per-card role assignments | `card_roles` | Owner / Admin (subject to the rank rule) |
-| Per-card usage limits | `card_limits` | Owner / Admin |
+| Per-card restrictions | `card_restrictions` | Owner / Admin |
 | State, grace and guard rules | One declarative table in code: `policy/rules.ts` — an array of rule objects evaluated by a generic engine, with a unit-test row per rule | A code change (reviewed, tested) |
 
 The matrix is loaded from the database and cached in memory for 60 seconds; the seed's checksum is logged at start-up.
@@ -86,13 +86,13 @@ The matrix is loaded from the database and cached in memory for 60 seconds; the 
 | `card:read` / `card:list` | ✔ | ✔ | D | O | O | O | ✔ | O |
 | `card:suspend` / `reinstate` / `revoke` / `replace` / `renew` / `unlock` / `reset_credentials` | ✔ | ✔ | — | — | — | — | — | — |
 | `card_events:read` | ✔ | ✔ | D | O | O | O | ✔ | O |
-| `card_limits:read` / `update` | ✔ | ✔ | — | — | — | — | read | — |
+| `card_restrictions:read` / `update` | ✔ | ✔ | — | — | — | — | read | — |
 | `role:read` | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
 | `card_roles:read` | ✔ | ✔ | D | O | O | O | ✔ | O |
 | `card_roles:assign` / `remove` | ✔ | ✔ (not Owner — rank rule) | — | — | — | — | — | — |
 | `audit:read` / `audit:verify` | ✔ | ✔ | — | — | — | — | ✔ | — |
 | `export:create` / `export:read` | ✔ | — | — | — | — | — | — | — |
-| `knowledge:read` *(Phase 2 placeholder)* | ✔ | ✔ | D | ✔ | ✔ | ✔ | — | O |
+| `knowledge:read` *(Phase 2 placeholder)* | ✔ | — | D | O | role-scoped, verified only (Phase 2 attribute) | queue only | — | O |
 | `knowledge:contribute` *(placeholder)* | — | — | — | ✔ | — | — | — | — |
 | `knowledge:verify` *(Reviewer capability)* | — | ✔ pilot | — | ✔ pilot | — | ✔ | — | — |
 | `tenant:create` / `tenant:list` *(platform only)* | platform tenant only | — | — | — | — | — | — | — |
@@ -150,7 +150,7 @@ Four independent checks:
 - cross-tenant → deny; department scope; own scope; sensitivity above the grant → deny;
 - grace → reads allowed, writes denied, export allowed; after grace → deny, Owner export only;
 - self-suspend, rank escalation, last-owner removal → deny;
-- card usage limit reached → deny;
+- each card restriction type (usage cap, hours, network, read-only) → deny;
 - unknown obligation → the HTTP layer denies.
 
 `test/integration/resource-filter.test.ts` — the if-and-only-if property against real PostgreSQL.

@@ -32,14 +32,14 @@ Legend for the **F#** column: the founder's feature number the table serves. *(d
 | slug | text | NOT NULL, UNIQUE, `^[a-z0-9-]{3,40}$` |
 | status | text | `active` \| `suspended` \| `closed`, default `active` |
 | is_platform | boolean | default false. True only for the LegacyAI operator tenant. A partial unique index allows at most one. |
-| plan_code | text | FK → `plan_limits.plan_code`, default `pilot` (F34/Phase 4 hook) |
+| plan_code | text | FK → `plan_limits.plan_code`, default `pilot` (Phase 4 hook) |
 | region | text | default `us`; CHECK IN (`us`,`eu`) — **F21 hook, design only** |
 | encryption_key_ref | text | NULLABLE — **F21 BYOK hook, design only**. Would hold a KMS key resource name. Never a key. |
 | created_at, updated_at | timestamptz | |
 
 RLS: `id = app_current_tenant()`. Listing all tenants (platform operator only) goes through one audited `SECURITY DEFINER` function, `platform_list_tenants()`.
 
-### `tenant_settings` — T — F29, F3, F34
+### `tenant_settings` — T — F29, F3, F1
 One row per tenant (PK = `tenant_id`).
 | Column | Type | Constraints / notes |
 |---|---|---|
@@ -55,7 +55,7 @@ One row per tenant (PK = `tenant_id`).
 | allowed_factor_types | text[] | default `{passkey,totp}` |
 | updated_at, updated_by_card_id | | |
 
-### `plan_limits` — G — F34 / Phase 4 stub
+### `plan_limits` — G — Phase 4 stub
 | Column | Type | Notes |
 |---|---|---|
 | plan_code | text | PK (`pilot` seeded) |
@@ -79,18 +79,18 @@ App role: SELECT only. No billing logic reads it in Phase 1 except through the `
 | display_name | text | NOT NULL. PII — redacted in logs. |
 | email | citext | NULLABLE, UNIQUE per tenant. PII — redacted in logs. Used only for notifications. |
 | department_id | uuid | NULLABLE, composite FK |
-| status | text | `active` \| `departed` |
+| status | text | `active` \| `departed`. Setting `departed` revokes the person's card in the same transaction (F3 offboarding). |
 | external_id | text | NULLABLE, UNIQUE per tenant — **F16 SCIM hook, design only** |
 | scim_managed | boolean | default false — **F16, design only** |
 | created_at, updated_at | | |
 
-### `cards` — T — F1, F3, F34
+### `cards` — T — F1, F3
 | Column | Type | Notes |
 |---|---|---|
 | id, tenant_id | uuid | PK; UNIQUE (tenant_id, id) |
 | kind | text | `person` \| `company` |
 | person_id | uuid | composite FK → people. CHECK: NOT NULL when kind=`person`, NULL when kind=`company` |
-| card_number | char(16) | NOT NULL, digits only, **globally unique** (enforced through `card_directory`). An identifier, **not a secret**. |
+| card_number | char(16) | NOT NULL, digits only (the `LGY-` prefix, if approved, is display-only and not stored), **globally unique** (enforced through `card_directory`). An identifier, **not a secret**. |
 | state | text | `issued` \| `active` \| `suspended` \| `revoked` \| `expired` \| `replaced` |
 | state_changed_at | timestamptz | |
 | issued_at | timestamptz | |
@@ -119,7 +119,7 @@ Maps a card number to its tenant so login can start before we know the tenant.
 
 **The app role has no direct privileges on this table.** It can only call two `SECURITY DEFINER` functions: `resolve_card(card_number)` (exact match, returns one tenant_id + card_id or nothing) and `register_card(...)` (insert at issue time). So even a bug in our code cannot list all card numbers.
 
-### `card_secrets` — T — F1, F34
+### `card_secrets` — T — F1
 One *current* row per card; older rows kept only as "retired" markers without usable hashes.
 | Column | Type | Notes |
 |---|---|---|
@@ -204,13 +204,21 @@ Index: (tenant_id, card_id) WHERE revoked_at IS NULL.
 
 ### `card_events` — T — F5 usage history
 Append-only (INSERT + SELECT for the app role).
-`id`, `tenant_id`, `card_id`, `occurred_at`, `event_type` (`issued`, `activated`, `login_success`, `login_failed`, `sc_locked`, `unlocked`, `suspended`, `reinstated`, `revoked`, `expired`, `renewed`, `replaced`, `role_assigned`, `role_removed`, `limit_exceeded`, `credential_added`, `credential_removed`), `actor_card_id` NULLABLE, `request_id`, `metadata jsonb` (no secrets, no PII).
+`id`, `tenant_id`, `card_id`, `occurred_at`, `credential_id` NULLABLE and `device_hash` NULLABLE (which device — F5), `ip_hash`, `event_type` (`issued`, `activated`, `login_success`, `login_failed`, `sc_locked`, `unlocked`, `suspended`, `reinstated`, `revoked`, `expired`, `renewed`, `replaced`, `role_assigned`, `role_removed`, `restriction_denied`, `credential_added`, `credential_removed`), `actor_card_id` NULLABLE, `request_id`, `metadata jsonb` (no secrets, no PII).
 Index: (tenant_id, card_id, occurred_at DESC).
 
-### `card_limits` and `card_usage_counters` — T — F5
-`card_limits`: `tenant_id`, `card_id`, `limit_key` (e.g. `requests_per_day`, `exports_per_day`), `window_seconds`, `max_count`. PK (tenant_id, card_id, limit_key).
+### `card_restrictions` and `card_usage_counters` — T — F5
+`card_restrictions`: one row per rule on a card.
+| Column | Notes |
+|---|---|
+| id, tenant_id, card_id | |
+| type | `usage_cap` \| `time_window` \| `network_allowlist` \| `read_only` |
+| config | jsonb, validated per type: `usage_cap` → `{limit_key, window_seconds, max_count}`; `time_window` → `{timezone, days, start, end}` (business hours only); `network_allowlist` → `{cidrs: [...]}` (one site only); `read_only` → `{}` |
+| enabled | boolean |
+| created_by_card_id, created_at | |
+
 `card_usage_counters`: `tenant_id`, `card_id`, `limit_key`, `window_start`, `count`. PK on all four key columns. Incremented atomically (`INSERT … ON CONFLICT DO UPDATE`).
-**Anomaly lock (F5) is design only:** the hook is `card_auth_state.lock_reason = 'anomaly'` plus a future `card_anomaly_signals` table; no detection code in Phase 1.
+**Unusual-use lock (F5) is design only:** the hook is `card_auth_state.lock_reason = 'anomaly'` plus a future `card_anomaly_signals` table; no detection code and no location lookup in Phase 1.
 
 ---
 
@@ -298,7 +306,7 @@ Managed by dbmate.
 
 **Global (8):** `roles`, `permissions`, `role_permissions`, `plan_limits`, `card_directory`, `login_attempts`, `rate_limit_buckets`, `schema_migrations`.
 
-**Tenant-scoped with row-level security (25):** `tenants`, `tenant_settings`, `departments`, `people`, `cards`, `card_secrets`, `card_auth_state`, `credentials`, `enrollment_tokens`, `login_transactions`, `sessions`, `card_events`, `card_limits`, `card_usage_counters`, `card_roles`, `audit_log`, `audit_chain_heads`, `audit_anchors`, `idempotency_keys`, `export_jobs`, `outbox_events`, `webhook_endpoints`, `analytics_events`, `card_tokens`, `sso_connections`.
+**Tenant-scoped with row-level security (25):** `tenants`, `tenant_settings`, `departments`, `people`, `cards`, `card_secrets`, `card_auth_state`, `credentials`, `enrollment_tokens`, `login_transactions`, `sessions`, `card_events`, `card_restrictions`, `card_usage_counters`, `card_roles`, `audit_log`, `audit_chain_heads`, `audit_anchors`, `idempotency_keys`, `export_jobs`, `outbox_events`, `webhook_endpoints`, `analytics_events`, `card_tokens`, `sso_connections`.
 *(`tenants` is scoped by its own `id`; the other 24 by `tenant_id`.)*
 
 A test (Step 5) queries the PostgreSQL catalogue and **fails if any table has a `tenant_id` column but lacks forced row-level security**, so a future table cannot be added without it.

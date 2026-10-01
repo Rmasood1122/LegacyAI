@@ -46,7 +46,7 @@ The enrollment token is the strong factor for that one step, so even enrollment 
 
 ## 2. Card number
 
-- **Format:** 16 digits = 15 random digits + 1 check digit. Shown as `1234 5678 9012 3456`. Stored as text (leading zeros matter).
+- **Format:** 16 digits = 15 random digits + 1 check digit, in groups of four, as the Phase 1 prompt specifies. Stored as text (leading zeros matter). **Display format is pending decision 5 in `08`:** your feature list asks that the card not look like a bank card and shows an `LGY-` prefix, so the recommendation is to always display `LGY-1234-5678-9012-3456` and accept input with or without the prefix, spaces or dashes.
 - **Randomness:** each digit from Node's `crypto.randomInt` (a CSPRNG). Never sequential, never derived from time or tenant. 10¹⁵ possibilities.
 - **Uniqueness:** enforced globally by the `card_directory` primary key; on the rare collision we generate again.
 - **Check digit: Damm.** Justification:
@@ -204,7 +204,7 @@ States: `issued`, `active`, `suspended`, `revoked`, `expired`, `replaced`. Termi
 - `expires_at ≤ now < grace_until` → **read-only**: reads allowed, writes denied (`DENY_GRACE_READ_ONLY`), except data export.
 - `now ≥ grace_until` → everything denied, except that a Company Owner may still sign in to **export data** ("export is always free") — nothing else.
 
-**Renewal (feature 34).** In one transaction: retire the current `card_secrets` row (hash set to NULL — the old SC is dead immediately), store the new hash, move `expires_at` / `grace_until` / `renewal_due` forward, revoke the card's sessions, write the event and audit row. The new SC is in the response once.
+**Renewal with SC rotation** ("feature 34" in the Phase 1 prompt; part of feature 1 in the feature list). In one transaction: retire the current `card_secrets` row (hash set to NULL — the old SC is dead immediately), store the new hash, move `expires_at` / `grace_until` / `renewal_due` forward, revoke the card's sessions, write the event and audit row. The new SC is in the response once.
 
 **Rules that protect the tenant from itself:** nobody can suspend, revoke or change roles on their own card; the last active Company Owner card cannot be suspended, revoked or have the owner role removed.
 
