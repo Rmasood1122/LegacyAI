@@ -27,3 +27,7 @@ crash.log
 backups/
 exports/
 .DS_Store
+
+# test output
+.test-exports/
+services/api/.test-exports/
