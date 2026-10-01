@@ -1,0 +1,363 @@
+// The HTTP layer. Every request passes through `runRoute`, which enforces, in order:
+// contract validation -> rate limit -> session -> CSRF -> policy decision -> idempotency
+// -> handler -> response validation.
+//
+// Handlers cannot skip the policy decision point: a route can only be registered through
+// `defineRoutes`, which requires policy metadata, and Fastify is hooked so that any route
+// registered another way makes the server refuse to start.
+import cookie from '@fastify/cookie';
+import cors from '@fastify/cors';
+import helmet from '@fastify/helmet';
+import { trace, SpanStatusCode } from '@opentelemetry/api';
+import Fastify, { type FastifyBaseLogger, type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import { randomUUID } from 'node:crypto';
+import type { Clock } from '../../../shared/clock.ts';
+import { constantTimeEqual } from '../../../shared/crypto.ts';
+import { ProblemError, problemBody, problems } from '../../../shared/errors.ts';
+import { KNOWN_OBLIGATIONS, type Decision, type RequestContext, type ResourceRef, type Subject } from '../../../shared/policy-types.ts';
+import { writeAudit } from './audit.ts';
+import type { Config } from './config.ts';
+import type { Database, Tx } from './db.ts';
+import type { Logger } from './logger.ts';
+import { loadContract, validationErrors, type Contract, type Operation } from './openapi.ts';
+import { hashRequest, type IdempotencyStore, type RateLimiter } from './support.ts';
+
+export const SESSION_COOKIE = '__Host-lai_session';
+
+/** What the HTTP layer needs from the identity module. Implemented there, plugged in by app.ts. */
+export interface AuthPort {
+  /** Extracts the tenant id from an opaque session token, or null if the token is malformed. */
+  tenantOfToken(token: string): string | null;
+  /** Returns the subject for a live session whose card is still allowed to act, else null. */
+  resolveSession(tx: Tx, token: string, ctx: RequestContext): Promise<{ subject: Subject; csrfToken: string } | null>;
+  /** The policy decision point. Writes the decision to the audit log inside `tx`. */
+  authorize(tx: Tx, subject: Subject, action: string, resource: ResourceRef, ctx: RequestContext): Promise<Decision>;
+}
+
+export interface HandlerResult {
+  status?: number;
+  body?: unknown;
+  setSessionCookie?: string;
+  clearSessionCookie?: boolean;
+}
+
+export interface PublicHandlerArgs {
+  ctx: RequestContext;
+  body: any;
+  params: any;
+  query: any;
+}
+
+export interface SessionHandlerArgs extends PublicHandlerArgs {
+  tx: Tx;
+  subject: Subject;
+  decision: Decision;
+  resource: ResourceRef;
+  sessionToken: string;
+  csrfToken: string;
+}
+
+export type PolicySpec =
+  | { public: true; reason: string }
+  | { service: true }
+  | {
+      /** Loads the thing being acted on. Returning null means "not found" (also for other tenants' data). */
+      resource: (args: { tx: Tx; subject: Subject; params: any; body: any; query: any; ctx: RequestContext }) => Promise<ResourceRef | null>;
+    };
+
+export type RouteDef =
+  | { kind: 'public'; operationId: string; policy: { public: true; reason: string }; handler: (a: PublicHandlerArgs) => Promise<HandlerResult> }
+  | { kind: 'service'; operationId: string; policy: { service: true }; handler: (a: PublicHandlerArgs) => Promise<HandlerResult> }
+  | { kind: 'session'; operationId: string; policy: Extract<PolicySpec, { resource: unknown }>; handler: (a: SessionHandlerArgs) => Promise<HandlerResult> };
+
+type SessionRouteDef = Extract<RouteDef, { kind: 'session' }>;
+
+export interface HttpDeps {
+  config: Config;
+  db: Database;
+  log: Logger;
+  clock: Clock;
+  auth: AuthPort;
+  rateLimiter: RateLimiter;
+  idempotency: IdempotencyStore;
+  contractPath: string;
+  /** Per-IP limit on all endpoints. Tests override it; production uses the default. */
+  generalLimit?: { limit: number; windowSeconds: number };
+}
+
+export interface RegisteredRoute {
+  operationId: string;
+  method: string;
+  path: string;
+  kind: 'public' | 'service' | 'session';
+  permission: string | null;
+  publicReason: string | null;
+}
+
+export interface HttpServer {
+  app: FastifyInstance;
+  contract: Contract;
+  defineRoutes(routes: RouteDef[]): void;
+  registeredRoutes(): RegisteredRoute[];
+}
+
+const ROUTE_MARK = Symbol('legacyai.route');
+const DEFAULT_GENERAL_LIMIT = { limit: 300, windowSeconds: 60 };
+const tracer = trace.getTracer('legacyai-api');
+
+export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
+  const { config, db, log, clock, auth } = deps;
+  const contract = loadContract(deps.contractPath);
+  const registry: RegisteredRoute[] = [];
+  const GENERAL_LIMIT = deps.generalLimit ?? DEFAULT_GENERAL_LIMIT;
+
+  const app = Fastify({
+    loggerInstance: log as FastifyBaseLogger,
+    bodyLimit: 64 * 1024,
+    requestTimeout: 30_000,
+    trustProxy: config.trustProxy,
+    genReqId: () => randomUUID(),
+  });
+
+  // Fail closed: a route that did not come through defineRoutes has no policy check.
+  app.addHook('onRoute', (route) => {
+    const marked = (route.config as Record<symbol, unknown> | undefined)?.[ROUTE_MARK] === true;
+    const methods = Array.isArray(route.method) ? route.method : [route.method];
+    const internal = methods.every((m) => m === 'HEAD' || m === 'OPTIONS');
+    if (!marked && !internal) {
+      throw new Error(`Route ${String(route.method)} ${route.url} was registered without defineRoutes(); it has no policy check`);
+    }
+  });
+
+  await app.register(helmet, {
+    contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } },
+    referrerPolicy: { policy: 'no-referrer' },
+    hsts: { maxAge: 31536000, includeSubDomains: true },
+  });
+  await app.register(cors, {
+    origin: (origin, cb) => cb(null, origin !== undefined && config.allowedOrigins.includes(origin)),
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    allowedHeaders: ['content-type', 'x-csrf-token', 'idempotency-key'],
+    maxAge: 600,
+  });
+  await app.register(cookie);
+
+  app.addHook('onSend', async (req, reply) => {
+    reply.header('x-request-id', req.id);
+    reply.header('cache-control', 'no-store');
+  });
+
+  const sendProblem = (req: FastifyRequest, reply: FastifyReply, err: ProblemError): FastifyReply => {
+    for (const [k, v] of Object.entries(err.headers ?? {})) reply.header(k, v);
+    return reply.status(err.status).type('application/problem+json').send(problemBody(err, req.id));
+  };
+
+  app.setNotFoundHandler((req, reply) => sendProblem(req, reply, problems.notFound()));
+  app.setErrorHandler((err, req, reply) => {
+    if (err instanceof ProblemError) return sendProblem(req, reply, err);
+    const status = (err as { statusCode?: number }).statusCode;
+    if (typeof status === 'number' && status >= 400 && status < 500) {
+      // Malformed JSON, body too large, unsupported media type: a client error with no detail.
+      const code = status === 413 ? 'payload-too-large' : 'bad-request';
+      return sendProblem(req, reply, new ProblemError(status, code, 'The request could not be read'));
+    }
+    req.log.error({ err, request_id: req.id }, 'unhandled error');
+    return sendProblem(req, reply, new ProblemError(500, 'internal', 'Something went wrong'));
+  });
+
+  function contextOf(req: FastifyRequest): RequestContext {
+    const ua = req.headers['user-agent'];
+    return { requestId: req.id, ip: req.ip, userAgent: typeof ua === 'string' ? ua.slice(0, 300) : '', now: clock.now() };
+  }
+
+  function validateRequest(op: Operation, req: FastifyRequest): { body: unknown; params: unknown; query: unknown; idemKey: string | null } {
+    const errors: Array<{ path: string; message: string }> = [];
+    const params = { ...((req.params as Record<string, unknown>) ?? {}) };
+    const query = { ...((req.query as Record<string, unknown>) ?? {}) };
+    const body = req.body;
+    if (op.validateParams && !op.validateParams(params)) errors.push(...validationErrors(op.validateParams, 'path'));
+    if (op.validateQuery && !op.validateQuery(query)) errors.push(...validationErrors(op.validateQuery, 'query'));
+    if (op.validateBody) {
+      if (!op.validateBody(body ?? null)) errors.push(...validationErrors(op.validateBody, 'body'));
+    } else if (body !== undefined && body !== null) {
+      errors.push({ path: 'body', message: 'this operation does not accept a body' });
+    }
+    let idemKey: string | null = null;
+    if (op.validateIdempotencyKey) {
+      const header = req.headers['idempotency-key'];
+      if (typeof header !== 'string' || !op.validateIdempotencyKey(header)) {
+        errors.push({ path: 'header/Idempotency-Key', message: 'a valid Idempotency-Key header is required' });
+      } else idemKey = header;
+    }
+    if (errors.length > 0) throw problems.badRequest(errors);
+    return { body, params, query, idemKey };
+  }
+
+  function send(op: Operation, reply: FastifyReply, result: HandlerResult): FastifyReply {
+    const status = result.status ?? 200;
+    if (config.validateResponses) {
+      if (!op.responses.has(status)) throw new Error(`contract: ${op.operationId} returned undeclared status ${status}`);
+      const validate = op.responses.get(status);
+      if (validate === null || validate === undefined) {
+        if (result.body !== undefined) throw new Error(`contract: ${op.operationId} ${status} must not have a body`);
+      } else if (!validate(result.body)) {
+        throw new Error(`contract: ${op.operationId} ${status} response does not match openapi.yaml: ${JSON.stringify(validate.errors?.slice(0, 3))}`);
+      }
+    }
+    if (result.setSessionCookie !== undefined) {
+      reply.setCookie(SESSION_COOKIE, result.setSessionCookie, { httpOnly: true, secure: true, sameSite: 'strict', path: '/' });
+    }
+    if (result.clearSessionCookie === true) {
+      reply.clearCookie(SESSION_COOKIE, { httpOnly: true, secure: true, sameSite: 'strict', path: '/' });
+    }
+    reply.status(status);
+    return result.body === undefined ? reply.send() : reply.type('application/json').send(result.body);
+  }
+
+  function checkCsrf(req: FastifyRequest, expectedToken: string): void {
+    if (req.method === 'GET') return;
+    const origin = req.headers.origin;
+    if (typeof origin !== 'string' || !config.allowedOrigins.includes(origin)) throw problems.csrf();
+    const token = req.headers['x-csrf-token'];
+    if (typeof token !== 'string' || token === '' || !constantTimeEqual(token, expectedToken)) throw problems.csrf();
+  }
+
+  type Outcome = { result: HandlerResult } | { problem: ProblemError };
+
+  async function runSessionRoute(
+    op: Operation, def: SessionRouteDef, req: FastifyRequest,
+    input: ReturnType<typeof validateRequest>, ctx: RequestContext,
+  ): Promise<HandlerResult> {
+    const token = req.cookies[SESSION_COOKIE];
+    const tenantId = typeof token === 'string' ? auth.tenantOfToken(token) : null;
+    if (typeof token !== 'string' || tenantId === null) throw problems.unauthenticated();
+    const action = op.permission as string;
+
+    let allowed: { subject: Subject; resource: ResourceRef; decision: Decision } | null = null;
+    try {
+      const outcome = await db.withTenantTx<Outcome>(tenantId, async (tx) => {
+        const session = await auth.resolveSession(tx, token, ctx);
+        if (!session) return { problem: problems.unauthenticated() };
+        checkCsrf(req, session.csrfToken);
+        const { subject } = session;
+
+        const loaded = await def.policy.resource({ tx, subject, params: input.params, body: input.body, query: input.query, ctx });
+        if (loaded === null) {
+          await writeAudit(tx, {
+            tenantId, actorCardId: subject.card_id, actorKind: 'card', action, decision: 'deny',
+            reasonCode: 'DENY_RESOURCE_NOT_FOUND', requestId: ctx.requestId, ip: ctx.ip,
+          });
+          return { problem: problems.notFound() };
+        }
+
+        const decision = await auth.authorize(tx, subject, action, loaded, ctx);
+        if (decision.effect !== 'allow') return { problem: problems.forbidden() };
+        // An obligation this layer does not understand cannot be honoured, so the request is refused.
+        if (decision.obligations.some((o) => !KNOWN_OBLIGATIONS.has(o.type))) {
+          req.log.error({ operation: op.operationId }, 'unknown policy obligation; denying');
+          return { problem: problems.forbidden() };
+        }
+        allowed = { subject, resource: loaded, decision };
+
+        if (input.idemKey !== null) {
+          const started = await deps.idempotency.begin(tx, {
+            tenantId, actorCardId: subject.card_id, key: input.idemKey, operationId: op.operationId,
+            requestHash: hashRequest(op.operationId, input.params, input.body), now: ctx.now,
+          });
+          if (started.kind === 'replay') return { result: { status: started.status, body: started.body ?? undefined } };
+        }
+
+        const result = await def.handler({
+          ctx, tx, subject, decision, resource: loaded, body: input.body, params: input.params, query: input.query,
+          sessionToken: token, csrfToken: session.csrfToken,
+        });
+
+        if (input.idemKey !== null) {
+          await deps.idempotency.complete(tx, {
+            tenantId, actorCardId: subject.card_id, key: input.idemKey, status: result.status ?? 200, body: result.body,
+          });
+        }
+        return { result };
+      });
+      if ('problem' in outcome) throw outcome.problem;
+      return outcome.result;
+    } catch (err) {
+      // The transaction rolled back, taking the "allow" audit row with it. Record that the
+      // request was allowed but did not complete, so the trail has no silent gap.
+      const granted = allowed as { subject: Subject; resource: ResourceRef; decision: Decision } | null;
+      if (granted !== null) {
+        const status = err instanceof ProblemError ? err.status : 500;
+        try {
+          await db.withTenantTx(tenantId, (tx) => writeAudit(tx, {
+            tenantId, actorCardId: granted.subject.card_id, actorKind: 'card', action,
+            resourceType: granted.resource.type, resourceId: granted.resource.id ?? null,
+            decision: 'allow', reasonCode: granted.decision.reason_code, requestId: ctx.requestId, ip: ctx.ip,
+            details: { outcome: 'failed', status },
+          }));
+        } catch (auditErr) {
+          req.log.error({ err: auditErr }, 'could not record a failed request in the audit log');
+        }
+      }
+      throw err;
+    }
+  }
+
+  function defineRoutes(routes: RouteDef[]): void {
+    for (const def of routes) {
+      const op = contract.operations.get(def.operationId);
+      if (!op) throw new Error(`defineRoutes: "${def.operationId}" is not an operation in openapi.yaml`);
+      if (registry.some((r) => r.operationId === def.operationId)) throw new Error(`defineRoutes: "${def.operationId}" registered twice`);
+      const kind = def.kind;
+      // The contract and the code must agree about which routes are public or service-only.
+      if ((kind === 'public') !== op.isPublic || (kind === 'service') !== op.isService) {
+        throw new Error(`defineRoutes: "${def.operationId}" public/service flag differs from openapi.yaml`);
+      }
+      if (def.kind === 'public' && def.policy.reason.trim().length < 10) {
+        throw new Error(`defineRoutes: public route "${def.operationId}" needs a written reason`);
+      }
+      registry.push({
+        operationId: op.operationId, method: op.method, path: op.path, kind, permission: op.permission,
+        publicReason: def.kind === 'public' ? def.policy.reason : null,
+      });
+
+      app.route({
+        method: op.method,
+        url: op.fastifyPath,
+        config: { [ROUTE_MARK]: true } as Record<symbol, unknown>,
+        handler: (req, reply) =>
+          tracer.startActiveSpan(op.operationId, async (span) => {
+            try {
+              const ctx = contextOf(req);
+              const general = await deps.rateLimiter.hit(`ip:${ctx.ip}`, GENERAL_LIMIT.limit, GENERAL_LIMIT.windowSeconds, ctx.now);
+              if (!general.allowed) throw problems.tooManyRequests(general.retryAfterSeconds);
+              const input = validateRequest(op, req);
+
+              let result: HandlerResult;
+              if (def.kind === 'public') {
+                result = await def.handler({ ctx, body: input.body, params: input.params, query: input.query });
+              } else if (def.kind === 'service') {
+                const header = req.headers.authorization;
+                const presented = typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7) : '';
+                if (presented === '' || !constantTimeEqual(presented, config.internalServiceToken.reveal())) {
+                  throw problems.unauthenticated();
+                }
+                result = await def.handler({ ctx, body: input.body, params: input.params, query: input.query });
+              } else {
+                result = await runSessionRoute(op, def, req, input, ctx);
+              }
+              span.setAttribute('http.response.status_code', result.status ?? 200);
+              return send(op, reply, result);
+            } catch (err) {
+              span.setStatus({ code: SpanStatusCode.ERROR });
+              throw err;
+            } finally {
+              span.end();
+            }
+          }),
+      });
+    }
+  }
+
+  return { app, contract, defineRoutes, registeredRoutes: () => [...registry] };
+}

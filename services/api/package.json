@@ -1,0 +1,58 @@
+{
+  "name": "@legacyai/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "dependencies": {
+    "@fastify/cookie": "11.1.2",
+    "@fastify/cors": "11.3.0",
+    "@fastify/helmet": "13.1.1",
+    "@opentelemetry/api": "1.9.1",
+    "@simplewebauthn/server": "13.3.3",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "argon2": "0.45.1",
+    "fastify": "5.12.5",
+    "otplib": "13.5.0",
+    "pg": "8.23.1",
+    "pino": "10.3.1",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@levischuck/tiny-cbor": "0.3.6",
+    "@redocly/cli": "2.57.0",
+    "@types/node": "24.19.0",
+    "@types/pg": "8.23.1",
+    "@vitest/coverage-v8": "4.1.11",
+    "dbmate": "2.36.0",
+    "dependency-cruiser": "18.5.0",
+    "eslint": "10.11.0",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.0",
+    "vitest": "4.1.11"
+  },
+  "scripts": {
+    "dev": "node --env-file=.env --watch src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . && depcruise src --config .dependency-cruiser.cjs",
+    "lint:openapi": "redocly lint openapi.yaml",
+    "test": "vitest run",
+    "test:unit": "vitest run test/unit",
+    "test:coverage": "vitest run --coverage",
+    "db:reset": "node ../../scripts/db-setup.mjs reset",
+    "db:roles": "node ../../scripts/db-setup.mjs roles",
+    "db:up": "node ../../scripts/db-setup.mjs up",
+    "db:down": "node ../../scripts/db-setup.mjs down",
+    "db:down-all": "node ../../scripts/db-setup.mjs down-all",
+    "audit:verify": "node src/cli/verify-audit-chain.ts",
+    "audit:anchor": "node src/cli/anchor-audit-head.ts",
+    "platform:bootstrap": "node src/cli/bootstrap-platform.ts",
+    "cards:sweep-expired": "node src/cli/sweep-expired-cards.ts"
+  }
+}
