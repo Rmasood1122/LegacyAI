@@ -32,7 +32,7 @@ curl http://localhost:8080/v1/ready      # database + migrations check
 
 ```bash
 cd services/api
-npm test                      # 480+ tests against the real local database (about 8 minutes)
+npm test                      # 530 tests against the real local database (about 8 minutes)
 npm run test:coverage         # same, with a coverage summary
 npm run typecheck && npm run lint
 
