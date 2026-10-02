@@ -122,7 +122,7 @@ async function builtin(direction) {
   await withClient(need('DATABASE_URL_ADMIN'), async (c) => {
     // One runner at a time (held until this connection closes).
     await c.query('SELECT pg_advisory_lock(721402)');
-    await c.query('CREATE TABLE IF NOT EXISTS schema_migrations (version varchar(128) PRIMARY KEY)');
+    await c.query('CREATE TABLE IF NOT EXISTS schema_migrations (version varchar PRIMARY KEY)');
     const applied = new Set((await c.query('SELECT version FROM schema_migrations')).rows.map((r) => r.version));
     const all = readMigrations();
     const run = async (m, sql, record) => {
