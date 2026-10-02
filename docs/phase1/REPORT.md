@@ -2,6 +2,8 @@
 
 **Date:** 2026-10-03. **Code state reported on:** commit `225f7e7` on `main`.
 
+> **Phase 1.1 (hardening) was added afterwards — see the last section, "Phase 1.1".** Where it changes something written below (tenant creation, who renews the company card, Owners managing each other, 45 → 47 operations, 530 → 581 tests), the Phase 1.1 section is the current truth.
+
 ## In plain language
 
 Phase 1 is built and its automated checks pass on GitHub's test machines: **530 tests, 0 failures**, plus separate checks for the database migrations, backup and restore, the containers, secret scanning and the cloud-setup code.
@@ -206,7 +208,7 @@ Things I did differently, and why. Details in `docs/decisions.md` (D1–D18).
 
 **Review findings accepted, not fixed**
 
-- **Creating a tenant is not one single database transaction.** A crash at the wrong moment could leave a half-created tenant. An operator would have to clean it up by hand.
+- ~~Creating a tenant is not one single database transaction.~~ **Fixed in Phase 1.1** (one transaction; proven with injected failures).
 - **Export and audit verification run inside the web request.** A very large tenant could time out (30 s limit on Cloud Run).
 - **No alert when a backup fails.** A silently failing nightly backup would be noticed only by looking.
 - **Base images are pinned by version tag, not by exact fingerprint.** A re-published tag would be picked up silently.
@@ -236,3 +238,102 @@ Things I did differently, and why. Details in `docs/decisions.md` (D1–D18).
 ## What happens next
 
 Nothing, until you decide. Phase 1 stops here. When you are ready for Phase 2, the piece it builds on is the retrieval filter (`buildResourceFilter`), which is implemented and tested.
+
+---
+
+# Phase 1.1 — hardening (2026-10-03)
+
+**Code state:** commit `4c7a2b8`. **Evidence:** CI run <https://github.com/Rmasood1122/LegacyAI/actions/runs/37046845463> — all 7 jobs green on the first run. Result lines are in that page's "Annotations" box.
+
+## In plain language
+
+Three things you decided, or that the Phase 1 report listed as open, are now built and tested:
+
+1. **Creating a company (tenant) is all-or-nothing.** If anything fails half-way, nothing is left behind.
+2. **Only you (the platform operator) can renew a company's card** — its subscription clock. Nobody inside the company can.
+3. **Owners can no longer get into each other's cards.** A locked-out Owner comes to you, and there is a written procedure for it.
+
+Before pushing, a fresh reviewer (a separate session that had not seen my work) read the change. It found that my first version of point 3 **did not hold**: an Owner could still take over another Owner in two or three steps. That and its other findings are listed below, with what was done about each.
+
+## Done and proven
+
+| Claim | Evidence (from the CI run above) |
+|---|---|
+| The whole suite passes | `Test Files  22 passed (22)` · `Tests  581 passed (581)` (was 530; 51 new) |
+| Coverage (MEASURED) | `Statements : 93.86% (2097/2234)` · `Branches : 90.11% (1495/1659)` · `Functions : 98.55% (408/414)` · `Lines : 96.71% (1826/1888)` |
+| The new migration applies, rolls back and re-applies with both runners | `[dbmate] OK applied=7 rolled_back=7 leftover_objects=0` · `[builtin] OK applied=7 rolled_back=7 leftover_objects=0` · `identical schemas` · `migrations: PASS` |
+| Contract and code agree (now 47 operations), every route has a policy | "OpenAPI sync check": `Tests 61 passed (61)` |
+| Backup → restore still works with the new schema | `restore-test: PASS tables=33 rows=8719 schema_version=20261003000700` · three negative controls rejected · `selftest: PASS` |
+| No secrets in files or history | `16 commits scanned.` · `no leaks found` |
+
+What the new tests check (`test/integration/phase1-1.test.ts`, plus changed rows in `unit/policy`, `security/review-findings`, `integration/sessions`, `contract`):
+
+**1. Tenant creation is one transaction**
+- A failure is injected at three points — right after the company card is issued, while the first Owner card is being issued, and at the very end after the operator's own audit row. Each time the request fails and **the row count of every table in the database is unchanged** (except the one audit line saying the request failed). The same request with the same idempotency key then succeeds, which shows the name was free and nothing was half-stored.
+- The same for a failure inside the two new operator actions.
+- The mechanism that makes this possible (switching one open transaction to another tenant for a moment) only works from the operator tenant; a customer's transaction can never be switched; it always switches back; row-level security still applies while switched.
+
+**2. Company-card renewal: operator only**
+- Owner and Admin are refused (`DENY_COMPANY_CARD`); a customer Owner or Admin calling the operator endpoint is refused (`DENY_PLATFORM_ONLY`), for their own company and for another one.
+- The operator renews it; it is written to the customer's audit log as an **operator** action and to the operator's own log; the customer's audit chain still verifies.
+- A company whose card lapsed comes back only when the operator renews it; it cannot renew itself back in.
+
+**3. Owners and recovery**
+- An Owner cannot renew, unlock, replace or issue an enrollment token for another Owner — and cannot do it in two steps either: cannot remove or change another Owner's roles, and cannot revoke the card and issue a new one to the same person. The same holds for Admin on Admin.
+- An Owner can still renew their **own** card, manage everyone below, and suspend or revoke another Owner (the defence against a compromised Owner account).
+- Recovery by the operator: only the operator can call it; it insists on a case reference in identifier form; it works only on a Company Owner's card of the named tenant; afterwards the old passkey, the old code and the old sessions are dead; the Owner must enrol a new factor with the new code and a one-time token; the token works once; it is recorded in both audit logs and the card's history; every other Owner is notified; a repeat of the same request does not run twice.
+- Special cases: an Owner whose card expired long ago; a first Owner who never enrolled; two recoveries in a row (the first token dies).
+- A locked-out **operator** cannot be recovered through the API at all; a command-line break-glass tool does it and is audited.
+
+## What the independent review found, and what was done
+
+| # | Finding | Action |
+|---|---|---|
+| 1 | **An Owner could still get into another Owner's card**: demote them first and then renew, or revoke the card and issue a new one in their name. Same for Admin on Admin. | **Fixed.** Role changes on a peer, and issuing a card to a person who ever held your rank or higher, now need a strictly higher rank. Tested. |
+| 2 | Three tests would have failed on GitHub for reasons unrelated to the feature (exact time comparison; a query that also matched refusal rows; a pinned list of operations). | **Fixed** before pushing. CI passed first time. |
+| 3 | A sign-in that was already in progress when a recovery (or renewal, or unlock) happened could still succeed with the old code and old factor. | **Fixed**: both are re-checked under the card lock. **Not tested** — it is a timing race I could not reproduce reliably in a test. |
+| 4 | Recovering a first Owner who never enrolled and whose card had expired returned "done" but left a card that could never sign in. | **Fixed and tested.** |
+| 5 | A case reference containing 16 digits in a row caused a server error. | **Fixed**: refused with a clear message. Tested. |
+| 6a | The operator had no way to find an Owner's card id. | **Fixed**: the card number (which the Owner can read out) is accepted. Tested. |
+| 6b | Every Owner who merely missed a renewal needs the full recovery, which also wipes their passkeys. | **Not fixed** — decision for you (below). |
+| 6c | The change made operator lock-out worse: operators could no longer help each other. | **Fixed** with a command-line break-glass tool (`npm run platform:recover-operator`). Tested as a function; **the command itself has never been run against a deployed system.** |
+| 7 | The only thing between a customer and the operator actions was one flag in a data table. | **Hardened**: the tenant switch now refuses any transaction that does not belong to the operator tenant. Tested. |
+| 8 | Notifications are sent before the database transaction is confirmed, so a notice could go out for something that then fails. | **Not fixed.** Harmless while notifications only go to the log; must be fixed before real email exists. |
+| 9 | Rolling the new migration back restores the old rules for new rows only (old audit rows cannot be deleted). | **Accepted**, documented in the migration file. |
+| 10 | Smaller items (card number kept 24 h in the operator's replay store; lock ordering). | **Accepted.** |
+
+## Done but not proven
+
+1. **The runbook's human steps** (call-back, identity check, two-channel hand-over) have never been exercised. Only the endpoint is tested.
+2. **The fix for finding 3** (sign-in during a reset) has no test.
+3. **The break-glass command** was tested by calling its function in the test suite, not by running the command line.
+4. **"Other Owners are notified"** means a line in the server log. No email exists.
+5. Everything from section 2 of the Phase 1 report still applies (nothing deployed, no `terraform plan`, no real passkey device, no load test).
+
+## Also done in Phase 1.1
+
+- `docs/phase1/07-feature-map.md` redone against `docs/feature-list-35.md` (all 35 features: phase, what exists, module, tables, endpoints, tests). I renamed the file you saved (`legacyAI_Features.md`) to that name.
+- `CLAUDE.md` written from the rules in your prompt (it did not exist).
+- `docs/runbooks/owner-recovery.md`.
+- Decisions D19–D21 in `docs/decisions.md`; design docs 03, 04, 05 updated.
+
+## Assumptions
+
+- **Unlock is treated like renew.** You named "renew/replace/enroll". Unlock also hands the actor the target's new code, so I blocked it between Owners too.
+- **Suspend and revoke between Owners stay allowed.** You did not mention them; they let one Owner stop a compromised one. They cannot be used to get into the other card.
+- **A returning former Owner needs a new person record** (or you). Nobody inside the company can issue a card to a person who once held an Owner card.
+
+## Risks and gaps (new or changed)
+
+- **You are now a single point of failure for every customer's Owners.** A sole Owner who is locked out, or any Owner who misses a renewal, waits for you. There is no on-call, no second operator requirement, and one operator can run a recovery alone.
+- **Recovery gives the operator the Owner's new code and enrollment token.** Whoever runs it could become that Owner. That is inherent; the controls are the audit entries, the notification to other Owners, and the runbook's identity check — which is a human procedure, not code.
+- **The identity-check reference is free text in identifier form.** The system cannot tell a case number from a surname typed without spaces. It goes into two audit logs that can never be edited.
+- **The repository is still public**, now including the recovery runbook. Your checklist says it should be private.
+- **`gh` is not installed.** Once the repository is private I cannot read CI results unless you install it and sign in, or paste results to me.
+
+## Decisions I need from the founder
+
+1. **A lighter operator action for a missed renewal?** Today an Owner whose card expired can only come back through the full recovery (new code *and* new passkey). A separate "extend this Owner's card" action would be gentler but is one more thing an operator can do to a customer. Recommendation: add it in Phase 2's API work, same audit and identity-check rules.
+2. **Confirm the three assumptions above** (unlock blocked; suspend/revoke allowed; former Owners need a new person record).
+3. **Second-person approval for recoveries?** Not built. Worth it only when there is a second operator.
+4. **Make the repository private, fix the commit identity, install `gh`** — the three open items of your own checklist.
