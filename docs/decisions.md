@@ -6,6 +6,7 @@ Choices that would take more than about an hour to reverse. Three lines each. Ev
 |---|---|---|
 | D1–D12 | 2026-10-02 | **ACCEPTED** at Gate 1 (founder replied "approved"; all recommendations in `08-open-decisions.md` accepted) |
 | D13–D17 | 2026-10-02 | Made during the build; listed in `REPORT.md` under Deviations for the founder to confirm |
+| D18 | 2026-10-03 | Founder decision during verification |
 
 **D1 — Fastify 5, not NestJS.**
 CONTEXT: NestJS 12 is 5 weeks old and no official LTS statement was found; rejected NestJS 11 (labelled `legacy` on npm) and NestJS 12.
@@ -74,3 +75,7 @@ CONSEQUENCES: after a session rotation the client must re-read `/v1/auth/session
 **D17 — Unknown-card and unauthenticated requests are not written to the audit chain.**
 CONTEXT: they have no actor and no tenant, and anyone on the internet can generate them without limit; an append-only table on a 0.5 GB free database would be a denial-of-service target.
 CONSEQUENCES: failed logins for unknown cards go to `login_attempts` (purgeable) and the application log; every decision made for an authenticated card, and every failed login against a real card, is in the audit chain.
+
+**D18 — Repository pushed to GitHub while public (supersedes D12).**
+CONTEXT: the founder's computer cannot run Docker, so the database tests run on GitHub Actions. The repository was public when it was time to push; the founder chose "keep it public and push anyway" and will make it private later. Rejected: waiting, or running the tests nowhere.
+CONSEQUENCES: the design, the code and the commit author's email address are public until the repository is made private. A full-history secret scan ran before the push and runs in CI on every push.

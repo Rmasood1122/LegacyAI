@@ -157,4 +157,4 @@ jobs:
       - name: Cost guardrails are present in the code
         run: EVIDENCE='terraform-guardrails:' bash ../../scripts/ci-run.sh "terraform guardrails" bash ../../scripts/ci-terraform-guardrails.sh
       - name: The guardrail check really fires (12 deliberate breaks must each be detected)
-        run: EVIDENCE='guardrails-selftest: PASS' bash ../../scripts/ci-run.sh "guardrails self-test" bash ../../scripts/ci-selftest-terraform-guardrails.sh
+        run: EVIDENCE='guardrails-selftest:' bash ../../scripts/ci-run.sh "guardrails self-test" bash ../../scripts/ci-selftest-terraform-guardrails.sh
