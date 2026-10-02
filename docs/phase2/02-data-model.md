@@ -1,22 +1,23 @@
 # 02 — Data model (Phase 2)
 
 > Phase 2 design. **Nothing in this document is built yet.** It is a proposal for Gate 1.
+> Revised after an independent review of the first draft (see `11`, "What the review changed").
 
 ## In plain language
 
-Phase 2 adds 29 tables (26 that hold company data, 3 global). Every one that holds a company's data follows the Phase 1 pattern without exception: it carries the company's id, the database refuses to show or change rows of any other company, and links between tables include the company id so a row can never point across the wall.
+Phase 2 adds 29 tables (25 that hold company data, 4 global). Every one that holds a company's data follows the Phase 1 pattern without exception: it carries the company's id, the database refuses to show or change rows of any other company, and links between tables include the company id so a row cannot point across the wall.
 
 Three things are new and worth knowing:
 
-- **A fourth database login, for the Python service.** It can touch only the Phase 2 tables. It cannot read card secrets, sessions or sign-in factors at all, and — like every login — cannot edit or delete audit rows.
-- **Text is stored redacted.** What the database holds is the text *after* personal data has been replaced by placeholders. The original upload is deleted as soon as it has been processed.
+- **A fourth database login, for the Python service.** It can touch only the Phase 2 tables. It has no access at all to card secrets, sessions or sign-in factors, and — like every login — cannot edit or delete audit rows. **Its limit, stated plainly:** the wall between companies depends on the service telling the database which company it is working for. A Python service that was taken over by an attacker could therefore read the Phase 2 content of *every* company (not cards or sign-in data). This is the same trust the API has had since Phase 1; it is listed as a risk in `07`.
+- **Text is stored redacted, and the uploaded file is never stored.** The file travels from the API to the Python service inside one request, is turned into redacted text there, and is gone when the request ends.
 - **Storage is tight** (about half a gigabyte for everything), so the model is built to be small: short vectors, no stored originals, quotas per company, and old logs pruned. Sizes are in `08`.
 
 ## Conventions
 
-As Phase 1 (`docs/phase1/02-data-model.md`): `id uuid DEFAULT uuidv7()`, `timestamptz`, text enums with `CHECK`, composite foreign keys `(tenant_id, x_id)`, `ENABLE` + `FORCE ROW LEVEL SECURITY` with the single policy `tenant_id = app_current_tenant()`. Migrations stay SQL-first with working rollbacks and the dbmate/built-in parity check.
+As Phase 1 (`docs/phase1/02-data-model.md`): `id uuid DEFAULT uuidv7()` primary key, `tenant_id uuid NOT NULL`, timestamps `timestamptz`, text enums as `text` with `CHECK`, references to cards/people as `uuid`, counters `integer`, money `bigint` micro-dollars, composite foreign keys `(tenant_id, x_id)`, `ENABLE` + `FORCE ROW LEVEL SECURITY` with the single policy `tenant_id = app_current_tenant()`. Where a column's type is not written below it follows these conventions; the migrations are the exact definition. Every tenant table has an index starting with `tenant_id`; additional indexes are listed.
 
-**Access labels.** Every row that can be retrieved or cited carries the same four labels the policy decision point already understands:
+**Access labels.** Every row that can be retrieved, listed or cited carries the four labels the policy decision point understands:
 
 | Column | Meaning |
 |---|---|
@@ -25,307 +26,284 @@ As Phase 1 (`docs/phase1/02-data-model.md`): `id uuid DEFAULT uuidv7()`, `timest
 | `sensitivity` | 0 = released to learners · 1 = internal (default) · 2 = confidential · 3 = restricted |
 | `owner_person_id` | nullable; the contributing expert ("own" scope). A person, not a card, so it survives a card replacement. |
 
-**Owner module** = the only module that changes the table. T = tenant-scoped with forced row-level security; G = global.
+**Labels are copied, and copies must move together.** A source's labels are copied to its chunks; an item's to its search chunk, its test questions and its review tasks. One database function, `relabel(kind, id, department, sensitivity)`, is the only way to change labels, and it updates every copy in one transaction (`03`). An item's sensitivity can never start lower than the highest sensitivity of the material it was derived from.
+
+T = tenant-scoped with forced row-level security; G = global. **F#** = feature number in `docs/feature-list-35.md`.
+
+## Who writes what
+
+"Owner" = the module responsible for the table's rules. Several tables are written by both services; this table says exactly who does what.
+
+| Table | Owner | API role `legacyai_app` | Python role `legacyai_ai` |
+|---|---|---|---|
+| `consents` | API | SELECT, INSERT, UPDATE | SELECT |
+| `knowledge_settings` | API | SELECT, INSERT, UPDATE | SELECT |
+| `redaction_allowlist` | API | SELECT, INSERT, DELETE | SELECT |
+| `review_tasks` | API | SELECT, UPDATE (assign, dismiss) | SELECT, INSERT, UPDATE (create; resolve when the subject is acted on) |
+| `ai_budgets` | API | SELECT, INSERT, UPDATE | SELECT |
+| `topics`, `role_topic_maps`, `person_job_roles` | API | SELECT, INSERT, UPDATE, DELETE | SELECT; INSERT on `topics` (proposed topics only — trigger); UPDATE of `topics.embedding*` |
+| `sources` | capture | SELECT; INSERT (a document's row, status `awaiting_content` or `awaiting_confirmation`); UPDATE of status for confirm / withdraw | SELECT, INSERT (interview sources), UPDATE |
+| `chunks` | capture | SELECT on label columns only (below) | SELECT, INSERT, UPDATE, DELETE |
+| `redaction_findings` | capture | SELECT | SELECT, INSERT, DELETE |
+| `interviews`, `interview_turns` | capture | SELECT on non-text columns; INSERT of `interviews` (invitation) | SELECT, INSERT, UPDATE |
+| `jobs` | capture | SELECT, INSERT | SELECT, INSERT, UPDATE, DELETE |
+| `knowledge_items` | knowledge | SELECT on label and status columns | SELECT, INSERT, UPDATE |
+| `knowledge_versions` | knowledge | — | SELECT, INSERT; change only through `erase_version()` |
+| `knowledge_item_topics`, `citations` | knowledge | — | SELECT, INSERT, DELETE |
+| `answer_logs` | knowledge | — | SELECT, INSERT, DELETE (pruning) |
+| `expert_questions` | knowledge | SELECT on label and status columns | SELECT, INSERT, UPDATE |
+| `quiz_items` | knowledge | SELECT on label and status columns (**not** `stem`, `options`, `correct_option`, `rubric`) | SELECT, INSERT, UPDATE |
+| `quiz_attempts` | knowledge | SELECT on label and status columns | SELECT, INSERT, UPDATE |
+| `quiz_answers` | knowledge | — | SELECT, INSERT, UPDATE |
+| `ai_budget_periods` | ai_gateway | SELECT | SELECT, INSERT, UPDATE |
+| `ai_usage_ledger` | ai_gateway | SELECT | SELECT, INSERT, UPDATE (state trigger), DELETE (roll-up after 12 months) |
+| `ai_global` (G) | ai_gateway | SELECT; UPDATE of kill switch and cap | SELECT; UPDATE of usage columns |
+| `ai_plan_defaults` (G), `audit_detail_keys` (G) | migrations | SELECT | SELECT |
+| `tenant_usage_counters` (G) | triggers | SELECT | SELECT (maintained by a trigger, not by direct writes) |
+
+The API never reads content text from Python-owned tables: its grants there are label and status columns, which is what it needs to ask the policy decision point about a row. Content reaches a user only through the Python service after a decision.
 
 ## Database roles
 
 | Role | Used by | Change from Phase 1 |
 |---|---|---|
 | `legacyai_migrator` | migrations | — |
-| `legacyai_app` | the TypeScript API | gains grants on the tables its new module owns, plus `SELECT` on the labels of Python-owned tables (needed to build policy decisions) |
-| `legacyai_backup` | nightly dump | — |
-| **`legacyai_ai`** (new) | the Python service | `LOGIN`, **no** `SUPERUSER`, **no** `BYPASSRLS`, no `CREATEROLE`/`CREATEDB`. Per-table grants below. The Python service checks its own role at start-up and refuses to run with a superuser or `BYPASSRLS` role (same as the API). |
+| `legacyai_app` | the TypeScript API | grants above |
+| `legacyai_backup` | nightly dump (read-only) | — |
+| **`legacyai_ai`** (new) | the Python service | `LOGIN`, **no** `SUPERUSER`, **no** `BYPASSRLS`, no `CREATEROLE` / `CREATEDB`. Grants above. The Python service checks its own role at start-up and refuses to run with a superuser or `BYPASSRLS` role (same as the API). |
 
-What `legacyai_ai` can **never** touch (no grant at all): `cards`, `card_secrets`, `card_auth_state`, `credentials`, `enrollment_tokens`, `sessions`, `card_directory`, `login_attempts`, `auth_transactions`, `idempotency_keys`, `rate_limit_buckets`, `tenants` (write), `tenant_settings` (write), `export_jobs`, `audit_log` (it may only `EXECUTE audit_write()`; no `SELECT`, `UPDATE`, `DELETE`), `audit_chain_heads`, `audit_anchors`.
+`legacyai_ai` has **no grant at all** on: `cards`, `card_secrets`, `card_auth_state`, `credentials`, `enrollment_tokens`, `sessions`, `card_directory`, `login_attempts`, `auth_transactions`, `idempotency_keys`, `rate_limit_buckets`, `card_roles`, `card_events`, `card_restrictions`, `tenants`, `tenant_settings`, `export_jobs`, `audit_log`, `audit_chain_heads`, `audit_anchors`. It may `EXECUTE audit_write()` (below). From Phase 1 it may read only `people (id, tenant_id, department_id, status)` and `departments (id, tenant_id)` — for foreign keys and labels. Display names are not readable by Python; where a response needs an expert's name, the API adds it.
 
-What it may read from Phase 1: `people (id, department_id, status)` and `departments (id)` — column-level `SELECT`, for foreign keys and labels. Display names are **not** readable by Python; where a response needs an expert's name, the API adds it.
+The `vector` extension must exist before migration 10. It is created by the setup step that creates the roles (`scripts/db-setup.mjs`, run by the superuser locally and by the Neon console role in the cloud), not by a migration, because the migration role cannot create extensions. *Whether Neon lets the console role create it without further steps is **UNVERIFIED** (Neon documents pgvector as available on every plan).*
 
-A test (extension of Phase 1's `integration/rls`) connects as `legacyai_ai` and asserts every one of these refusals, and that every new T table returns nothing without a tenant set and nothing of another tenant.
+A test (extension of Phase 1's `integration/rls`) connects as `legacyai_ai` and asserts every refusal above, and that every new T table returns nothing without a tenant set and nothing of another tenant.
 
 ---
 
-## A. Consent and settings (owner: API `knowledge-gateway`)
+## A. Consent and settings
 
 ### `consents` — T — F19
-One row per person per scope.
 
-| Column | Type | Notes |
-|---|---|---|
-| id | uuid | PK |
-| tenant_id | uuid | FK |
-| person_id | uuid | FK `(tenant_id, person_id)` → `people`. The expert the consent is from. |
-| scope | text | `interview` (my interview answers may be captured) · `documents` (documents I authored may be ingested as my contribution) · `named_expert` (answers may be attributed to me by name) |
-| purpose | text | 1–500 chars; the purpose shown to the person when they agreed |
-| policy_version | text | which wording they agreed to |
-| granted_at | timestamptz | |
-| granted_by_card_id | uuid | must be a card of **that person** (checked by a trigger): nobody can consent for someone else |
-| expires_at | timestamptz | nullable |
-| withdrawn_at, withdrawn_by_card_id | | nullable; again only the person's own card |
-| withdrawal_status | text | `none` · `pending` · `completed` · `held` (legal hold) |
-| legal_hold, legal_hold_reason, legal_hold_by_card_id, legal_hold_at | | set by an Owner; see `05` |
+| Column | Notes |
+|---|---|
+| id, tenant_id | |
+| person_id | FK → `people`. The expert the consent is from. |
+| scope | `own_words` (what I type into the system: interview answers, items I write, replies to questions) · `documents` (documents I wrote may be ingested as my contribution) · `named_expert` (answers may be attributed to me by name) |
+| purpose | 1–500 chars; the purpose shown to the person |
+| policy_version | which wording they agreed to |
+| granted_at, granted_by_card_id | the card must belong to **that person** (trigger) |
+| expires_at | nullable |
+| superseded_at | set when the person gives a newer consent for the same scope (a renewal does not erase anything) |
+| withdrawn_at | nullable |
+| withdrawn_by_card_id | the person's own card — **or** an Owner's card when `withdrawal_recorded_for_person` is true |
+| withdrawal_recorded_for_person, withdrawal_reference | an Owner recorded the withdrawal on the person's written request (the person has left and has no card). The reference names the Owner's own record of that request; identifier characters only. |
+| withdrawal_status | `none` · `hidden` (material no longer served; erasure pending) · `completed` · `held` (legal hold) |
+| legal_hold, legal_hold_by_card_id, legal_hold_at, legal_hold_reason | set by an Owner. The written reason stays in this table and is **not** copied to the audit log. |
 
-Indexes: partial unique `(tenant_id, person_id, scope) WHERE withdrawn_at IS NULL` — at most one live consent per scope. A function `consent_is_valid(tenant, person, scope, at)` is the single definition of "valid" (granted, not withdrawn, not expired) used by triggers and by both services.
-
-Grants: `legacyai_app` SELECT, INSERT, UPDATE (no DELETE). `legacyai_ai` SELECT, and UPDATE of `withdrawal_status` only.
+Indexes: partial unique `(tenant_id, person_id, scope) WHERE withdrawn_at IS NULL AND superseded_at IS NULL` — one live consent per scope. Function `consent_is_valid(tenant, person, scope, at)` — granted, not withdrawn, not superseded, not expired — is the single definition used by triggers and both services.
 
 ### `knowledge_settings` — T — F12, F13, F18, F19
 One row per tenant (PK `tenant_id`).
 
 | Column | Default | Notes |
 |---|---|---|
-| chunk_quota | 5000 | hard ceiling per tenant (`08`) |
+| chunk_quota | 5000 | chunks of all kinds per tenant (`08`) |
 | max_upload_bytes | 5 MB | CHECK ≤ 10 MB |
 | max_pdf_pages | 50 | CHECK ≤ 200 |
-| store_originals | false | CHECK = false while the plan is `pilot` (free database): originals are never kept |
-| second_reviewer_for_own_items | true | F12 |
-| second_reviewer_for_admin_items | true | F12 |
-| verifications_per_hour / per_day | 30 / 100 | poisoning rate limit |
-| learner_sources | `verified_only` | or `all_marked` (open decision 4) |
+| store_originals | false | CHECK (= false): keeping uploaded files is not offered in Phase 2 |
+| second_reviewer_required | true | the verifier may not be the item's contributor or the author of its current version (`06`) |
+| verifications_per_hour / per_day | 30 / 100 | |
+| learner_sources | `verified_only` | or `all_marked` |
 | stale_after_days | 365 | |
 | review_sla_days | 5 | |
 | answer_log_retention_days | 90 | |
 | quiz_answer_retention_days | 365 | |
 | interview_max_turns | 30 | |
+| interview_max_cost_micro_usd | 250000 | $0.25 per session |
 | expert_question_expiry_days | 30 | |
-
-Grants: `legacyai_app` SELECT, INSERT, UPDATE. `legacyai_ai` SELECT.
+| quiz_questions_per_attempt | 10 | |
+| quiz_time_limit_minutes | 45 | |
+| quiz_min_questions_per_topic | 3 | below this a topic is "not enough questions to score" |
+| quiz_show_answers_after_grading | false | |
 
 ### `redaction_allowlist` — T — F18
-Terms a reviewer has confirmed are **not** personal data in this company (a machine called "Baker", a product called "Jordan").
-
 `id`, `tenant_id`, `term` (1–80 chars), `entity_type`, `added_by_card_id`, `created_at`. Unique `(tenant_id, lower(term), entity_type)`.
-Grants: `legacyai_app` SELECT, INSERT, DELETE. `legacyai_ai` SELECT.
 
 ---
 
-## B. Capture (owner: Python `capture`)
+## B. Capture
 
 ### `sources` — T — F25, F7
-One row per document or interview: the thing a citation points back to.
-
-| Column | Type | Notes |
-|---|---|---|
-| id, tenant_id | | |
-| kind | text | `document` · `interview` |
-| title | text | 1–200 chars, **redacted** like any other text |
-| department_id, sensitivity, owner_person_id | | access labels; every chunk inherits them |
-| consent_id | uuid | nullable; required when `owner_person_id` is set (trigger) |
-| company_owned_attested_by_card_id | uuid | nullable; for documents with no personal contributor the uploader attests "this is the company's document" (`05`). Exactly one of consent / attestation must be present (CHECK). |
-| uploaded_by_card_id | uuid | |
-| status | text | `pending` · `processing` · `ready` · `failed` · `withdrawn` |
-| failure_code | text | nullable; a code, never a message with content |
-| mime | text | `application/pdf` · `text/plain` |
-| byte_size, page_count, char_count, chunk_count | int | |
-| content_sha256 | bytea | of the uploaded bytes |
-| language | text | `en` in Phase 2 |
-| created_at, ready_at | | |
-
-Indexes: `(tenant_id, content_sha256)` (not unique — a duplicate is reported only to an uploader who may read the existing source; otherwise a unique rule would reveal that a hidden file exists, see `03`); `(tenant_id, status)`; `(tenant_id, owner_person_id)`.
-**Consent trigger:** an INSERT, or a move to `processing`/`ready`, is refused unless `consent_is_valid(...)` for `owner_person_id` with scope `documents` (or `interview`), or the attestation is present. This is the database-level proof that capture without consent fails even if application code is bypassed.
-Grants: `legacyai_app` SELECT, INSERT (the upload route creates the row). `legacyai_ai` SELECT, UPDATE.
-
-### `source_blobs` — T — F25 (transient)
-The uploaded bytes, held only until parsing has committed.
-
-`source_id` PK, `tenant_id`, `bytes bytea`, `created_at`. CHECK `octet_length(bytes) <= 10485760`.
-Deleted in the same transaction that writes the chunks. A purge function removes any blob older than 24 hours (a job that never ran). Not included in exports or in the size a tenant is "charged" for.
-Grants: `legacyai_app` INSERT. `legacyai_ai` SELECT, DELETE.
-
-### `chunks` — T — F14, F17
-The unit of retrieval. **This is the table the permission filter is about.**
-
-| Column | Type | Notes |
-|---|---|---|
-| id, tenant_id | | |
-| kind | text | `source` (a piece of a document or interview) · `item` (the current text of a knowledge item, kept here so that search has one table) |
-| source_id | uuid | FK `(tenant_id, source_id)`; set when `kind = source` |
-| knowledge_item_id | uuid | set when `kind = item` (CHECK: exactly one of the two) |
-| verification_status | text | `unverified` (default) · `verified` · `corrected` · `stale`. For `item` rows it mirrors the item's status; the knowledge module updates it through the capture module's public function in the same transaction as the status change. |
-| ordinal | int | position in the source |
-| text | text | **redacted**; 1–4000 chars |
-| token_estimate | int | |
-| embedding | `halfvec(384)` | nullable until embedded. Half-precision: 2 bytes per dimension. |
-| embedding_model | text | e.g. `bge-small-en-v1.5@fastembed-0.8.1`; rows with a different model id are never compared with each other, which is what makes re-embedding possible |
-| department_id, sensitivity, owner_person_id | | access labels (copied from the source; changed only through a labelled, audited action) |
-| page_from, page_to | int | nullable |
-| redaction_count | int | |
-| low_confidence_redactions | boolean | true → a review task exists; the chunk stays retrievable because the doubtful spans are already redacted |
-| status | text | `active` · `withdrawn` |
-| interview_turn_id | uuid | nullable; set for interview answers |
-| created_at | | |
-
-Indexes: unique `(tenant_id, source_id, ordinal)`; unique `(tenant_id, knowledge_item_id)`; btree `(tenant_id, status, sensitivity)`; btree `(tenant_id, owner_person_id)`; GIN on `to_tsvector('english', text)` (keyword search) — kept only if a test shows PostgreSQL uses it under row-level security (`03`). **No vector index** — see `03` and `08`: at pilot sizes an exact scan inside one tenant is fast, gives perfect recall, and costs no index storage.
-Constraint: `embedding IS NULL OR embedding_model IS NOT NULL`.
-Grants: `legacyai_ai` SELECT, INSERT, UPDATE, DELETE. `legacyai_app` SELECT on `(id, tenant_id, source_id, department_id, sensitivity, owner_person_id, status)` only — the labels, never the text.
-
-### `redaction_findings` — T — F18
-What was redacted where. **Never the value itself.**
-
-`id`, `tenant_id`, `source_id`, `chunk_id` (nullable), `entity_type` (`EMAIL`, `PHONE`, `PERSON`, `CREDIT_CARD`, `IBAN`, `GOV_ID`, `SECRET`, `LOCATION`, …), `detector` (`pattern` · `checksum` · `ner` · `secret_pattern`), `confidence real`, `placeholder` (e.g. `[PERSON_3]`), `char_length int`, `low_confidence boolean`, `created_at`.
-Index `(tenant_id, source_id)`.
-Grants: `legacyai_ai` SELECT, INSERT, DELETE. `legacyai_app` SELECT.
-
-### `interviews` — T — F7
+One row per document or interview.
 
 | Column | Notes |
 |---|---|
 | id, tenant_id | |
-| expert_person_id | the interviewee |
-| source_id | the `sources` row (kind `interview`) that holds this interview's chunks |
-| consent_id | must be a valid `interview` consent of that person (trigger, as for sources) |
-| job_role | text; which role's topic map drives the interview |
-| status | `active` · `paused` · `completed` · `abandoned` · `stopped_budget` |
-| turn_count, max_turns | |
-| cost_micro_usd | running total, from the ledger |
-| started_by_card_id, created_at, last_turn_at, completed_at | |
+| kind | `document` · `interview` |
+| title | 1–200 chars, **redacted** like any other text |
+| department_id, sensitivity, owner_person_id | access labels |
+| consent_id | required when `owner_person_id` is set (trigger) |
+| company_owned_attested_by_card_id | for documents with no personal contributor: the uploader's declaration (`05`). CHECK: exactly one of `consent_id` / attestation. |
+| contributor_confirmed_at | when someone else uploads a document naming a person as contributor, that person must confirm before anything is processed |
+| uploaded_by_card_id | |
+| status | `awaiting_confirmation` · `awaiting_content` · `processing` · `ready` · `failed` · `withdrawn` (trigger refuses illegal moves) |
+| failure_code | a code, never content |
+| mime | `application/pdf` · `text/plain` · `text/markdown` |
+| byte_size, page_count, char_count, chunk_count | |
+| content_sha256 | bytea, of the uploaded bytes |
+| language | `en` |
+| created_at, ready_at | |
+
+Indexes: `(tenant_id, content_sha256)` (not unique — a duplicate is reported only to an uploader who may read the existing source, `03`); `(tenant_id, status)`; `(tenant_id, owner_person_id)`.
+**Consent trigger:** a row may enter `processing` or `ready` only if `consent_is_valid(...)` holds for `owner_person_id` (scope `documents`, or `own_words` for interviews) **and**, when uploader ≠ contributor, `contributor_confirmed_at` is set — or the attestation is present. With the application bypassed, an insert or status change without one of these is refused; the test attacks this directly. *The attestation is a person's declaration, not something the database can check.*
+
+### `chunks` — T — F14, F17
+The unit of retrieval.
+
+| Column | Notes |
+|---|---|
+| id, tenant_id | |
+| kind | `source` (a piece of a document or interview) · `item` (the text of a **verified** knowledge item — created when the item is verified, removed when it leaves that status) |
+| source_id | set when `kind = source` |
+| knowledge_item_id | set when `kind = item` (CHECK: exactly one of the two) |
+| ordinal | position in the source (0 for items) |
+| text | **redacted**; 1–2000 chars |
+| token_estimate | |
+| embedding | `halfvec(384)`, nullable until embedded |
+| embedding_model | e.g. `bge-small-en-v1.5@fastembed-0.8.1`; only rows with the same model id are compared — this is what makes re-embedding possible |
+| department_id, sensitivity, owner_person_id | access labels (changed only through `relabel()`) |
+| verification_status | `unverified` (every `source` chunk) · `verified` · `corrected` · `stale` (item chunks, mirroring the item) |
+| page_from, page_to | nullable |
+| redaction_count, low_confidence_redactions | |
+| status | `pending` (source not ready yet — never searched) · `active` · `withdrawn` (hidden at once; deleted by the erasure step) |
+| interview_turn_id | set for interview answers |
+
+Indexes: unique `(tenant_id, source_id, ordinal)`; unique `(tenant_id, knowledge_item_id)`; `(tenant_id, status, sensitivity)`; `(tenant_id, owner_person_id)`. **No vector index and no keyword index** (`03`, `08`).
+API column grant: `id, tenant_id, kind, source_id, knowledge_item_id, department_id, sensitivity, owner_person_id, verification_status, status` — labels, never text.
+
+### `redaction_findings` — T — F18
+`id`, `tenant_id`, `source_id`, `chunk_id` (nullable), `entity_type`, `detector` (`pattern` · `checksum` · `ner` · `secret_pattern`), `confidence real`, `placeholder`, `char_length`, `low_confidence`. Index `(tenant_id, source_id)`. **Never the value.**
+
+### `interviews` — T — F7
+`id`, `tenant_id`, `expert_person_id`, `source_id` (the `sources` row of kind `interview`; **the interview's access labels are that source's labels**), `consent_id` (valid `own_words` consent required to leave `invited` — trigger), `job_role`, `status` (`invited` · `active` · `paused` · `stopped_budget` · `completed` · `abandoned`), `turn_count`, `max_turns`, `cost_micro_usd`, `invited_by_card_id`, `created_at`, `last_turn_at`, `completed_at`. Index `(tenant_id, expert_person_id, status)`.
 
 ### `interview_turns` — T — F7
-
-`id`, `tenant_id`, `interview_id`, `ordinal`, `topic_id` (nullable), `question_text`, `question_kind` (`topic` · `follow_up`), `answer_text` (**redacted**, nullable until answered), `answered_at`, `prompt_version`, `created_at`. Unique `(tenant_id, interview_id, ordinal)`.
-Grants (both): `legacyai_ai` SELECT, INSERT, UPDATE. `legacyai_app` SELECT on labels (`id`, `tenant_id`, `expert_person_id`, `status`).
+`id`, `tenant_id`, `interview_id`, `ordinal`, `topic_id` (nullable), `question_text`, `question_kind` (`topic` · `follow_up` · `template`), `answer_text` (redacted; nullable until answered; blanked on withdrawal — CHECK allows empty only when `erased_at` is set), `answered_at`, `erased_at`, `prompt_version`. Unique `(tenant_id, interview_id, ordinal)`.
+API column grant on both: ids, `expert_person_id`, `source_id`, `status`, counts — no question or answer text.
 
 ### `topics` — T — F10
-
-`id`, `tenant_id`, `name` (1–120), `description` (0–500), `department_id`, `origin` (`admin` · `extracted`), `status` (`active` · `proposed` · `retired`), `embedding halfvec(384)`, `embedding_model`, `created_by_card_id`, `created_at`. Unique `(tenant_id, lower(name))`.
-AI-proposed topics arrive as `proposed` and count for nothing until an Admin accepts them.
+`id`, `tenant_id`, `name` (1–120), `description` (0–500), `department_id`, `sensitivity` (topics are labelled too: a topic extracted from a confidential document must not be visible to everyone), `origin` (`admin` · `extracted`), `extracted_from_source_id` (nullable), `status` (`active` · `proposed` · `retired`), `embedding halfvec(384)`, `embedding_model`, `created_by_card_id`. Unique `(tenant_id, lower(name))`. Extracted topics start `proposed`, inherit the source's labels, and count for nothing until an Admin accepts them.
 
 ### `role_topic_maps` — T — F10
-Which topics a job role must cover. ("Job role" is a label such as *Boiler operator* — not an access role.)
-
-`id`, `tenant_id`, `job_role` (1–120), `topic_id`, `required boolean`, `importance smallint 1–3`, `created_by_card_id`. Unique `(tenant_id, job_role, topic_id)`.
+`id`, `tenant_id`, `job_role` (1–120; a label such as *Boiler operator*, not an access role), `topic_id`, `required`, `importance` (1–3). Unique `(tenant_id, job_role, topic_id)`.
 
 ### `person_job_roles` — T — F10, F13
-Who holds, or is training for, which job role.
+`tenant_id`, `person_id`, `job_role`, `relation` (`holder` · `successor`). PK on all four.
 
-`tenant_id`, `person_id`, `job_role`, `relation` (`holder` · `successor`). PK `(tenant_id, person_id, job_role, relation)`.
-Grants (three tables): `legacyai_ai` SELECT, INSERT, UPDATE. `legacyai_app` SELECT, INSERT, UPDATE, DELETE (admin-managed lists).
-
-### `jobs` — T — queue
-The Postgres-backed queue (no Redis).
-
-`id`, `tenant_id`, `kind` (`ingest` · `withdraw_consent` · `reembed` · `prune`), `subject_id uuid`, `stage text`, `status` (`queued` · `running` · `done` · `failed`), `attempts int`, `max_attempts int DEFAULT 5`, `locked_until timestamptz`, `last_error_code text`, `created_at`, `updated_at`.
-Index `(tenant_id, status, created_at)`. Unique `(tenant_id, kind, subject_id) WHERE status IN ('queued','running')` — a job cannot be queued twice.
-A worker claims a job with `SELECT … FOR UPDATE SKIP LOCKED` and a lease (`locked_until`); a crashed slice is picked up again when the lease expires.
-Grants: `legacyai_app` SELECT, INSERT. `legacyai_ai` SELECT, INSERT, UPDATE.
+### `jobs` — T — queue (F25, F19)
+`id`, `tenant_id`, `kind` (`embed` · `erase_withdrawn` · `reembed` · `expire` · `prune`), `subject_id`, `status` (`queued` · `running` · `done` · `failed`), `attempts`, `max_attempts` (default 5), `locked_until`, `last_error_code`, timestamps. Index `(tenant_id, status, created_at)`. Unique `(tenant_id, kind, subject_id) WHERE status IN ('queued','running')`. Claimed with `FOR UPDATE SKIP LOCKED` and a lease. `done` rows are deleted after 7 days by the housekeeping step (`05`).
 
 ---
 
-## C. Knowledge (owner: Python `knowledge`)
+## C. Knowledge
 
 ### `knowledge_items` — T — F12
 
 | Column | Notes |
 |---|---|
 | id, tenant_id | |
-| title | redacted, 1–200 |
-| current_version_id | FK to `knowledge_versions` |
-| status | `candidate` · `in_review` · `verified` · `corrected` · `rejected` · `stale` · `withdrawn` (state machine in `06`; a trigger refuses illegal moves) |
+| title | redacted, 1–200; blanked on withdrawal |
+| current_version_id | |
+| status | `candidate` · `in_review` · `verified` · `corrected` · `rejected` · `stale` · `withdrawn` (`06`; trigger) |
 | origin | `interview` · `document` · `expert_reply` · `manual` |
 | ai_extracted | boolean |
-| department_id, sensitivity, owner_person_id | access labels (`owner_person_id` = contributor) |
+| department_id, sensitivity, owner_person_id | labels; `owner_person_id` = contributor. Starting sensitivity = the highest among its provenance (trigger). |
+| consent_id | required when `owner_person_id` is set (trigger): hand-written items and replies need the person's `own_words` consent just as interview answers do |
 | created_by_card_id | |
-| verified_by_card_id, verified_at | set together (CHECK) |
-| stale_after | timestamptz |
-| usage_count | int; how often answers cited it — drives review priority |
-| created_at, updated_at | |
+| verified_by_card_id, verified_at | set together |
+| stale_after | |
+| usage_count | how often answers cited it |
 
 Indexes: `(tenant_id, status)`, `(tenant_id, owner_person_id)`, `(tenant_id, status, usage_count DESC)`.
 
 ### `knowledge_versions` — T — F12
-Immutable. `legacyai_ai` gets INSERT and SELECT only — **no UPDATE** — except through the withdrawal function, which blanks `body` (see `05`).
-
-`id`, `tenant_id`, `item_id`, `version_no`, `body` (redacted, 1–8000), `change_kind` (`extracted` · `written` · `corrected` · `expert_reply` · `rollback`), `author_card_id` (nullable for AI extraction), `prompt_version` (nullable), `created_at`. Unique `(tenant_id, item_id, version_no)`.
+Immutable. `id`, `tenant_id`, `item_id`, `version_no`, `body` (redacted, **1–2000 chars** — so a verified item always fits one search chunk and the embedding model's input), `change_kind` (`extracted` · `written` · `corrected` · `expert_reply` · `rollback`), `author_card_id`, `author_person_id` (null for AI extraction; used by the second-reviewer rule), `prompt_version`, `erased_at`. Unique `(tenant_id, item_id, version_no)`.
+No `UPDATE` grant. The only change possible is `erase_version(id)` (a database function used by the withdrawal step) which blanks `body` and sets `erased_at`.
 
 ### `knowledge_item_topics` — T — F10
-`tenant_id`, `item_id`, `topic_id`, `link_source` (`similarity` · `reviewer`), `score real`. PK `(tenant_id, item_id, topic_id)`.
+`tenant_id`, `item_id`, `topic_id`, `link_source` (`similarity` · `reviewer`), `score`. PK `(tenant_id, item_id, topic_id)`.
 
 ### `citations` — T — F14, F12
-One table for every "this came from there" link.
+`id`, `tenant_id`, `subject_type` (`knowledge_version` · `answer` · `quiz_item`), `subject_id`, `chunk_id` (`ON DELETE CASCADE`), `quote_start`, `quote_end`, `quote_sha256`. Indexes `(tenant_id, subject_type, subject_id)`, `(tenant_id, chunk_id)`. Citations of an answer are deleted when its `answer_logs` row is pruned.
 
-| Column | Notes |
-|---|---|
-| id, tenant_id | |
-| subject_type | `knowledge_version` (provenance) · `answer` · `quiz_item` |
-| subject_id | uuid |
-| chunk_id | FK `(tenant_id, chunk_id)`; `ON DELETE CASCADE` — when a chunk is withdrawn, its citations go with it |
-| quote_start, quote_end | int offsets into the chunk text |
-| quote_sha256 | bytea; lets the validator's result be re-checked later |
-| created_at | |
-
-Index `(tenant_id, subject_type, subject_id)`, `(tenant_id, chunk_id)`.
-
-### `answer_logs` — T — F22 (basic logging), F14
-`id`, `tenant_id`, `card_id`, `question_redacted` (≤ 500 chars), `expert_person_id` (nullable; ask-the-expert), `outcome` (`answered` · `dont_know` · `budget_exhausted`), `reason`, `confidence`, `candidates int`, `approved int`, `policy_disagreements int`, `claims_valid int`, `claims_rejected int`, `fabricated_citation boolean`, `prompt_version`, `ledger_id`, `latency_ms`, `created_at`. Index `(tenant_id, created_at)`. Pruned after `answer_log_retention_days`.
+### `answer_logs` — T — F22 (logging only), F14
+`id`, `tenant_id`, `card_id`, `question_redacted` (the first 500 characters of the redacted question), `expert_person_id` (nullable), `outcome` (`answered` · `dont_know` · `search_only`), `reason` (`no_relevant_sources` · `not_grounded` · `sources_conflict` · `low_confidence` · `budget_exhausted` · `ai_disabled` · `ai_unavailable` · `grace`), `confidence`, `candidates`, `approved`, `policy_disagreements`, `claims_valid`, `claims_rejected`, `fabricated_citation`, `prompt_version`, `ledger_id`, `latency_ms`, `created_at`. Index `(tenant_id, created_at)`.
 
 ### `expert_questions` — T — F15
-`id`, `tenant_id`, `asked_by_card_id`, `expert_person_id`, `question_redacted` (≤ 1000), `department_id`, `sensitivity`, `status` (`open` · `answered` · `declined` · `expired`), `decline_reason`, `answer_item_id` (nullable), `created_at`, `answered_at`, `expires_at`. Index `(tenant_id, expert_person_id, status)`.
+`id`, `tenant_id`, `asked_by_card_id`, `expert_person_id`, `owner_person_id` (= the expert; the label used by the filter), `question_redacted` (≤ 1000), `department_id`, `sensitivity`, `status` (`open` · `answered` · `declined` · `expired`), `decline_reason`, `answer_item_id`, `created_at`, `answered_at`, `expires_at`. Index `(tenant_id, expert_person_id, status)`.
 
 ### `quiz_items` — T — F13
-`id`, `tenant_id`, `topic_id`, `knowledge_item_id`, `knowledge_version_id`, `kind` (`mcq` · `open`), `stem`, `options jsonb` (mcq), `correct_option smallint` (mcq), `rubric jsonb` (open), `status` (`draft` · `approved` · `retired`), `department_id`, `sensitivity`, `owner_person_id` (copied from the item, so the same filter applies), `approved_by_card_id`, `approved_at`, `prompt_version`, `created_at`.
-The API role gets `SELECT` on everything **except** `correct_option` and `rubric` — the gateway physically cannot return the answers.
+`id`, `tenant_id`, `topic_id`, `knowledge_item_id`, `knowledge_version_id`, `kind` (`mcq` · `open`), `stem`, `options jsonb`, `correct_option`, `rubric jsonb`, `status` (`draft` · `approved` · `retired`), labels (copied from the item), `approved_by_card_id`, `approved_at`, `prompt_version`. Index `(tenant_id, topic_id, status)`.
+The API's database role has no `SELECT` on `stem`, `options`, `correct_option`, `rubric`: the gateway is designed to have no way of reading the answers; a test asserts the refusal.
 
 ### `quiz_attempts` — T — F13
-`id`, `tenant_id`, `learner_card_id`, `learner_person_id`, `job_role`, `status` (`in_progress` · `submitted` · `graded` · `expired`), `started_at`, `expires_at`, `submitted_at`, `graded_at`, `scores jsonb` (per topic), `bank_size int`. Trigger: `submitted_at` can be set once; an attempt past `expires_at` cannot be submitted.
+`id`, `tenant_id`, `learner_card_id`, `learner_person_id`, `owner_person_id` (= the learner, for the "own" scope), `job_role`, `status` (`in_progress` · `submitted` · `graded` · `expired`), `started_at`, `expires_at`, `submitted_at`, `graded_at`, `scores jsonb`, `bank_size`. Index `(tenant_id, learner_person_id, started_at)`. Trigger: `submitted_at` can be set once; an attempt past `expires_at` cannot be submitted.
 
 ### `quiz_answers` — T — F13
-`id`, `tenant_id`, `attempt_id`, `quiz_item_id`, `position smallint`, `option_order smallint[]` (the shuffle used for this attempt), `chosen_option smallint`, `answer_text` (redacted, ≤ 4000), `auto_score real`, `ai_score real`, `ai_rubric_result jsonb`, `ai_confidence real`, `final_score real`, `decided_by` (`auto` · `ai` · `reviewer`), `overridden_by_card_id`, `graded_at`. Unique `(tenant_id, attempt_id, quiz_item_id)`. `answer_text` and `ai_rubric_result` are blanked after `quiz_answer_retention_days`; scores stay.
-
-Grants for section C: `legacyai_ai` SELECT, INSERT, UPDATE (no DELETE except `citations`). `legacyai_app` SELECT on label columns of `knowledge_items`, `quiz_items` (minus answers), `quiz_attempts`, `expert_questions` — enough to build a policy decision, not to read content.
+`id`, `tenant_id`, `attempt_id`, `quiz_item_id`, `position`, `option_order smallint[]`, `chosen_option`, `answer_text` (redacted, ≤ 4000), `auto_score`, `ai_score`, `ai_rubric_result jsonb`, `ai_confidence`, `final_score`, `decided_by` (`auto` · `ai` · `reviewer`), `overridden_by_card_id`, `graded_at`. Unique `(tenant_id, attempt_id, quiz_item_id)`. Text and rubric result are blanked after the retention period; scores stay.
 
 ---
 
-## D. Review queue (owner: API `knowledge-gateway`; Python may add and resolve)
+## D. Review queue
 
 ### `review_tasks` — T — F24
-`id`, `tenant_id`, `kind` (`verify_item` · `redaction_review` · `expert_question` · `quiz_item_approval` · `grading_override` · `stale_item`), `subject_type`, `subject_id`, `department_id`, `sensitivity`, `owner_person_id` (labels of the subject, so the queue is filtered like everything else), `priority int`, `status` (`open` · `assigned` · `resolved` · `dismissed`; trigger refuses illegal moves), `assigned_to_card_id`, `created_at`, `due_at`, `first_response_at`, `resolved_at`, `resolved_by_card_id`, `resolution text`.
+`id`, `tenant_id`, `kind` (`verify_item` · `redaction_review` · `expert_question` · `quiz_item_approval` · `grading_override` · `stale_item`), `subject_type`, `subject_id`, labels (copied from the subject), `visible_to_person_id` (set for `expert_question` tasks: only that expert and Owners see them), `priority`, `status` (`open` · `assigned` · `resolved` · `dismissed`; trigger), `assigned_to_card_id`, `created_at`, `due_at`, `first_response_at`, `resolved_at`, `resolved_by_card_id`, `resolution`.
 Indexes: `(tenant_id, status, priority DESC, created_at)`; unique `(tenant_id, kind, subject_id) WHERE status IN ('open','assigned')`.
-Grants: `legacyai_app` SELECT, UPDATE. `legacyai_ai` SELECT, INSERT, UPDATE.
 
 ---
 
-## E. AI cost control (owner: Python `ai_gateway`; budgets set through the API)
+## E. AI cost control
 
 ### `ai_budgets` — T
-One row per tenant (PK `tenant_id`): `monthly_cap_micro_usd bigint` (CHECK ≥ 0), `max_output_tokens int`, `max_input_tokens int`, `updated_by_card_id`, `updated_at`. No row = the plan default from `ai_plan_defaults`.
-Grants: `legacyai_app` SELECT, INSERT, UPDATE. `legacyai_ai` SELECT.
+PK `tenant_id`: `monthly_cap_micro_usd` (CHECK ≥ 0), `updated_by_card_id`, `updated_at`. No row = the plan default.
 
 ### `ai_budget_periods` — T
-`tenant_id`, `period char(7)` (`2026-10`), `spent_micro_usd bigint`, `reserved_micro_usd bigint`. PK `(tenant_id, period)`. This row is what makes the cap **hard**: a call first reserves its worst-case cost with a single conditional `UPDATE … WHERE spent + reserved + $x <= cap`; if no row is updated, the call is refused (`04`).
-Grants: `legacyai_ai` SELECT, INSERT, UPDATE. `legacyai_app` SELECT.
+`tenant_id`, `period char(7)`, `spent_micro_usd`, `reserved_micro_usd`, `calls`. PK `(tenant_id, period)`. The row the cap is enforced on (`04`).
 
 ### `ai_usage_ledger` — T
-One row per AI call, including refused ones.
-
-`id`, `tenant_id`, `card_id` (nullable for system work), `feature` (`answer` · `interview_question` · `item_extract` · `topic_extract` · `quiz_generate` · `quiz_grade` · `embed`), `provider`, `model`, `prompt_version`, `status` (`reserved` · `settled` · `failed` · `refused_budget` · `refused_global` · `refused_kill_switch` · `refused_limits`), `input_tokens`, `output_tokens`, `reserved_micro_usd`, `cost_micro_usd`, `price_input_micro_per_mtok`, `price_output_micro_per_mtok` (the prices used, so old rows stay explainable after a price change), `request_id`, `latency_ms`, `created_at`, `settled_at`.
-Index `(tenant_id, created_at)`, `(tenant_id, feature, created_at)`.
-Grants: `legacyai_ai` SELECT, INSERT, UPDATE (the trigger allows only `reserved → settled/failed`). `legacyai_app` SELECT.
+One row per **attempt** of an AI call, including refused ones.
+`id`, `tenant_id`, `card_id`, `feature` (`answer` · `interview_question` · `item_extract` · `topic_extract` · `quiz_generate` · `quiz_grade` · `eval_judge`), `provider`, `model`, `prompt_version`, `attempt`, `status` (`reserved` · `settled` · `failed_charged` · `failed_free` · `expired_charged` · `refused_budget` · `refused_global` · `refused_kill_switch` · `refused_limits` · `refused_rate`), `input_tokens`, `output_tokens`, `reserved_micro_usd`, `cost_micro_usd`, the two prices used, `request_id`, `latency_ms`, `created_at`, `settled_at`.
+Indexes `(tenant_id, created_at)`, `(tenant_id, status) WHERE status = 'reserved'`. Rows older than 12 months are deleted once their totals are held in `ai_budget_periods`.
+Local embeddings cost nothing and write **no** ledger rows.
 
 ### `ai_global` — G
-One row. `kill_switch boolean`, `kill_switch_reason`, `monthly_cap_micro_usd`, `period`, `spent_micro_usd`, `reserved_micro_usd`, `updated_at`.
-Grants: `legacyai_ai` SELECT, UPDATE of the usage columns only. `legacyai_app` SELECT, UPDATE of `kill_switch*` and the cap (operator-only route, platform permission).
+One row: `kill_switch`, `kill_switch_reason`, `monthly_cap_micro_usd`, `period`, `spent_micro_usd`, `reserved_micro_usd`.
 
 ### `ai_plan_defaults` — G
-`plan_code` PK, `monthly_cap_micro_usd`, `max_output_tokens`, `max_input_tokens`, `chunk_quota`. Seeded: `pilot`, `free`. Read-only for both services.
+`plan_code` PK (FK → `plan_limits`), `monthly_cap_micro_usd`, `max_input_tokens`, `max_output_tokens`, `calls_per_hour`. Seeded for `pilot` and `free`. **The `free` plan does not exist in Phase 1**; migration 13 adds it to `plan_limits`.
+
+### `tenant_usage_counters` — G
+`tenant_id` PK, `chunk_count`, `updated_at`. Maintained by a trigger on `chunks`. It exists because a tenant-scoped login cannot count other companies' rows: the system-wide chunk ceiling and the operator's storage view read this table (counts only, no content).
 
 ---
 
 ## F. Audit: one writer path
 
-- New function **`audit_write(tenant, actor_card, actor_kind, action, resource_type, resource_id, decision, reason_code, request_id, ip, details jsonb)`**. It rejects any detail key not in the new G table **`audit_detail_keys`** and any string value over 200 characters or containing 16 digits in a row (the two rules the TypeScript code enforces today), then inserts into `audit_log`. The Phase 1 trigger still assigns `seq`, `prev_hash`, `row_hash`.
-- `legacyai_app`: its direct `INSERT` grant on `audit_log` is replaced by `EXECUTE` on the function. `legacyai_ai`: `EXECUTE` only.
-- `actor_kind` gains the value `ai_service` (Python acting on a card's behalf is recorded with the card as actor and this kind).
-- New detail keys for Phase 2 (`source_id`, `chunk_count`, `redactions`, `item_id`, `version_no`, `feature`, `model`, `cost_micro_usd`, `task_id`, `consent_id`, `scope`, `attempt_id`, `candidates`, `approved`) are rows in `audit_detail_keys`, added by migration.
+- New function **`audit_write(tenant, actor_card, actor_kind, action, resource_type, resource_id, decision, reason_code, request_id, ip, details jsonb)`**. It rejects any detail key not in the G table **`audit_detail_keys`**, any string value over 200 characters or containing 16 digits in a row (the rules the TypeScript code enforces today), then inserts into `audit_log`. The Phase 1 trigger still assigns `seq`, `prev_hash`, `row_hash`.
+- `legacyai_app`: its direct `INSERT` on `audit_log` is replaced by `EXECUTE`. `legacyai_ai`: `EXECUTE` only.
+- **When the caller is `legacyai_ai`, the function forces `actor_kind = 'service'`** (the kind Phase 1 already uses for "another service acted on a card's behalf") and allows only the decision `event`. The Python service therefore cannot write a row that looks like a card's own decision. It *can* name any card as the one it acted for — a compromised Python service could write misleading `service` rows; this is stated in `07`.
+- New detail keys: `source_id`, `chunk_count`, `redactions`, `item_id`, `version_no`, `feature`, `model`, `cost_micro_usd`, `task_id`, `consent_id`, `attempt_id`, `candidates`, `approved`, `policy_disagreements`, `sensitivity_from`, `sensitivity_to`, `department_from`, `department_to`, `interview_id`, `topic_id`.
 
 ---
 
 ## Tenant export
 
-Phase 1's export gains: `consents`, `sources` (no blobs), `chunks` (redacted text, **no vectors**), `knowledge_items`, `knowledge_versions`, `knowledge_item_topics`, `topics`, `role_topic_maps`, `interviews`, `interview_turns`, `expert_questions`, `quiz_items`, `quiz_attempts`, `quiz_answers`, `review_tasks`, `ai_usage_ledger`. The no-secrets scan of Phase 1 is extended to these tables.
+The Phase 1 export runs as the API role, which by design cannot read Phase 2 content. The Phase 2 part of an export is therefore produced by the Python service (same file formats and manifest) and merged by the API: `consents`, `sources`, `chunks` (redacted text, **no vectors**), `knowledge_items`, `knowledge_versions`, `knowledge_item_topics`, `topics`, `role_topic_maps`, `interviews`, `interview_turns`, `expert_questions`, `quiz_items`, `quiz_attempts`, `quiz_answers`, `review_tasks`, `ai_usage_ledger`. The no-secrets scan of Phase 1 is extended to these files.
 
 ## Table list
 
-**Tenant-scoped (26):** `consents`, `knowledge_settings`, `redaction_allowlist`, `sources`, `source_blobs`, `chunks`, `redaction_findings`, `interviews`, `interview_turns`, `topics`, `role_topic_maps`, `person_job_roles`, `jobs`, `knowledge_items`, `knowledge_versions`, `knowledge_item_topics`, `citations`, `answer_logs`, `expert_questions`, `quiz_items`, `quiz_attempts`, `quiz_answers`, `review_tasks`, `ai_budgets`, `ai_budget_periods`, `ai_usage_ledger`.
-**Global (3):** `ai_global`, `ai_plan_defaults`, `audit_detail_keys`.
+**Tenant-scoped (25):** `consents`, `knowledge_settings`, `redaction_allowlist`, `sources`, `chunks`, `redaction_findings`, `interviews`, `interview_turns`, `topics`, `role_topic_maps`, `person_job_roles`, `jobs`, `knowledge_items`, `knowledge_versions`, `knowledge_item_topics`, `citations`, `answer_logs`, `expert_questions`, `quiz_items`, `quiz_attempts`, `quiz_answers`, `review_tasks`, `ai_budgets`, `ai_budget_periods`, `ai_usage_ledger`.
+**Global (4):** `ai_global`, `ai_plan_defaults`, `audit_detail_keys`, `tenant_usage_counters`.
 
 29 new tables; with Phase 1's 33 the database has **62**. The row-level-security test asserts the exact list of tenant tables, so a table added without the policy fails CI.
 
@@ -333,12 +311,12 @@ Phase 1's export gains: `consents`, `sources` (no blobs), `chunks` (redacted tex
 
 | # | Contents |
 |---|---|
-| 8 | `legacyai_ai` grants scaffold, `audit_write()`, `audit_detail_keys`, `ai_service` actor kind |
+| 8 | `audit_write()`, `audit_detail_keys`; the API switched to the function |
 | 9 | consent, settings, allow-list |
-| 10 | capture tables, consent triggers, pgvector `halfvec` columns |
-| 11 | knowledge, citations, logs, expert questions, state-machine triggers |
+| 10 | capture tables, consent triggers, `halfvec` columns, `relabel()`, usage-counter trigger |
+| 11 | knowledge, citations, logs, expert questions, state-machine triggers, `erase_version()` |
 | 12 | readiness test tables, review queue |
-| 13 | AI cost tables and seeds |
-| 14 | new permissions and matrix rows (`03`) |
+| 13 | AI cost tables and seeds; plan `free` added to `plan_limits` |
+| 14 | new permissions and matrix rows (`03`). **The primary key of `role_permissions` changes** from `(role_key, permission_key)` to `(role_key, permission_key, grant_source)`: an Expert needs both an `own` base row and a `tenant` pilot row for `knowledge:read`, which the Phase 1 key cannot hold. The Phase 1 matrix tests are re-run unchanged. |
 
-Each has a tested rollback. The `legacyai_ai` role itself is created by `db/roles/create-roles.sql` (as the other three are), not by a migration.
+Each has a tested rollback. The `legacyai_ai` role and the `vector` extension are created by the roles/setup script, not by a migration.

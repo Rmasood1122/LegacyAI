@@ -138,7 +138,7 @@ Actions are pinned to full commit hashes, not tags, so a moved tag cannot change
 ## 8. Assumptions still open
 
 1. Neon Free permits commercial use (third-party reports only).
-2. Neon Free storage is 0.5 GB, not 1 GB (we plan for the smaller number).
+2. Neon Free storage: planned as 0.5 GB. Neon's own plans and pricing pages said **1 GB per project** when re-read on 2026-10-03 (§9.5); the design keeps budgeting for 0.5 GB.
 3. Whether a role created by SQL on Neon can be given `BYPASSRLS` (needed for the dedicated backup role). If not, backups use the Neon console role; `db/roles/create-roles.sql` stops loudly rather than create a backup role that silently skips rows.
 4. NestJS has no published LTS policy (absence of evidence, not proof).
 5. The exact `age` and `postgresql18-client` package versions inside Alpine 3.24 (printed at image build time; not pinned).
@@ -147,7 +147,7 @@ Actions are pinned to full commit hashes, not tags, so a moved tag cannot change
 
 ## 9. Phase 2 candidates (design stage — nothing below is installed yet)
 
-Checked on **2026-10-03**. First check: a research pass that fetched each page listed. Second check (the "re-check once"): versions, dates and licences of every Python and npm package re-read directly from the PyPI / npm JSON APIs, and the pgvector tags from GitHub — all matched. Prices, model facts and cloud facts were read once from the providers' own pages; they are re-read at Gate 2 before any key is created. Anything marked **UNVERIFIED** was not confirmed.
+Checked on **2026-10-03**. First check: a research pass that fetched each page listed. Second check (the "re-check once"): versions, dates and licences of every Python and npm package re-read directly from the PyPI / npm JSON APIs, and the pgvector tags from GitHub — all matched. **Prices, model facts and cloud facts were read once only**, from the providers' own pages; they are re-read at Gate 2 before any key is created. OpenAI and Gemini developer pages were read through a page summariser rather than as raw text. Anything marked **UNVERIFIED** was not confirmed.
 
 Maturity rule (D2): a new major version must be at least 60 days old. 60 days before today = 2026-08-04.
 
@@ -202,7 +202,8 @@ Evidence: https://pypi.org/pypi/anthropic/json · https://pypi.org/pypi/openai/j
 | claude-sonnet-5-5 | $2 / $10 | 2026-09-28 (too new) | https://platform.claude.com/docs/en/models/sonnet-5-5/overview |
 | gpt-5.6-luna | $0.20 / $1.20 | 2026-07-09 | https://developers.openai.com/api/docs/models/gpt-5.6-luna (read through a summariser — re-read raw at Gate 2) |
 | gpt-6-luna | $0.10 / $0.50 | 2026-09-22 (too new) | https://developers.openai.com/api/docs/models/gpt-6-luna |
-| gemini-3.1-flash-lite | $0.25 / $1.50 | 2026-05-07 | https://ai.google.dev/gemini-api/docs/pricing |
+| gemini-3.1-flash-lite | $0.25 / $1.50 | 2026-05-07 (shutdown announced 2027-05-07) | https://ai.google.dev/gemini-api/docs/pricing · https://ai.google.dev/gemini-api/docs/deprecations |
+| gemini-3.5-flash-lite | $0.30 / $2.50 | 2026-07-21 | https://ai.google.dev/gemini-api/docs/pricing · https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite |
 | voyage-4-lite (embeddings) | $0.02 | — | https://docs.voyageai.com/docs/pricing |
 | text-embedding-3-small | $0.02 | — | https://developers.openai.com/api/docs/pricing |
 
@@ -225,7 +226,28 @@ Terms and limits: Anthropic — no training by default, deletion within 30 days,
 | pgvector 0.8.7 released 2026-10-01 (fixes an IVFFlat index-build overflow — we use no IVFFlat index); `halfvec` = 2 bytes per dimension + 8; filtering is applied after approximate index scans; exact search recommended for small filtered sets; hybrid search with reciprocal rank fusion | https://github.com/pgvector/pgvector (README, CHANGELOG) · https://github.com/pgvector/pgvector-python/blob/master/examples/hybrid_search/rrf.py |
 | PostgreSQL: on tables with row-level security an index is not used for an operator whose function is not LEAKPROOF | https://www.postgresql.org/docs/current/rules-privileges.html |
 
-### 9.6 Unverified / assumptions added by Phase 2
+### 9.6 Other facts quoted in the Phase 2 design (read once, 2026-10-03)
+
+| Fact as used in `docs/phase2` | Evidence |
+|---|---|
+| Claude Haiku 4.5: status active; retirement "not sooner than October 15, 2026"; Anthropic gives "at least 60 days' notice before model retirement" | https://platform.claude.com/docs/en/models/haiku-4-5/overview · https://platform.claude.com/docs/en/about-claude/model-deprecations |
+| Anthropic entry tier: 1,000 requests/min; prepaid credits; workspace spend limits cannot be set on the default workspace | https://platform.claude.com/docs/en/api/rate-limits · https://platform.claude.com/docs/en/manage-claude/workspaces · https://support.claude.com/en/articles/8977456-how-do-i-pay-for-my-claude-api-usage |
+| OpenAI Tier 1: 500 requests/min for the listed models; prepaid, minimum $5 (the billing page itself returned 403; taken from a search summary — **UNVERIFIED**) | https://developers.openai.com/api/docs/guides/rate-limits · https://help.openai.com/en/articles/8264644-setting-up-and-managing-prepaid-api-billing |
+| Gemini API: prepaid by default, minimum $5; project spend caps "Experimental" with about 10 minutes of overrun | https://ai.google.dev/gemini-api/docs/billing |
+| Structured outputs generally available on Claude Haiku 4.5 | https://platform.claude.com/docs/en/build-with-claude/structured-outputs |
+| Newer Claude models produce "approximately 30% more tokens for the same text"; Haiku 4.5 uses the older tokenizer; minimum cacheable prompt on Haiku 4.5 is 4,096 tokens | https://platform.claude.com/docs/en/about-claude/pricing · https://platform.claude.com/docs/en/build-with-claude/prompt-caching |
+| Voyage: first 200 M tokens free per account | https://docs.voyageai.com/docs/pricing |
+| bge-small-en-v1.5: MTEB average 62.17, retrieval 51.68; 512-token input | https://huggingface.co/BAAI/bge-small-en-v1.5 |
+| Quality by vector size, published by two models: Gemini embedding 768 → 67.99, 512 → 67.55, 256 → 66.19; nomic-embed-text-v1.5 768 → 62.28, 512 → 61.96, 256 → 61.04 (their own benchmarks; not comparable with each other or with our model) | https://ai.google.dev/gemini-api/docs/embeddings · https://huggingface.co/nomic-ai/nomic-embed-text-v1.5 |
+| Exact (sequential) vector search "performed reasonably well for tables with 10k rows (~36ms)" on 960-dimension vectors with 4 CU | https://neon.com/docs/ai/ai-vector-search-optimization |
+| Direct VPC egress: "connection establishment delays of a minute or more on instance startup" | https://docs.cloud.google.com/run/docs/configuring/vpc-direct-vpc |
+| Neon: the Free plan "should be avoided for production workloads where uninterrupted availability matters" | https://neon.com/docs/get-started/production-checklist |
+| Cloud Run request-based price beyond the free tier: $0.000024 per vCPU-second, $0.0000025 per GiB-second | https://cloud.google.com/run/pricing |
+| e2-micro on-demand $0.008376428/hour (region shown not confirmed as us-central1) — basis of the "~$12/month" connector figure | https://cloud.google.com/products/compute/pricing/general-purpose |
+
+Not needed after all: a multipart upload library for the API — uploads are sent as the raw request body (`docs/phase2/05`).
+
+### 9.7 Unverified / assumptions added by Phase 2
 
 1. Whether a request rejected by Cloud Run's IAM check can start an instance (only "not billed" is documented).
 2. Memory needed by Presidio + spaCy + the embedding model together (planned 1 GiB; measured in CI before Gate 2).
@@ -236,3 +258,6 @@ Terms and limits: Anthropic — no training by default, deletion within 30 days,
 7. OpenAI and Gemini figures were read through a page summariser, not raw text.
 8. Whether anthropic 0.x / openai 2.x still receive fixes.
 9. Whether Cloud Run keeps giving CPU to a request whose caller has disconnected (the design does not depend on it).
+10. Whether a 50-page text PDF parses, redacts and chunks inside one upload request (measured in CI).
+11. Whether Neon's console role can create the `vector` extension and the `legacyai_ai` role as the setup script expects.
+12. The price of backup storage beyond the free 5 GB (not re-read).
