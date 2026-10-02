@@ -144,3 +144,95 @@ Actions are pinned to full commit hashes, not tags, so a moved tag cannot change
 5. The exact `age` and `postgresql18-client` package versions inside Alpine 3.24 (printed at image build time; not pinned).
 6. Node 24 / Python 3.12 end-of-life dates are from third-party trackers.
 7. Docker base images are pinned by tag, not by digest.
+
+## 9. Phase 2 candidates (design stage — nothing below is installed yet)
+
+Checked on **2026-10-03**. First check: a research pass that fetched each page listed. Second check (the "re-check once"): versions, dates and licences of every Python and npm package re-read directly from the PyPI / npm JSON APIs, and the pgvector tags from GitHub — all matched. Prices, model facts and cloud facts were read once from the providers' own pages; they are re-read at Gate 2 before any key is created. Anything marked **UNVERIFIED** was not confirmed.
+
+Maturity rule (D2): a new major version must be at least 60 days old. 60 days before today = 2026-08-04.
+
+### 9.1 Python libraries (planned pins)
+
+| Purpose | Package and version | Released | Licence | Evidence | Notes |
+|---|---|---|---|---|---|
+| PDF text extraction | pypdf 6.19.0 | 2026-09-16 (6.x since 2025-08-11) | BSD-3-Clause | https://pypi.org/pypi/pypdf/json · limits: https://raw.githubusercontent.com/py-pdf/pypdf/main/pypdf/_configuration.py · advisories: https://api.osv.dev (PyPI/pypdf) | ~50 denial-of-service advisories in 12 months, all fixed by 6.19.0. Runs in a child process with a timeout. |
+| File type sniffing | puremagic 2.2.0 | 2026-04-08 (2.x since 2026-02-20) | MIT | https://pypi.org/pypi/puremagic/json | no system library; needs Python ≥ 3.12 |
+| PII detection | presidio-analyzer 2.2.364 | 2026-07-22 | MIT | https://pypi.org/pypi/presidio-analyzer/json · entities: https://raw.githubusercontent.com/microsoft/presidio/main/docs/supported_entities.md | no street-address recognizer; memory footprint **UNVERIFIED** |
+| PII replacement | presidio-anonymizer 2.2.364 | 2026-07-22 | MIT | https://pypi.org/pypi/presidio-anonymizer/json | requires cryptography >=48.0.1,<49 |
+| Language engine | spacy 3.8.16 | 2026-08-24 | MIT | https://pypi.org/pypi/spacy/json | |
+| Language model | en_core_web_sm 3.8.0 (12.8 MB) | — | MIT | https://github.com/explosion/spacy-models/releases (compatibility.json) | the default large model is 400.7 MB — not used |
+| PostgreSQL driver | psycopg 3.3.6 | 2026-09-18 | **LGPL-3.0-only** | https://pypi.org/pypi/psycopg/json | used unmodified |
+| Connection pool | psycopg-pool 3.3.3 | 2026-09-22 | LGPL-3.0-only | https://pypi.org/pypi/psycopg-pool/json | |
+| Vector type support | pgvector (Python) 0.5.0 | 2026-07-06 | MIT | https://pypi.org/pypi/pgvector/json | |
+| Service tokens | PyJWT 2.15.1 | 2026-09-28 | MIT | https://pypi.org/pypi/PyJWT/json · https://api.osv.dev/v1/vulns/GHSA-gvp8-978c-rx2q | advisory batch 2026-09-29/30 fixed in 2.14.0–2.15.0; none listed against 2.15.1 |
+| Local embeddings | fastembed 0.8.1 | 2026-09-22 | Apache-2.0 | https://pypi.org/pypi/fastembed/json · https://github.com/qdrant/fastembed | |
+| Embedding runtime | onnxruntime 1.30.0 | 2026-09-10 | MIT | https://pypi.org/pypi/onnxruntime/json | |
+| Embedding model | BAAI/bge-small-en-v1.5 (384 dimensions, 0.067 GB) | — | MIT | https://huggingface.co/BAAI/bge-small-en-v1.5 · https://qdrant.github.io/fastembed/examples/Supported_Models/ | English; RAM need **UNVERIFIED** (no first-party figure) |
+| Validation | pydantic 2.13.5 | 2026-08-28 | MIT | https://pypi.org/pypi/pydantic/json | |
+| Settings | pydantic-settings 2.15.0 | 2026-08-07 | MIT | https://pypi.org/pypi/pydantic-settings/json | CVE-2026-58203 fixed in 2.14.2 |
+| Web framework (already used) | fastapi 0.142.2 · uvicorn 0.54.0 · starlette 1.7.0 | 2026-09-30 · 2026-09-25 · 2026-09-23 | MIT · BSD · BSD | PyPI JSON | starlette to be pinned explicitly (6 advisories fixed up to 1.3.1) |
+| Lint | ruff 0.16.10 | 2026-10-01 | MIT | https://pypi.org/pypi/ruff/json | |
+| Types | mypy 2.4.0 | 2026-10-01 (2.x since 2026-05-06) | MIT | https://pypi.org/pypi/mypy/json | |
+| Tests | pytest 9.1.1 · pytest-asyncio 1.4.0 | 2026-06-19 · 2026-05-26 | MIT · Apache-2.0 | PyPI JSON | |
+| Audit | pip-audit 2.10.1 | 2026-06-10 | Apache-2.0 | https://pypi.org/pypi/pip-audit/json | already used |
+
+Rejected: pdfminer.six / pdfplumber (code-execution advisory CVE-2025-64512, no documented guards); PyMuPDF (AGPL); python-magic (needs system libmagic, no release since 2022); scrubadub (unmaintained since 2023); tiktoken (downloads files at run time, vendor-specific); procrastinate / pgqueuer (assume an always-running worker); LangChain / LlamaIndex (not needed); voyageai SDK (pulls langchain-text-splitters).
+
+### 9.2 TypeScript
+
+| Purpose | Package and version | Released | Licence | Evidence |
+|---|---|---|---|---|
+| Service tokens | jose 6.2.12 | 2026-09-05 (6.x since 2025-02-22) | MIT | https://registry.npmjs.org/jose |
+
+### 9.3 AI provider SDKs (chosen at Gate 2)
+
+| SDK | Latest | Major started | 60-day rule today |
+|---|---|---|---|
+| anthropic 1.11.0 | 2026-09-30 | 1.0.0 on 2026-08-20 | **fails** until 2026-10-19; previous line 0.125.0 |
+| openai 3.24.0 | 2026-10-02 | 3.0.0 on 2026-08-12 | **fails** until 2026-10-11; previous line 2.54.0 |
+
+Evidence: https://pypi.org/pypi/anthropic/json · https://pypi.org/pypi/openai/json
+
+### 9.4 Models and prices (read 2026-10-03; re-read at Gate 2)
+
+| Model | Price per million tokens (in / out) | Released | Evidence |
+|---|---|---|---|
+| claude-haiku-4-5-20251001 | $1 / $5 | 2025-10-15 | https://platform.claude.com/docs/en/models/haiku-4-5/overview · https://platform.claude.com/docs/en/about-claude/pricing |
+| claude-sonnet-5 | $2 / $10 | 2026-06-30 | https://platform.claude.com/docs/en/models/sonnet-5/overview |
+| claude-sonnet-5-5 | $2 / $10 | 2026-09-28 (too new) | https://platform.claude.com/docs/en/models/sonnet-5-5/overview |
+| gpt-5.6-luna | $0.20 / $1.20 | 2026-07-09 | https://developers.openai.com/api/docs/models/gpt-5.6-luna (read through a summariser — re-read raw at Gate 2) |
+| gpt-6-luna | $0.10 / $0.50 | 2026-09-22 (too new) | https://developers.openai.com/api/docs/models/gpt-6-luna |
+| gemini-3.1-flash-lite | $0.25 / $1.50 | 2026-05-07 | https://ai.google.dev/gemini-api/docs/pricing |
+| voyage-4-lite (embeddings) | $0.02 | — | https://docs.voyageai.com/docs/pricing |
+| text-embedding-3-small | $0.02 | — | https://developers.openai.com/api/docs/pricing |
+
+Terms and limits: Anthropic — no training by default, deletion within 30 days, workspace hard spend limit (https://privacy.claude.com/en/articles/7996868 · https://platform.claude.com/docs/en/manage-claude/workspaces · https://platform.claude.com/docs/en/api/rate-limits). OpenAI — no training unless opted in, 30-day abuse logs, hard spend limits since 2026-07-22 (https://developers.openai.com/api/docs/guides/your-data · https://developers.openai.com/api/docs/guides/spend-limits). Gemini API — paid tier not used for training, **free tier is**, 55-day abuse logs (https://ai.google.dev/gemini-api/terms · https://ai.google.dev/gemini-api/docs/usage-policies). Voyage — stores and may train unless opted out (https://docs.voyageai.com/docs/faq). Anthropic offers no embedding model (https://platform.claude.com/docs/en/build-with-claude/embeddings).
+
+### 9.5 Cloud and database facts (read 2026-10-03)
+
+| Fact | Evidence |
+|---|---|
+| Cloud Run: requests denied by IAM are not billed; same-region service-to-service traffic is free; free tier 180,000 vCPU-s, 360,000 GiB-s, 2 M requests per month (request-based billing); start-up time is billed | https://cloud.google.com/run/pricing · https://docs.cloud.google.com/run/docs/configuring/billing-settings |
+| Cloud Run service-to-service: ID token, audience, `X-Serverless-Authorization` | https://docs.cloud.google.com/run/docs/authenticating/service-to-service |
+| "Internal" ingress needs VPC routing; Direct VPC egress has no standing charge but needs Cloud NAT (all traffic) or a Cloud DNS private zone (~$0.20/month, no free tier) for our case | https://docs.cloud.google.com/run/docs/securing/private-networking · https://docs.cloud.google.com/run/docs/configuring/vpc-direct-vpc · https://cloud.google.com/nat/pricing · https://cloud.google.com/dns/pricing |
+| Serverless VPC connector: minimum 2 instances, billed as VMs (~$12/month) | https://docs.cloud.google.com/run/docs/configuring/vpc-connectors · https://cloud.google.com/vpc/pricing |
+| Minimum memory 512 MiB for second-generation execution | https://docs.cloud.google.com/run/docs/configuring/services/memory-limits |
+| Secret Manager: 6 active versions free, $0.06 per version-month beyond | https://cloud.google.com/secret-manager/pricing |
+| Artifact Registry: 0.5 GiB free, ~$0.10 per GiB-month beyond | https://cloud.google.com/artifact-registry/pricing |
+| Neon Free: **1 GB per project** (was assumed 0.5 GB), 100 CU-hours per project per month, scale-to-zero after 5 minutes, 6-hour restore window | https://neon.com/docs/introduction/plans · https://neon.com/pricing |
+| Neon Launch: usage-based, no minimum, $0.106 per CU-hour, $0.35 per GB-month, "typical spend $15/mo" | https://neon.com/pricing |
+| Neon ships pgvector 0.8.6 on PostgreSQL 18 | https://neon.com/docs/extensions/pg-extensions |
+| pgvector 0.8.7 released 2026-10-01 (fixes an IVFFlat index-build overflow — we use no IVFFlat index); `halfvec` = 2 bytes per dimension + 8; filtering is applied after approximate index scans; exact search recommended for small filtered sets; hybrid search with reciprocal rank fusion | https://github.com/pgvector/pgvector (README, CHANGELOG) · https://github.com/pgvector/pgvector-python/blob/master/examples/hybrid_search/rrf.py |
+| PostgreSQL: on tables with row-level security an index is not used for an operator whose function is not LEAKPROOF | https://www.postgresql.org/docs/current/rules-privileges.html |
+
+### 9.6 Unverified / assumptions added by Phase 2
+
+1. Whether a request rejected by Cloud Run's IAM check can start an instance (only "not billed" is documented).
+2. Memory needed by Presidio + spaCy + the embedding model together (planned 1 GiB; measured in CI before Gate 2).
+3. Whether PostgreSQL uses the keyword (GIN) index under row-level security (a test reads the plan).
+4. Exact-search latency at 5,000 chunks per company (measured in CI).
+5. Bytes per chunk (estimate 2.7 KB; measured in CI).
+6. Whether Neon's Free plan permits commercial use (still no explicit statement either way).
+7. OpenAI and Gemini figures were read through a page summariser, not raw text.
+8. Whether anthropic 0.x / openai 2.x still receive fixes.
+9. Whether Cloud Run keeps giving CPU to a request whose caller has disconnected (the design does not depend on it).
