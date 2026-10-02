@@ -10,7 +10,7 @@ import type { RequestContext, ResourceRef, RoleKey, Subject } from '../../../sha
 import {
   countAuditRows, createTenant, decodeCursor, encodeCursor, getPlan, getSettings, getTenant, listTenants, toApiTenant, updateSettings,
   writeAudit,
-  type Database, type RouteDef, type Tx,
+  type Database, type Notifier, type RouteDef, type Tx,
 } from '../../platform/index.ts';
 import { sessionBody, type AuthService } from './auth.ts';
 import type { Authorizer } from './authz.ts';
@@ -18,6 +18,7 @@ import {
   CARD_COLUMNS, getCard, maxRank, otherActiveOwners, personDepartment, toApiCard, withSecrets,
   type CardRow, type CardService, type RoleInput,
 } from './cards.ts';
+import { normalizeCardNumber } from './card-number.ts';
 import type { ResourceDescriptor } from './policy.ts';
 import { loadRoles, revokeSession, revokeSessionsForCard, rotateSession, subjectForCard } from './sessions.ts';
 
@@ -26,6 +27,7 @@ export interface IdentityRouteDeps {
   auth: AuthService;
   cards: CardService;
   authorizer: Authorizer;
+  notifier: Notifier;
 }
 
 const CARD_DESCRIPTOR: ResourceDescriptor = {
@@ -161,7 +163,17 @@ async function roleAssignments(tx: Tx, card: CardRow): Promise<Array<Record<stri
 }
 
 export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
-  const { db, auth, cards, authorizer } = deps;
+  const { db, auth, cards, authorizer, notifier } = deps;
+
+  /** The thing a platform operator acts on when working on a customer tenant: that tenant, named by id. */
+  const targetTenant = async ({ subject, params }: { subject: Subject; params: { tenant_id: string } }): Promise<ResourceRef> => ({
+    type: 'tenant', id: params.tenant_id, tenant_id: subject.tenant_id,
+  });
+  /** Loads a customer tenant inside withinTenant(); the operator tenant itself is never a target. */
+  const mustGetCustomerTenant = async (tx: Tx, tenantId: string): Promise<void> => {
+    const tenant = await getTenant(tx, tenantId);
+    if (!tenant || tenant.is_platform) throw problems.notFound();
+  };
 
   const roleChangeAudit = async (tx: Tx, subject: Subject, card: CardRow, ctx: { requestId: string; ip: string }, roleKey: string, removed: boolean): Promise<void> => {
     await writeAudit(tx, {
@@ -268,10 +280,22 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
       operationId: 'issueCard',
       kind: 'session',
       policy: {
-        resource: async ({ tx, subject, body }) => ({
-          type: 'card', tenant_id: subject.tenant_id, collection: true,
-          role_rank: rankOf(await roleRanks(tx), (body.roles as RoleInput[]).map((r) => r.role_key)),
-        }),
+        resource: async ({ tx, subject, body }) => {
+          // "Revoke a peer's card, then issue a new one to the same person" must not be a way into
+          // that person's identity. So the person counts with the highest rank any of their cards
+          // ever held, and the actor must rank strictly above it.
+          const held = await tx.query<{ rank: number | null }>(
+            `SELECT max(r.rank) AS rank FROM cards c
+               JOIN card_roles cr ON cr.tenant_id = c.tenant_id AND cr.card_id = c.id
+               JOIN roles r ON r.role_key = cr.role_key
+              WHERE c.tenant_id = $1 AND c.person_id = $2`,
+            [subject.tenant_id, body.person_id]);
+          return {
+            type: 'card', tenant_id: subject.tenant_id, collection: true,
+            role_rank: rankOf(await roleRanks(tx), (body.roles as RoleInput[]).map((r) => r.role_key)),
+            target_rank: held.rows[0]?.rank ?? 0,
+          };
+        },
       },
       handler: async ({ tx, subject, body, ctx }) => {
         const settings = await getSettings(tx, subject.tenant_id);
@@ -702,27 +726,28 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
       policy: { resource: collection('tenant') },
       handler: async ({ tx, subject, body, ctx }) => {
         const tenantId = randomUUID();
-        // The new tenant's rows are written in ITS OWN transaction, under its own tenant id,
-        // so row-level security checks every insert.
-        const created = await db.withTenantTx(tenantId, async (ntx) => {
-          const tenant = await createTenant(ntx, { id: tenantId, name: body.name, slug: body.slug });
-          const settings = await getSettings(ntx, tenantId);
-          const person = await ntx.query<PersonRow>(
+        // ONE transaction for everything: the new tenant's rows, the operator's audit row and the
+        // idempotency record commit together or not at all. The transaction is switched to the new
+        // tenant's id while its rows are written, so row-level security checks every insert.
+        const created = await db.withinTenant(tx, tenantId, async () => {
+          const tenant = await createTenant(tx, { id: tenantId, name: body.name, slug: body.slug });
+          const settings = await getSettings(tx, tenantId);
+          const person = await tx.query<PersonRow>(
             `INSERT INTO people (tenant_id, display_name, email) VALUES ($1, $2, $3) RETURNING ${PERSON_COLUMNS}`,
             [tenantId, body.owner_display_name, typeof body.owner_email === 'string' ? body.owner_email.toLowerCase() : null]);
           const owner = person.rows[0] as PersonRow;
-          const company = await cards.issue(ntx, { tenantId, kind: 'company', personId: null, roles: [], actorCardId: null }, settings, ctx);
+          const company = await cards.issue(tx, { tenantId, kind: 'company', personId: null, roles: [], actorCardId: null }, settings, ctx);
           const ownerCard = await cards.issue(
-            ntx, { tenantId, kind: 'person', personId: owner.id, roles: [{ role_key: 'company_owner' }], actorCardId: null }, settings, ctx);
-          await writeAudit(ntx, {
+            tx, { tenantId, kind: 'person', personId: owner.id, roles: [{ role_key: 'company_owner' }], actorCardId: null }, settings, ctx);
+          await writeAudit(tx, {
             tenantId, actorKind: 'system', action: 'tenant:create', resourceType: 'tenant', resourceId: tenantId,
             decision: 'event', reasonCode: 'TENANT_CREATED', requestId: ctx.requestId, ip: ctx.ip,
           });
           return {
             tenant: toApiTenant(tenant),
             owner_person: toApiPerson(owner),
-            company_card: withSecrets(await toApiCard(ntx, company.card, ctx.now), company),
-            owner_card: withSecrets(await toApiCard(ntx, ownerCard.card, ctx.now), ownerCard),
+            company_card: withSecrets(await toApiCard(tx, company.card, ctx.now), company),
+            owner_card: withSecrets(await toApiCard(tx, ownerCard.card, ctx.now), ownerCard),
           };
         });
         await writeAudit(tx, {
@@ -730,7 +755,87 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
           resourceType: 'tenant', resourceId: tenantId, decision: 'event', reasonCode: 'TENANT_CREATED',
           requestId: ctx.requestId, ip: ctx.ip, details: { target_tenant_id: tenantId },
         });
+        await notifier.notify({ type: 'tenant_created', tenantId });
         return { status: 201, body: created };
+      },
+    },
+    {
+      // Company-card renewal is the subscription clock. Until billing owns it (Phase 4) only the
+      // platform operator can move it; nobody inside the tenant can.
+      operationId: 'renewCompanyCard',
+      kind: 'session',
+      policy: { resource: targetTenant },
+      handler: async ({ tx, subject, params, body, ctx }) => {
+        const tenantId: string = params.tenant_id;
+        const renewed = await db.withinTenant(tx, tenantId, async () => {
+          await mustGetCustomerTenant(tx, tenantId);
+          const found = await tx.query<CardRow>(
+            `SELECT ${CARD_COLUMNS} FROM cards WHERE tenant_id = $1 AND kind = 'company' AND state NOT IN ('revoked', 'replaced') FOR UPDATE`,
+            [tenantId]);
+          const card = found.rows[0];
+          if (!card) throw problems.notFound();
+          const settings = await getSettings(tx, tenantId);
+          const result = await cards.renew(tx, card, body?.validity_days, { operatorCardId: subject.card_id }, settings, ctx);
+          return withSecrets(await toApiCard(tx, result.card, ctx.now), result);
+        });
+        await writeAudit(tx, {
+          tenantId: subject.tenant_id, actorCardId: subject.card_id, actorKind: 'card', action: 'tenant:renew_company_card',
+          resourceType: 'tenant', resourceId: tenantId, decision: 'event', reasonCode: 'COMPANY_CARD_RENEWED',
+          requestId: ctx.requestId, ip: ctx.ip, details: { target_tenant_id: tenantId },
+        });
+        await notifier.notify({ type: 'company_card_renewed', tenantId });
+        return { body: renewed };
+      },
+    },
+    {
+      // Recovery of a Company Owner who cannot sign in. See docs/runbooks/owner-recovery.md: the
+      // operator must first verify the person's identity out of band and quote that record here.
+      operationId: 'recoverOwnerCard',
+      kind: 'session',
+      policy: { resource: targetTenant },
+      handler: async ({ tx, subject, params, body, ctx }) => {
+        const tenantId: string = params.tenant_id;
+        const reference: string = body.verification_reference;
+        // The audit log refuses anything that looks like a card number; say so clearly instead of failing later.
+        if (/\d{16}/.test(reference)) {
+          throw problems.unprocessable('The reference must be a case id', [{ path: 'body/verification_reference', message: 'must not contain 16 digits in a row' }]);
+        }
+        const cardNumber = body.card_number === undefined ? null : normalizeCardNumber(body.card_number);
+        if (body.card_number !== undefined && cardNumber === null) throw problems.notFound();
+        const recovered = await db.withinTenant(tx, tenantId, async () => {
+          await mustGetCustomerTenant(tx, tenantId);
+          await lockTenantRoles(tx, tenantId);
+          // The Owner's card is named by its id or - what the Owner can read off their own card - its number.
+          const found = cardNumber === null
+            ? await getCard(tx, body.card_id, true)
+            : (await tx.query<CardRow>(`SELECT ${CARD_COLUMNS} FROM cards WHERE tenant_id = $1 AND card_number = $2 FOR UPDATE`, [tenantId, cardNumber])).rows[0] ?? null;
+          const card = found;
+          if (!card) throw problems.notFound();
+          const roles = await loadRoles(tx, tenantId, card.id);
+          if (card.kind !== 'person' || !roles.some((r) => r.role_key === 'company_owner')) {
+            // Everyone below an Owner is recovered inside the tenant, by an Owner or Admin.
+            throw problems.conflict('not-an-owner-card', 'Only a Company Owner card can be recovered by the platform operator');
+          }
+          const settings = await getSettings(tx, tenantId);
+          const result = await cards.recoverOwner(tx, card, { operatorCardId: subject.card_id }, reference, settings, ctx);
+          // Every OTHER Owner of the company is told that an Owner card was recovered.
+          const others = await tx.query<{ id: string }>(
+            `SELECT c.id FROM cards c JOIN card_roles cr ON cr.tenant_id = c.tenant_id AND cr.card_id = c.id
+              WHERE c.tenant_id = $1 AND c.id <> $2 AND c.kind = 'person' AND c.state IN ('active', 'expired')
+                AND cr.role_key = 'company_owner' ORDER BY c.id`,
+            [tenantId, card.id]);
+          for (const o of others.rows) {
+            await notifier.notify({ type: 'owner_recovered', tenantId, cardId: card.id, recipientCardId: o.id });
+          }
+          return { cardId: card.id, body: { ...withSecrets(await toApiCard(tx, result.card, ctx.now), result), notified_owner_count: others.rows.length } };
+        });
+        await writeAudit(tx, {
+          tenantId: subject.tenant_id, actorCardId: subject.card_id, actorKind: 'card', action: 'tenant:recover_owner',
+          resourceType: 'tenant', resourceId: tenantId, decision: 'event', reasonCode: 'OWNER_RECOVERED',
+          requestId: ctx.requestId, ip: ctx.ip,
+          details: { target_tenant_id: tenantId, target_card_id: recovered.cardId, verification_ref: reference },
+        });
+        return { status: 201, body: recovered.body };
       },
     },
     {

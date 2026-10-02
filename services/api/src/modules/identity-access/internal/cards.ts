@@ -46,7 +46,17 @@ export interface IssuedSecrets {
 export type CardEventType =
   | 'issued' | 'activated' | 'login_success' | 'login_failed' | 'sc_locked' | 'unlocked' | 'suspended' | 'reinstated'
   | 'revoked' | 'expired' | 'renewed' | 'replaced' | 'role_assigned' | 'role_removed' | 'restriction_denied'
-  | 'restrictions_changed' | 'credential_added' | 'credential_removed' | 'enrollment_token_issued';
+  | 'restrictions_changed' | 'credential_added' | 'credential_removed' | 'enrollment_token_issued' | 'owner_recovered';
+
+/**
+ * Who is doing something to a card: a card of the same tenant, nobody (the system), or a
+ * LegacyAI platform operator - whose card lives in the operator tenant, so it can be named in
+ * the audit log (kind 'operator') but never in this tenant's own tables.
+ */
+export type Actor = string | null | { operatorCardId: string };
+
+/** The actor as a card of THIS tenant, or null. Safe to store in columns that reference cards. */
+export const actorCard = (actor: Actor): string | null => (typeof actor === 'string' ? actor : null);
 
 const ENROLLMENT_TOKEN_HOURS = 72;
 
@@ -150,18 +160,21 @@ export class CardService {
   }
 
   async #audit(
-    tx: Tx, card: Pick<CardRow, 'id' | 'tenant_id'>, action: string, reasonCode: string, actorCardId: string | null,
+    tx: Tx, card: Pick<CardRow, 'id' | 'tenant_id'>, action: string, reasonCode: string, actor: Actor,
     ctx: RequestContext, details: Record<string, string | number | boolean | null> = {},
   ): Promise<void> {
+    const who = actor === null ? { actorCardId: null, actorKind: 'system' as const }
+      : typeof actor === 'string' ? { actorCardId: actor, actorKind: 'card' as const }
+        : { actorCardId: actor.operatorCardId, actorKind: 'operator' as const };
     await writeAudit(tx, {
-      tenantId: card.tenant_id, actorCardId, actorKind: actorCardId === null ? 'system' : 'card', action,
+      tenantId: card.tenant_id, ...who, action,
       resourceType: 'card', resourceId: card.id, decision: 'event', reasonCode, requestId: ctx.requestId, ip: ctx.ip, details,
     });
   }
 
   /** Changes state through the state machine and records it. */
   async transition(
-    tx: Tx, card: CardRow, to: CardState, eventType: CardEventType, actorCardId: string | null, ctx: RequestContext,
+    tx: Tx, card: CardRow, to: CardState, eventType: CardEventType, actor: Actor, ctx: RequestContext,
     extra: { reasonColumn?: 'suspended_reason' | 'revoked_reason'; reason?: string } = {},
   ): Promise<CardRow> {
     assertTransition(card.state, to);
@@ -172,8 +185,8 @@ export class CardService {
     } else {
       await tx.query('UPDATE cards SET state = $2, updated_at = now() WHERE id = $1', [card.id, to]);
     }
-    await this.event(tx, card, eventType, actorCardId, ctx, { state_from: card.state, state_to: to });
-    await this.#audit(tx, card, `card:${eventType}`, 'CARD_STATE_CHANGED', actorCardId, ctx, { state_from: card.state, state_to: to });
+    await this.event(tx, card, eventType, actorCard(actor), ctx, { state_from: card.state, state_to: to });
+    await this.#audit(tx, card, `card:${eventType}`, 'CARD_STATE_CHANGED', actor, ctx, { state_from: card.state, state_to: to });
     return { ...card, state: to };
   }
 
@@ -307,10 +320,13 @@ export class CardService {
     return updated;
   }
 
-  async renew(tx: Tx, card: CardRow, validityDays: number | undefined, actorCardId: string | null, settings: TenantSettings, ctx: RequestContext): Promise<IssuedSecrets> {
+  /** A new validity period starting now. An expired card becomes active again. */
+  async #extendValidity(
+    tx: Tx, card: CardRow, validityDays: number | undefined, actor: Actor, settings: TenantSettings, ctx: RequestContext,
+  ): Promise<CardRow> {
     let current = await this.materializeExpiry(tx, card, ctx);
-    if (current.state === 'expired') current = await this.transition(tx, current, 'active', 'renewed', actorCardId, ctx);
-    else if (current.state === 'active') await this.event(tx, current, 'renewed', actorCardId, ctx);
+    if (current.state === 'expired') current = await this.transition(tx, current, 'active', 'renewed', actor, ctx);
+    else if (current.state === 'active') await this.event(tx, current, 'renewed', actorCard(actor), ctx);
     else throw problems.conflict('illegal-transition', `A card that is ${current.state} cannot be renewed`);
 
     const dates = computeDates(ctx.now, settings, validityDays);
@@ -319,15 +335,58 @@ export class CardService {
               last_renewed_at = $5, updated_at = now() WHERE id = $1 RETURNING ${CARD_COLUMNS}`,
       [card.id, dates.expires_at, dates.grace_until, dates.renewal_due, ctx.now],
     );
+    return rows[0] as CardRow;
+  }
+
+  async renew(tx: Tx, card: CardRow, validityDays: number | undefined, actor: Actor, settings: TenantSettings, ctx: RequestContext): Promise<IssuedSecrets> {
+    const renewed = await this.#extendValidity(tx, card, validityDays, actor, settings, ctx);
     // Renewal ALWAYS rotates the SC: the old code is dead from this moment.
-    const sc = await this.rotateSecret(tx, card, actorCardId, ctx.now);
+    const sc = await this.rotateSecret(tx, card, actorCard(actor), ctx.now);
     await tx.query(
       'UPDATE card_auth_state SET sc_failed_count = 0, locked_at = NULL, lock_reason = NULL WHERE tenant_id = $1 AND card_id = $2',
       [card.tenant_id, card.id]);
     await revokeSessionsForCard(tx, card.tenant_id, card.id, 'sc_rotated', ctx.now);
-    await this.#audit(tx, card, 'card:renew', 'CARD_RENEWED_SC_ROTATED', actorCardId, ctx);
+    await this.#audit(tx, card, 'card:renew', 'CARD_RENEWED_SC_ROTATED', actor, ctx);
     await this.#notifier.notify({ type: 'card_renewed', tenantId: card.tenant_id, cardId: card.id });
-    return { card: rows[0] as CardRow, sc };
+    return { card: renewed, sc };
+  }
+
+  /**
+   * Platform-operator recovery of a Company Owner who can no longer sign in (locked, lost
+   * device, expired). Nobody inside the tenant can do this for an Owner. What it does, all in
+   * the caller's transaction:
+   *   - every existing strong factor, session and unused enrollment token of the card is revoked;
+   *   - the SC is rotated (forced) and any lock or sign-in pause is cleared;
+   *   - an expired card gets a new validity period;
+   *   - a new one-time enrollment token is issued, so the Owner must enrol a NEW strong factor.
+   * The operator receives the new SC and the token to hand over out of band. Together they only
+   * let someone enrol a factor - which the audit log, the card history and the notifications to
+   * the other Owners make visible.
+   */
+  async recoverOwner(
+    tx: Tx, card: CardRow, actor: { operatorCardId: string } | null, verificationRef: string, settings: TenantSettings, ctx: RequestContext,
+  ): Promise<IssuedSecrets> {
+    let current = await this.materializeExpiry(tx, card, ctx);
+    if (current.kind !== 'person' || (current.state !== 'active' && current.state !== 'expired' && current.state !== 'issued')) {
+      throw problems.conflict('illegal-transition', `A card that is ${current.state} cannot be recovered`);
+    }
+    if (current.state === 'expired') current = await this.#extendValidity(tx, current, undefined, actor, settings, ctx);
+
+    await tx.query(`UPDATE credentials SET status = 'revoked' WHERE tenant_id = $1 AND card_id = $2`, [card.tenant_id, card.id]);
+    await tx.query('UPDATE enrollment_tokens SET used_at = $3 WHERE tenant_id = $1 AND card_id = $2 AND used_at IS NULL', [card.tenant_id, card.id, ctx.now]);
+    await revokeSessionsForCard(tx, card.tenant_id, card.id, 'credentials_reset', ctx.now);
+    const sc = await this.rotateSecret(tx, card, null, ctx.now);
+    await tx.query(
+      `UPDATE card_auth_state SET sc_failed_count = 0, locked_at = NULL, lock_reason = NULL, factor_failed_count = 0,
+              factor_window_start = NULL, factor_throttle_level = 0, factor_throttled_until = NULL
+        WHERE tenant_id = $1 AND card_id = $2`,
+      [card.tenant_id, card.id]);
+    const enrollment = await this.#newEnrollmentToken(tx, card, current.activated_at === null ? 'initial' : 'reset', null, ctx.now);
+
+    await this.event(tx, card, 'owner_recovered', null, ctx);
+    await this.#audit(tx, card, 'card:owner_recovery', 'OWNER_RECOVERED_BY_OPERATOR', actor, ctx, { verification_ref: verificationRef });
+    await this.#notifier.notify({ type: 'owner_recovered', tenantId: card.tenant_id, cardId: card.id });
+    return { card: current, sc, enrollmentToken: enrollment.token, enrollmentTokenExpiresAt: enrollment.expiresAt };
   }
 
   async unlock(tx: Tx, card: CardRow, actorCardId: string, ctx: RequestContext): Promise<IssuedSecrets> {

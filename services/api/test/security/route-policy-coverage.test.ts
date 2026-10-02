@@ -101,20 +101,20 @@ describe('the list of routes that skip the session check is short and pinned', (
     for (const r of routes.filter((x) => x.kind === 'public')) expect(r.publicReason!.length).toBeGreaterThan(20);
   });
 
-  it('every other route (38) is a session route with a permission that exists in the permission table', async () => {
+  it('every other route (40) is a session route with a permission that exists in the permission table', async () => {
     const su = await superuser();
     const known = new Set((await su.query('SELECT permission_key FROM permissions')).rows.map((r) => r.permission_key as string));
     await su.end();
     const session = t.app.http.registeredRoutes().filter((r) => r.kind === 'session');
-    expect(session).toHaveLength(38);
+    expect(session).toHaveLength(40);
     for (const r of session) expect(known.has(r.permission!), `${r.operationId} uses unknown permission ${r.permission}`).toBe(true);
   });
 
-  it('routes registered in the server == operations in openapi.yaml (45, no more, no fewer)', () => {
+  it('routes registered in the server == operations in openapi.yaml (47, no more, no fewer)', () => {
     const registered = t.app.http.registeredRoutes().map((r) => `${r.method} ${r.path}`).sort();
     const contract = [...t.app.http.contract.operations.values()].map((o) => `${o.method} ${o.path}`).sort();
     expect(registered).toEqual(contract);
-    expect(registered).toHaveLength(45);
+    expect(registered).toHaveLength(47);
     // and Fastify itself knows no route beyond those (HEAD/OPTIONS helpers aside)
     const printed = t.app.http.app.printRoutes({ commonPrefix: false });
     expect(printed).not.toMatch(/rogue/);
@@ -183,7 +183,7 @@ describe('the handler never runs unless the policy decision point said allow', (
 });
 
 describe('real app: a card with almost no permissions cannot get a 2xx from anything it is not granted', () => {
-  it('walks all 38 protected operations as a Successor', async () => {
+  it('walks all 40 protected operations as a Successor', async () => {
     const su = await superuser();
     const granted = new Set((await su.query(`SELECT permission_key FROM role_permissions WHERE role_key = 'successor'`)).rows.map((r) => r.permission_key as string));
     await su.end();
@@ -196,20 +196,21 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
       putCardRestrictions: { restrictions: [] }, assignCardRole: { role_key: 'expert' }, replaceCardRoles: { roles: [{ role_key: 'expert' }] },
       createPerson: { display_name: 'x' }, updatePerson: { display_name: 'x' }, createDepartment: { name: 'x' },
       createTenant: { name: 'x', slug: 'x-tenant', owner_display_name: 'x' }, updateTenantSettings: { grace_days: 1 }, verifyAuditChain: {},
+      renewCompanyCard: {}, recoverOwnerCard: { card_id: tenant.ownerCard.id, verification_reference: 'CASE-000001' },
     };
     let denied = 0;
     for (const op of t.app.http.contract.operations.values()) {
       if (op.isPublic || op.isService || granted.has(op.permission!)) continue;
       // Target a REAL resource in the same tenant (the Owner's card / the Successor's own person), so that
       // "not found" cannot be what stops the request.
-      const url = op.path.replace('{card_id}', tenant.ownerCard.id).replace('{person_id}', successor.personId)
+      const url = op.path.replace('{card_id}', tenant.ownerCard.id).replace('{person_id}', successor.personId).replace('{tenant_id}', tenant.tenantId)
         .replace('{role_key}', 'company_owner').replace('{export_id}', randomUUID()).replace('{credential_id}', randomUUID());
       const res = await successor.client.request(op.method, url, bodies[op.operationId], { idem: op.idempotent ? `walk-${randomUUID()}` : false });
       expect([403, 404], `${op.operationId} answered ${res.status}: ${res.raw}`).toContain(res.status);
       if (res.status === 404) expect(op.operationId).toBe('getExport'); // the only one whose target does not exist
       denied += 1;
     }
-    expect(denied).toBe(26); // 38 protected operations minus the 12 that the Successor's 11 permissions reach
+    expect(denied).toBe(28); // 40 protected operations minus the 12 that the Successor's 11 permissions reach
   });
 });
 

@@ -12,7 +12,7 @@ import { SecretCodeHasher } from './internal/secret-code.ts';
 import { resolveSession, tenantOfToken } from './internal/sessions.ts';
 
 export { DEFAULT_AUTH_LIMITS, type AuthLimits } from './internal/auth.ts';
-export { bootstrapOperator, type BootstrapResult } from './internal/bootstrap.ts';
+export { bootstrapOperator, recoverOperator, type BootstrapResult } from './internal/bootstrap.ts';
 export { Authorizer, loadMatrix } from './internal/authz.ts';
 export {
   dammCheckDigit, dammValid, formatCardNumber, generateCardNumber, isValidCardNumber, luhnValid, maskCardNumber, normalizeCardNumber,
@@ -77,7 +77,7 @@ export function createIdentityAccess(deps: IdentityAccessDeps): IdentityAccess {
   });
 
   return {
-    routes: identityRoutes({ db, auth, cards, authorizer }),
+    routes: identityRoutes({ db, auth, cards, authorizer, notifier: deps.notifier }),
     authPort: {
       tenantOfToken,
       resolveSession,

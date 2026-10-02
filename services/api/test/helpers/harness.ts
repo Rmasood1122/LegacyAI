@@ -263,8 +263,10 @@ let operator: { card: IssuedCard; passkey: VirtualPasskey } | null = null;
  * A LegacyAI operator card in the platform tenant. Each test file makes its own (test files
  * do not share memory), using the same card service the bootstrap CLI uses.
  */
-export async function platformOperator(t: TestApp): Promise<Client> {
-  if (operator === null) {
+export async function platformOperator(t: TestApp, opts: { fresh?: boolean } = {}): Promise<Client> {
+  // `fresh`: issue a NEW operator card at the current (test) time - needed after a test has moved
+  // the clock past the first operator card's 90-day validity.
+  if (operator === null || opts.fresh === true) {
     const ctx = { requestId: 'test-operator', ip: '127.0.0.1', userAgent: 'test', now: t.clock.now() };
     const issued = await t.app.db.withTenantTx(PLATFORM_TENANT_ID, async (tx) => {
       const person = await tx.query<{ id: string }>(
@@ -305,6 +307,12 @@ export async function createTenant(t: TestApp, label = 'acme'): Promise<TestTena
     companyCard: { id: res.body.company_card.card.id, number: res.body.company_card.card.card_number, sc: res.body.company_card.sc },
     ownerCard, ownerPasskey, owner: await login(t, ownerCard, { passkey: ownerPasskey }),
   };
+}
+
+/** The platform operator renews a tenant's company card (nobody inside the tenant can). */
+export async function renewCompanyCard(t: TestApp, tenantId: string, opts: { fresh?: boolean; body?: unknown } = {}): Promise<Res> {
+  const op = await platformOperator(t, { fresh: opts.fresh });
+  return op.post(`/v1/tenants/${tenantId}/company-card/renew`, opts.body ?? {});
 }
 
 export interface TestMember {

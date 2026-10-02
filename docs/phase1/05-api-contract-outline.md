@@ -62,7 +62,7 @@ There is deliberately **no** endpoint that accepts only a card number and SC and
 | `POST /v1/cards/{card_id}/reinstate` **(idem)** | Owner, Admin [`card:reinstate`] | — | 200: card |
 | `POST /v1/cards/{card_id}/revoke` **(idem)** | Owner, Admin [`card:revoke`] | `reason` | 200: card. Permanent. |
 | `POST /v1/cards/{card_id}/replace` **(idem)** | Owner, Admin [`card:replace`] | `reason` (`lost` \| `damaged` \| `compromised`), `reset_credentials` (default true when `compromised`) | 201: the **new** card with new `card_number`, new `sc` (once), and an `enrollment_token` if credentials were reset. Old card → `replaced`. |
-| `POST /v1/cards/{card_id}/renew` **(idem)** | Owner, Admin [`card:renew`] | optional `validity_days` (cannot exceed the tenant setting) | 200: card with new dates + **new `sc` shown once**. Old SC dead immediately; sessions revoked. |
+| `POST /v1/cards/{card_id}/renew` **(idem)** | Owner, Admin, for a card ranked below them; an Owner for their own card. Never the company card. [`card:renew`] | optional `validity_days` (cannot exceed the tenant setting) | 200: card with new dates + **new `sc` shown once**. Old SC dead immediately; sessions revoked. |
 | `POST /v1/cards/{card_id}/unlock` **(idem)** | Owner, Admin [`card:unlock`] | — | 200: card + new `sc` (once) |
 | `POST /v1/cards/{card_id}/enrollment-token` **(idem)** | Owner, Admin [`card:reset_credentials`] | `revoke_existing` (bool) | 201: `enrollment_token` (once), `expires_at` |
 | `GET /v1/cards/{card_id}/events` | Owner, Admin · own card [`card_events:read`] | filters: `event_type`, `from`, `to` | Page of usage-history events: what, when, and which device (credential label + device fingerprint) |
@@ -98,7 +98,9 @@ Guard rules: not on your own card; not a role ranked above your own; not a role 
 
 | Method & path | Required role [permission] | Request | Response |
 |---|---|---|---|
-| `POST /v1/tenants` **(idem)** | Platform operator only [`tenant:create`] | `name`, `slug`, first owner's `display_name` and optional `email` | 201: tenant + company card (`card_number`, `sc` once) + first Owner card (`card_number`, `sc`, `enrollment_token` once) |
+| `POST /v1/tenants` **(idem)** | Platform operator only [`tenant:create`] | `name`, `slug`, first owner's `display_name` and optional `email` | 201: tenant + company card (`card_number`, `sc` once) + first Owner card (`card_number`, `sc`, `enrollment_token` once). One database transaction since Phase 1.1: a failure leaves nothing behind. |
+| `POST /v1/tenants/{tenant_id}/company-card/renew` **(idem)** *(Phase 1.1)* | Platform operator only [`tenant:renew_company_card`] | optional `validity_days` | 200: the company card with new dates + new `sc` (once). Audited in both tenants. |
+| `POST /v1/tenants/{tenant_id}/owner-recovery` **(idem)** *(Phase 1.1)* | Platform operator only [`tenant:recover_owner`] | `card_id` **or** `card_number` (a Company Owner's card, exactly one of the two), `verification_reference` (case id of the out-of-band identity check; identifier characters only) | 201: card + new `sc` + `enrollment_token` (once) + `notified_owner_count`. Old factors, sessions and SC are dead. See `docs/runbooks/owner-recovery.md`. |
 | `GET /v1/tenants` | Platform operator only [`tenant:list`] | pagination | Page of tenants: `id`, `name`, `slug`, `status`, `created_at` — no customer data |
 | `GET /v1/tenants/current` | Owner, Admin [`tenant_settings:read`] | — | Tenant: `id`, `name`, `slug`, `status`, `plan_code`, `region` |
 | `GET /v1/tenants/current/settings` | Owner, Admin [`tenant_settings:read`] | — | All settings in `tenant_settings` |
@@ -135,4 +137,4 @@ Billing, payments, webhooks, analytics, QR/NFC, SSO/SCIM, knowledge capture, AI.
 
 ## Endpoint count
 
-45 operations: 2 health, 8 auth, 13 cards, 5 roles, 6 people/departments, 6 tenants, 2 audit, 2 export, 1 internal. The contract test (Step 5) asserts that the set of routes registered in the server equals the set of operations in `openapi.yaml` — no more, no fewer.
+47 operations (45 in Phase 1, 2 added in Phase 1.1): 2 health, 8 auth, 13 cards, 5 roles, 6 people/departments, 8 tenants, 2 audit, 2 export, 1 internal. The contract test (Step 5) asserts that the set of routes registered in the server equals the set of operations in `openapi.yaml` — no more, no fewer.

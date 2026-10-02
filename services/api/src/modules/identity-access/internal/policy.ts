@@ -64,14 +64,25 @@ const SELF_FORBIDDEN: ReadonlySet<string> = new Set([
   'card_restrictions:update', 'card_roles:assign', 'card_roles:remove', 'person:update',
 ]);
 /**
- * Actions that hand the actor a way INTO the target card (a new SC, a new enrollment token,
- * a new card). For these the actor must rank strictly ABOVE the target - an Admin cannot do
- * them to another Admin (or to itself) - unless the actor is a Company Owner.
+ * Actions that hand the actor a way INTO the target card - directly (a new SC, a new enrollment
+ * token, a new card) or in two steps (take the target's rank away first, or revoke the card and
+ * issue a new one to the same person). For these the actor must rank strictly ABOVE the target:
+ * an Admin cannot do them to another Admin, and an Owner cannot do them to another Owner.
+ * For card:issue the "target" is the person: the highest rank any of that person's cards ever held.
+ * Nobody inside a tenant outranks an Owner, so a locked-out Owner is recovered by the platform
+ * operator (docs/runbooks/owner-recovery.md). The single exception is a Company Owner renewing
+ * their OWN card: that gives them nothing they do not already have.
  */
-const TAKEOVER_CAPABLE: ReadonlySet<string> = new Set(['card:renew', 'card:unlock', 'card:reset_credentials', 'card:replace']);
-/** The company card is the tenant's identity and subscription clock. Only renewal (by an Owner) is possible. */
+const TAKEOVER_CAPABLE: ReadonlySet<string> = new Set([
+  'card:renew', 'card:unlock', 'card:reset_credentials', 'card:replace', 'card_roles:assign', 'card_roles:remove', 'card:issue',
+]);
+/**
+ * The company card is the tenant's identity and subscription clock. Nothing can be done to it
+ * from inside the tenant - not even renewal, which only the platform operator can do
+ * (permission tenant:renew_company_card) until billing takes it over.
+ */
 const COMPANY_CARD_FORBIDDEN: ReadonlySet<string> = new Set([
-  'card:suspend', 'card:reinstate', 'card:revoke', 'card:replace', 'card:unlock', 'card:reset_credentials',
+  'card:suspend', 'card:reinstate', 'card:revoke', 'card:replace', 'card:renew', 'card:unlock', 'card:reset_credentials',
   'card_restrictions:update', 'card_roles:assign', 'card_roles:remove',
 ]);
 /** Actions on a card that require the actor to rank at least as high as the target and the role involved. */
@@ -304,7 +315,14 @@ function decideUnsafe(subject: Subject, action: string, resource: ResourceRef, c
       if (rank === undefined) continue;
       if (typeof rank !== 'number' || !Number.isFinite(rank) || rank > ev.subjectRank) return deny('DENY_RANK');
     }
-    if (TAKEOVER_CAPABLE.has(action) && !ev.isOwner && (resource.target_rank as number) >= ev.subjectRank) return deny('DENY_RANK');
+    if (TAKEOVER_CAPABLE.has(action)) {
+      // The target's rank must be known here too (for card:issue: the person's rank history).
+      if (typeof resource.target_rank !== 'number') return deny('DENY_RANK');
+      if (resource.target_rank >= ev.subjectRank) {
+        const ownRenewal = ev.isOwner && action === 'card:renew' && resource.owner_card_id === subject.card_id;
+        if (!ownRenewal) return deny('DENY_RANK');
+      }
+    }
   }
   if (resource.removes_last_owner !== undefined && resource.removes_last_owner !== false) return deny('DENY_LAST_OWNER');
 

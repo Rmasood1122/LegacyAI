@@ -5,7 +5,7 @@ import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_AUTH_LIMITS, SecretCodeHasher } from '../../src/modules/identity-access/index.ts';
 import { ARGON2_FLOOR, Secret } from '../../src/modules/platform/index.ts';
-import { addMember, Client, createTenant, login, startApp, superuser, tryLogin, type TestApp, type TestTenant } from '../helpers/harness.ts';
+import { addMember, Client, createTenant, startApp, superuser, tryLogin, type TestApp, type TestTenant } from '../helpers/harness.ts';
 
 let t: TestApp;
 let su: pg.Client;
@@ -37,13 +37,12 @@ describe('the company card cannot be used to switch a tenant off or to dodge exp
     expect((await tenant.owner.get('/v1/cards')).status).toBe(200);
   });
 
-  it('even an Owner cannot suspend, revoke or replace it; an Owner can renew it', async () => {
+  it('even an Owner cannot suspend, revoke, replace or renew it (renewal is for the platform operator)', async () => {
     const id = tenant.companyCard.id;
-    for (const [verb, body] of [['suspend', { reason: 'x' }], ['revoke', { reason: 'x' }], ['replace', { reason: 'lost' }]] as const) {
+    for (const [verb, body] of [['suspend', { reason: 'x' }], ['revoke', { reason: 'x' }], ['replace', { reason: 'lost' }], ['renew', {}]] as const) {
       expect((await tenant.owner.post(`/v1/cards/${id}/${verb}`, body)).status, verb).toBe(403);
+      expect(await lastDeny(tenant.ownerCard.id), verb).toBe('DENY_COMPANY_CARD');
     }
-    expect(await lastDeny(tenant.ownerCard.id)).toBe('DENY_COMPANY_CARD');
-    expect((await tenant.owner.post(`/v1/cards/${id}/renew`, {})).status).toBe(200);
   });
 
   it('if a company card is revoked anyway (directly in the database), the tenant is treated as lapsed - not as "never expires"', async () => {
@@ -127,22 +126,20 @@ describe('the last Company Owner cannot be removed, even by two requests racing 
     }
   });
 
-  it('two Owners remove each other\'s Owner role at the same moment: one Owner always remains', async () => {
+  it('two Owners try to remove each other\'s Owner role at the same moment: neither can (Phase 1.1), both remain', async () => {
     const ten = await createTenant(t, 'racerole');
-    await ten.owner.patch('/v1/tenants/current/settings', { enabled_roles: ['company_owner', 'admin', 'expert', 'successor'] });
     // Both Owners also hold the Admin role, so "a card must keep one role" is not what stops the removal.
     const second = await addMember(t, ten.owner, [{ role_key: 'company_owner' }, { role_key: 'admin' }]);
-    expect((await second.client.post(`/v1/cards/${ten.ownerCard.id}/roles`, { role_key: 'admin' })).status).toBe(201);
-    const first = await login(t, ten.ownerCard, { passkey: ten.ownerPasskey }); // the role change ended its earlier session
     const results = await Promise.all([
-      first.del(`/v1/cards/${second.card.id}/roles/company_owner`),
+      ten.owner.del(`/v1/cards/${second.card.id}/roles/company_owner`),
       second.client.del(`/v1/cards/${ten.ownerCard.id}/roles/company_owner`),
     ]);
-    expect(results.map((r) => r.status).filter((s) => s === 204)).toHaveLength(1);
+    expect(results.map((r) => r.status)).toEqual([403, 403]);
+    expect(await lastDeny(ten.ownerCard.id)).toBe('DENY_RANK');
     const owners = await su.query(
       `SELECT count(*)::int AS n FROM cards c JOIN card_roles r ON r.card_id = c.id WHERE c.tenant_id = $1 AND r.role_key = 'company_owner' AND c.state = 'active'`,
       [ten.tenantId]);
-    expect(owners.rows[0].n).toBeGreaterThanOrEqual(1);
+    expect(owners.rows[0].n).toBe(2);
   });
 });
 

@@ -1219,6 +1219,86 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+  /v1/tenants/{tenant_id}/company-card/renew:
+    post:
+      operationId: renewCompanyCard
+      summary: "Platform operator only: renew a tenant's company card (its subscription clock). Nobody inside the tenant can do this."
+      tags:
+        - tenants
+      x-permission: tenant:renew_company_card
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenewCardRequest"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CardWithSecrets"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/tenants/{tenant_id}/owner-recovery:
+    post:
+      operationId: recoverOwnerCard
+      summary: "Platform operator only: recover a Company Owner who cannot sign in. The card is named by its id or its number (exactly one). Revokes the card's strong factors and sessions, rotates its SC and issues a one-time enrollment token. Requires the reference of an out-of-band identity check (see docs/runbooks/owner-recovery.md)."
+      tags:
+        - tenants
+      x-permission: tenant:recover_owner
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OwnerRecoveryRequest"
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerRecoveryResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
   /v1/tenants/current:
     get:
       operationId: getCurrentTenant
@@ -1552,6 +1632,11 @@ components:
       schema: *a1
     CredentialId:
       name: credential_id
+      in: path
+      required: true
+      schema: *a1
+    TenantId:
+      name: tenant_id
       in: path
       required: true
       schema: *a1
@@ -2165,6 +2250,48 @@ components:
           type: integer
           minimum: 1
           maximum: 366
+    OwnerRecoveryRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - verification_reference
+      oneOf:
+        - required:
+            - card_id
+        - required:
+            - card_number
+      properties:
+        card_id: *a1
+        card_number: *a6
+        verification_reference:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._-]{5,63}$
+          description: The id of the operator's own record of the out-of-band identity check (a ticket or case number). An identifier only - never a name, phone number or other personal data. Written to the audit log of both tenants.
+    OwnerRecoveryResult:
+      type: object
+      additionalProperties: false
+      required:
+        - card
+        - secret_already_shown
+        - notified_owner_count
+      properties:
+        card:
+          $ref: "#/components/schemas/Card"
+        sc:
+          type: string
+          pattern: ^[0-9]{3}$
+          description: Shown ONCE.
+        enrollment_token:
+          type: string
+          description: Shown ONCE.
+        enrollment_token_expires_at: *a5
+        secret_already_shown:
+          type: boolean
+          description: "True on an idempotent replay: the one-time secrets are not repeated."
+        notified_owner_count:
+          type: integer
+          minimum: 0
+          description: How many other Owners of the company were notified.
     EnrollmentTokenRequest:
       type: object
       additionalProperties: false
@@ -2695,6 +2822,7 @@ components:
             - system
             - anonymous
             - service
+            - operator
         action:
           type: string
         resource_type:

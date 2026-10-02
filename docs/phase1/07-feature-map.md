@@ -1,85 +1,61 @@
-# 07 — Feature map
+# 07 — Feature map (all 35 features)
+
+> **Redone in Phase 1.1 (2026-10-03)** against `docs/feature-list-35.md`, which is the source of truth.
+> The earlier version of this document mapped a 30-feature list and guessed at "feature 34"; the three
+> mismatches it reported are resolved by the new list (35 features; billing features 31–35 are separate;
+> phases are now stated by you, not assumed by me).
 
 ## In plain language
 
-For each of your features: which phase delivers it, and — for Phase 1 features — exactly which module, tables, endpoints and tests cover it. Test file names below are the real files under `services/api/test/`; results are in `REPORT.md`.
+For each of your 35 features: which phase delivers it and what exists today. For anything Phase 1 built, the exact module, tables, endpoints and tests are in the detail sections further down. "Hook" means a table or column exists so the feature can be added later without rebuilding — there is **no working feature** behind it.
 
-Source: the feature list you sent on 2026-10-02 (30 numbered features, sections A–G).
+Test file names are real files under `services/api/test/`. Results are in `REPORT.md`.
 
-> ## ⚠ Three mismatches between your feature list and the Phase 1 prompt
->
-> 1. **The list has 30 features; the prompt says 35** and refers to a "feature 34" that does not exist in the list. I have mapped the prompt's numbers onto the list as shown in the next table. Please correct me if a newer 35-item list exists.
-> 2. **Card number format.** The list shows `LGY-4821-9376-0152` (a prefix + 12 digits) and says "do not make it look like a bank card". The prompt says 15 random digits + 1 check digit in groups of four — which is exactly the shape of a bank card. This needs your decision: see decision 5 in `08-open-decisions.md`.
-> 3. **Build order.** The list puts features 16 (SSO/SCIM) and 22 (answer quality monitor) in the first build. The prompt forbids implementing SSO/SCIM and any AI in Phase 1. I follow the prompt: 16 is a schema hook only, 22 waits for the AI phase.
+Phases (from your list): **P1** Foundation · **P2** Core value (capture, AI, verification) · **P3** Frontend · **P4** Revenue · **P5** Production readiness · **LATER** = after the pilot.
 
-## How the prompt's feature numbers map to your list
+## All 35 features
 
-| Prompt says | Your list | Note |
-|---|---|---|
-| 1 unique cards | **1** | same |
-| 2 role-based access | **2** | same |
-| 3 card lifecycle | **3** | same |
-| 4 QR/NFC formats | **4** | same |
-| 5 card-level limits and usage history | **5** | same |
-| 16 SSO + SCIM | **16** | same |
-| 17 retrieval-time filter | **17** | same |
-| 20 audit log | **20** | same (the list calls it "tamper-proof"; what we can honestly deliver is tamper-**evident**) |
-| 21 regional hosting + BYOK | **21** | same |
-| 27 analytics events | **27** | same |
-| 28 webhooks/outbox | **28** | same |
-| 29 multi-tenant admin console API | **29** | admin console part only; billing/metering is Phase 4 |
-| 30 export + backup/DR skeleton | **30** | the "open-format export and disaster recovery" half of feature 30; the knowledge graph half is later |
-| 34 renewal with SC rotation | **1** ("codes can be rotated on a schedule") | no feature 34 in the list |
+| # | Feature | Delivering phase (your list) | What exists after Phase 1 + 1.1 | Module | Tables | Endpoints | Tests |
+|---|---|---|---|---|---|---|---|
+| 1 | Unique cards (person + company, check digit, SC) | P1 | **Built** | identity-access | `cards`, `card_directory`, `card_secrets`, `card_auth_state`, `credentials`, `enrollment_tokens`, `people` | `/v1/cards*`, `/v1/auth/*`, `POST /v1/tenants` | `unit/card-number`, `unit/secret-code`, `integration/smoke`, `integration/lockout`, `security/card-sc-alone`, `security/enumeration` |
+| 2 | Role-based access (8 roles; 4 enabled for pilot) | P1 | **Built** | identity-access | `roles`, `permissions`, `role_permissions`, `card_roles`, `tenant_settings.enabled_roles` | `/v1/roles`, `/v1/cards/{id}/roles*`, `/v1/internal/policy/check` | `unit/policy`, `integration/resource-filter`, `security/route-policy-coverage` |
+| 3 | Card lifecycle: issue, suspend, revoke, expire, replace | P1 | **Built** (API; screens are P3) | identity-access | `cards`, `card_events`, `sessions` | `/v1/cards/{id}/suspend`, `reinstate`, `revoke`, `replace`, `renew`, `unlock`, `enrollment-token`; `PATCH /v1/people/{id}` | `unit/lifecycle`, `integration/lifecycle`, `integration/sessions`, `integration/phase1-1` |
+| 4 | Digital, QR and NFC formats | digital: P1/P3 · QR/NFC: LATER | Digital card = the card record and its number (built). **QR/NFC: hook only** | identity-access | `card_tokens` (hook) | — | — |
+| 5 | Card-level limits, usage history, anomaly lock | limits + history: P1 · anomaly lock: LATER | Limits and history **built**. Anomaly lock: **hook only** (`card_auth_state.lock_reason = 'anomaly'`) | identity-access | `card_restrictions`, `card_usage_counters`, `card_events` | `/v1/cards/{id}/restrictions`, `/v1/cards/{id}/events` | `unit/policy`, `integration/features`, `integration/lifecycle` |
+| 6 | Passive expertise capture (chats, tickets, email) | LATER (needs consent + legal review) | Nothing | — | — | — | — |
+| 7 | Adaptive AI voice interviewer | text interviewer: P2 · voice: LATER | Nothing yet. Designed in `docs/phase2/05` | (P2) capture | (P2) `interviews`, `interview_turns` | (P2) | (P2) |
+| 8 | Scenario replay mode | LATER | Nothing | — | — | — | — |
+| 9 | Shadow mode (offline, frontline) | LATER | Nothing | — | — | — | — |
+| 10 | Gap detector | P2 (simple version) | Nothing yet. Designed in `docs/phase2/05` | (P2) capture | (P2) `topics`, `role_topic_maps` | (P2) | (P2) |
+| 11 | Retirement radar (24/12/6-month nudges) | LATER (needs reminders from P4) | Nothing | — | — | — | — |
+| 12 | Expert verification loop | P2 | Permission `knowledge:verify` seeded; nothing else. Designed in `docs/phase2/06` | (P2) knowledge | (P2) `knowledge_items`, `knowledge_versions` | (P2) | (P2) |
+| 13 | Readiness test for successors | P2 | Nothing yet. Designed in `docs/phase2/06` | (P2) knowledge | (P2) `quiz_items`, `quiz_attempts`, `quiz_answers` | (P2) | (P2) |
+| 14 | Source-cited answers that say "I don't know" | P2 | Nothing yet. Designed in `docs/phase2/06` | (P2) knowledge | (P2) `chunks`, `citations` | (P2) | (P2) |
+| 15 | Ask-the-expert mode | P2 | Nothing yet. Designed in `docs/phase2/06` | (P2) knowledge | (P2) `expert_questions` | (P2) | (P2) |
+| 16 | SSO + SCIM provisioning | LATER (hook in P1) | **Hook only** | identity-access | `sso_connections`; `people.external_id`, `people.scim_managed` | — | — |
+| 17 | Permission-aware answers (enforced at retrieval) | filter: P1 · retrieval wiring: P2 | Filter **built and tested** on cards and people. Wiring into search is P2 (`docs/phase2/03`) | identity-access | — | `/v1/internal/policy/check`; used by `GET /v1/cards`, `GET /v1/people` | `integration/resource-filter` (11,040 row-by-row comparisons in the last run), `unit/policy` |
+| 18 | Sensitive-data redaction | P2 (basic) | Only redaction of **our own logs** (not this feature). Designed in `docs/phase2/05` | (P2) capture | (P2) `redaction_findings` | (P2) | `security/no-secrets` covers logs only |
+| 19 | Expert consent and ownership controls | P2 | Nothing yet. Designed in `docs/phase2/05`. **Needs legal review; code cannot settle it.** | (P2) | (P2) `consents` | (P2) | (P2) |
+| 20 | Tamper-evident audit log | P1 | **Built** | platform | `audit_log`, `audit_chain_heads`, `audit_anchors` | `/v1/audit/events`, `/v1/audit/verify` | `integration/audit`, `security/no-secrets` |
+| 21 | Regional hosting and bring-your-own-key | LATER (hook in P1) | **Hook only** | platform | `tenants.region`, `tenants.encryption_key_ref`; Terraform `var.regions` | — | — |
+| 22 | Answer quality monitor | LATER (basic logging in P2) | Nothing yet | (P2) knowledge | (P2) `answer_logs` | — | (P2) |
+| 23 | Contradiction and staleness detection | LATER | Nothing. (P2 adds a `stale` item status by age only — not detection.) | — | — | — | — |
+| 24 | Human review queue | P2 | Reviewer role and permission seeded; nothing else. Designed in `docs/phase2/06` | (P2) API gateway | (P2) `review_tasks` | (P2) | (P2) |
+| 25 | Multi-language and multi-format (OCR, voice, drawings) | text + PDF: P2 · rest: LATER | Nothing yet. Designed in `docs/phase2/05` | (P2) capture | (P2) `sources`, `chunks` | (P2) | (P2) |
+| 26 | Department templates | LATER | `departments` table exists (used by access rules), no templates | identity-access | `departments` | `/v1/departments` | `contract/contract` |
+| 27 | Outcome analytics | LATER (events table in P1) | **Hook only** | platform | `analytics_events` | — | — |
+| 28 | Open API, webhooks, connectors | LATER (outbox hook in P1) | **Hook only** for webhooks/connectors. The OpenAPI contract itself is built (47 operations). | platform | `outbox_events`, `webhook_endpoints` | — | `contract/contract` |
+| 29 | Multi-tenant admin console and billing | API: P1 · screens: P3 · billing: P4 | Tenant API **built** (basic). No screens, no billing. | platform, identity-access | `tenants`, `tenant_settings`, `plan_limits` | `/v1/tenants*` | `integration/rls`, `integration/features`, `integration/phase1-1` |
+| 30 | Living knowledge graph + open-format export + disaster recovery | export + backup: P1 · graph: LATER | Export and backup/restore skeleton **built**. No graph. | platform + `scripts/` | `export_jobs` | `/v1/exports*` | `integration/features`, `scripts/backup-restore-selftest.sh` |
+| 31 | Renewal center | P4 | Nothing | (P4) billing | — | — | — |
+| 32 | One company-wide renewal date | P4 | The **company card** carries one expiry date for the whole company and puts the tenant into read-only grace, then export-only. Billing does not drive it yet; since Phase 1.1 only the platform operator can renew it. | identity-access | `cards` (kind `company`) | `POST /v1/tenants/{id}/company-card/renew` | `integration/sessions`, `integration/phase1-1`, `security/review-findings` |
+| 33 | Expiry reminders and optional auto-renew | P4 | `cards.renewal_due` and the `card_expiring` notification type exist; **nothing sends reminders** (no email, no scheduler job) | identity-access | `cards.renewal_due` | `GET /v1/tenants/current/usage` (count of cards expiring soon) | `integration/features` |
+| 34 | Renewal with SC rotation | identity side: P1 · billing trigger: P4 | Identity side **built**: every renewal replaces the SC and ends the card's sessions. No billing trigger. | identity-access | `card_secrets`, `cards` | `POST /v1/cards/{id}/renew` | `integration/lifecycle` ("renewal rotates the SC") |
+| 35 | Upgrade prompts at card limits | P4 | **Hook only**: `plan_limits` table and a billing stub the policy decision point already asks (`DENY_PLAN_LIMIT`); the stub always answers "allowed" | billing (stub) | `plan_limits` | — | `unit/policy` (plan-limit denial) |
 
-## Phase numbering
+**Built in Phase 1 + 1.1:** 1, 2, 3, 5 (limits + history), 20, the identity side of 34, and the Phase 1 parts of 4, 17, 29, 30, 32. **Hooks only:** 4 (QR/NFC), 5 (anomaly lock), 16, 21, 27, 28, 33, 35. **Phase 2 (designed, not built):** 7, 10, 12, 13, 14, 15, 17 (wiring), 18, 19, 22 (logging), 24, 25. **Nothing:** 6, 8, 9, 11, 23, 26, 31.
 
-| Phase | Content | Source |
-|---|---|---|
-| 0 | Stack decisions | Prompt (done) |
-| 1 | Foundation: identity, cards, access, platform | This phase |
-| 2 | Knowledge layer / AI service | **ASSUMPTION** — the prompt says Phase 2 reuses the retrieval filter; your "Next" build group (6, 7, 12, 14) fits here |
-| 3 | Frontend | **ASSUMPTION** — the prompt only says "later phase" |
-| 4 | Billing | Prompt |
-| unscheduled | Everything else | Not assigned to a phase by you yet; I have not invented one |
-
-## All 30 features
-
-| # | Feature | Phase | Phase 1 status |
-|---|---|---|---|
-| 1 | Unique Access Card for every person and company | **1** | **Build** (SSO and device check as the strong factor: later) |
-| 2 | Role-based access attached to the card | **1** | **Build** (4 pilot roles on; all 8 in the matrix) |
-| 3 | Card lifecycle management | **1** | **Build** the API. The "one admin screen" is frontend (Phase 3). Automatic revoke from an HR system needs feature 16/28. |
-| 4 | Digital, QR and NFC card formats | unscheduled ("Later" group) | Hook only (`card_tokens`) |
-| 5 | Card-level permissions and usage history | **1** | **Build** history + per-card restrictions. Unusual-use lock: design only. |
-| 6 | Passive Expertise Capture | 2 | — |
-| 7 | Adaptive AI Interviewer | 2 | — |
-| 8 | Scenario Replay Mode | unscheduled | — |
-| 9 | Shadow Mode | unscheduled | — |
-| 10 | Gap Detector | unscheduled | — |
-| 11 | Retirement Radar | unscheduled | — |
-| 12 | Expert Verification Loop | 2 | Permission `knowledge:verify` seeded |
-| 13 | Readiness Test | unscheduled ("Later" group) | — |
-| 14 | Source-Cited Answers | 2 | — |
-| 15 | Ask-the-Expert Mode | unscheduled | — |
-| 16 | SSO and automatic provisioning | unscheduled (your list: first group; prompt: not Phase 1) | Hook only (`sso_connections`, `people.external_id`) |
-| 17 | Permission-aware answers | 2 | **Hook built and tested** (`buildResourceFilter`) |
-| 18 | Sensitive data redaction | unscheduled | Log redaction for our own logs only — not this feature |
-| 19 | Expert consent and ownership controls | unscheduled (**must precede any capture — legal risk**) | — |
-| 20 | Audit log | **1** | **Build** (tamper-evident) |
-| 21 | Regional hosting and bring-your-own-key | unscheduled | Hook only (`tenants.region`, `encryption_key_ref`, Terraform `var.regions`) |
-| 22 | Answer quality monitor | with/after Phase 2 | — (needs AI) |
-| 23 | Contradiction and staleness detection | unscheduled | — |
-| 24 | Human review queue | unscheduled | Reviewer role and permission seeded |
-| 25 | Multi-language and multi-format support | unscheduled | — |
-| 26 | Department templates | unscheduled ("Later" group) | `departments` table exists |
-| 27 | Outcome analytics for executives | unscheduled ("Later" group) | Hook only (`analytics_events`) |
-| 28 | Open API, webhooks and connectors | unscheduled | Hook only (`outbox_events`, `webhook_endpoints`). The OpenAPI contract itself is built. |
-| 29 | Multi-tenant admin console and billing | **1** (console API) / **4** (billing, metering, invoicing) | **Build** tenant API (basic). Bulk card issuing: not in Phase 1. |
-| 30 | Living Knowledge Graph + open export and disaster recovery | **1** (export + backup/restore skeleton) / unscheduled (graph) | **Build** export + backup skeleton only |
-
-Buying-urgency tools (Risk Calculator, free 7-day gap scan, Clock Dashboard, pricing) are not numbered and are not in Phase 1.
-
-**Phase 1 builds:** 1, 2, 3, 5, 20, and parts of 29 and 30. **Hooks only:** 4, 16, 17, 21, 27, 28.
+Buying-urgency tools (Risk Calculator, free gap scan, Clock Dashboard, pricing) are not in the 35 and are not built.
 
 ---
 
@@ -91,7 +67,7 @@ Buying-urgency tools (Risk Calculator, free 7-day gap scan, Clock Dashboard, pri
 | Module | `identity-access` (`cards`, `card-number`, `secret-code`, `auth`, `lifecycle`) |
 | Tables | `cards`, `card_directory`, `card_secrets`, `card_auth_state`, `credentials`, `enrollment_tokens`, `people` |
 | Endpoints | `POST /v1/cards`, `GET /v1/cards`, `GET /v1/cards/{id}`, `POST /v1/cards/{id}/renew`, `POST /v1/cards/{id}/unlock`, `POST /v1/auth/login/*`, `POST /v1/auth/enrollment/*`, `POST /v1/tenants` (issues the company card and first Owner card) |
-| Tests | `unit/card-number`, `unit/secret-code`, `integration/smoke`, `integration/lifecycle` (one live card per person, renewal with SC rotation), `integration/lockout`, `integration/features` (pepper rotation, bootstrap), `security/card-sc-alone`, `security/enumeration` |
+| Tests | `unit/card-number`, `unit/secret-code`, `integration/smoke`, `integration/lifecycle` (one live card per person, renewal with SC rotation — feature 34), `integration/lockout`, `integration/features` (pepper rotation, bootstrap), `security/card-sc-alone`, `security/enumeration` |
 | From your list, covered | unique number with check digit · company card with person cards linked · SC stored only as a salted hash (plus pepper) · never the only login · lock after 3–5 wrong codes with admin alert (via the notification interface; console/log only for now) · rotation on renewal |
 | From your list, **not** in Phase 1 | SSO or a device check as the strong factor (Phase 1: passkey or authenticator app). Email delivery of alerts. |
 
@@ -139,7 +115,7 @@ Buying-urgency tools (Risk Calculator, free 7-day gap scan, Clock Dashboard, pri
 |---|---|
 | Module | `platform` (`tenants`) |
 | Tables | `tenants`, `tenant_settings`, `plan_limits` |
-| Endpoints | `POST /v1/tenants`, `GET /v1/tenants`, `GET /v1/tenants/current`, `GET/PATCH /v1/tenants/current/settings`, `GET /v1/tenants/current/usage` |
+| Endpoints | `POST /v1/tenants`, `GET /v1/tenants`, `GET /v1/tenants/current`, `GET/PATCH /v1/tenants/current/settings`, `GET /v1/tenants/current/usage`; Phase 1.1 (operator only): `POST /v1/tenants/{id}/company-card/renew`, `POST /v1/tenants/{id}/owner-recovery` |
 | CLI | `bootstrap-platform` (creates the operator tenant once) |
 | Tests | `integration/rls` (isolation, platform-only permissions), `integration/features` (settings ranges, usage), `integration/lockout` (threshold range) |
 | **Not** in Phase 1 | Billing, metering, invoicing (Phase 4). Bulk card issuing. Workspaces per division inside one company (today: one tenant = one workspace). |

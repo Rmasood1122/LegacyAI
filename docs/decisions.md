@@ -7,6 +7,7 @@ Choices that would take more than about an hour to reverse. Three lines each. Ev
 | D1–D12 | 2026-10-02 | **ACCEPTED** at Gate 1 (founder replied "approved"; all recommendations in `08-open-decisions.md` accepted) |
 | D13–D17 | 2026-10-02 | Made during the build; listed in `REPORT.md` under Deviations for the founder to confirm |
 | D18 | 2026-10-03 | Founder decision during verification |
+| D19–D21 | 2026-10-03 | Phase 1.1: two founder decisions (D19, D20) and how they were built (D21) |
 
 **D1 — Fastify 5, not NestJS.**
 CONTEXT: NestJS 12 is 5 weeks old and no official LTS statement was found; rejected NestJS 11 (labelled `legacy` on npm) and NestJS 12.
@@ -79,3 +80,15 @@ CONSEQUENCES: failed logins for unknown cards go to `login_attempts` (purgeable)
 **D18 — Repository pushed to GitHub while public (supersedes D12).**
 CONTEXT: the founder's computer cannot run Docker, so the database tests run on GitHub Actions. The repository was public when it was time to push; the founder chose "keep it public and push anyway" and will make it private later. Rejected: waiting, or running the tests nowhere.
 CONSEQUENCES: the design, the code and the commit author's email address are public until the repository is made private. A full-history secret scan ran before the push and runs in CI on every push.
+
+**D19 — Company-card renewal is for the platform operator only (founder decision).**
+CONTEXT: an Owner could renew their own company card, i.e. extend their own subscription clock. Rejected: leaving it until billing exists.
+CONSEQUENCES: `card:renew` is refused for company cards inside a tenant; a new platform-only action renews it; until billing (Phase 4) every renewal is manual work for the operator.
+
+**D20 — Owners cannot renew, unlock, replace or re-enrol another Owner (founder decision).**
+CONTEXT: each of those hands the actor a way into the target card. Rejected: keeping Owner-to-Owner management. The founder named renew/replace/enroll; **unlock** was included because it also hands over the target's new SC, and — after an independent review showed two-step routes — so were **role changes on a peer** and **issuing a card to a person who held the actor's rank or higher**. Suspend and revoke between Owners stay allowed (defence against a compromised Owner).
+CONSEQUENCES: a locked-out Owner needs the platform operator (`docs/runbooks/owner-recovery.md`); a returning former Owner needs a new person record or the operator; a locked-out operator uses a break-glass command line tool (`platform:recover-operator`).
+
+**D21 — Operator actions on a customer tenant run in the operator's own transaction, switched to the customer tenant for a moment.**
+CONTEXT: tenant creation used two transactions, so a failure could leave a half-created tenant. Rejected: a compensating "clean-up" step (can itself fail) and a `SECURITY DEFINER` function (filtered by forced row-level security, see D14).
+CONSEQUENCES: `Database.withinTenant` exists, works only in a transaction of the operator tenant, and must stay narrow (three callers); row-level security still checks every statement while switched.

@@ -122,7 +122,7 @@ describe('idempotency keys', () => {
   it('every state-changing admin operation in the contract requires a key', () => {
     const required = ['issueCard', 'suspendCard', 'reinstateCard', 'revokeCard', 'replaceCard', 'renewCard', 'unlockCard',
       'issueEnrollmentToken', 'putCardRestrictions', 'assignCardRole', 'replaceCardRoles', 'removeCardRole', 'createPerson',
-      'updatePerson', 'createDepartment', 'createTenant', 'updateTenantSettings', 'createExport'];
+      'updatePerson', 'createDepartment', 'createTenant', 'updateTenantSettings', 'createExport', 'renewCompanyCard', 'recoverOwnerCard'];
     for (const id of required) expect(t.app.http.contract.operations.get(id)?.idempotent, id).toBe(true);
     const actual = [...t.app.http.contract.operations.values()].filter((o) => o.idempotent).map((o) => o.operationId).sort();
     expect(actual).toEqual([...required].sort());

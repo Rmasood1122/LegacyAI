@@ -1,5 +1,6 @@
 // Database access. The ONLY ways to run SQL are:
 //   withTenantTx(tenantId, fn)  - one transaction, tenant set for that transaction only
+//   withinTenant(tx, id, fn)    - the SAME transaction, switched to another tenant for a moment
 //   global(text, params)        - single statements against GLOBAL tables
 // Row-level security does the filtering; if the tenant is not set, tenant tables return nothing.
 import pg from 'pg';
@@ -23,6 +24,8 @@ export class UnsafeDatabaseRoleError extends Error {
 
 export class Database {
   readonly #pool: pg.Pool;
+  /** The tenant each open transaction was started for, and whether it is currently switched away. */
+  readonly #txTenant = new WeakMap<Tx, { home: string; switched: boolean }>();
 
   constructor(connectionString: string, poolMax: number) {
     this.#pool = new pg.Pool({
@@ -60,6 +63,7 @@ export class Database {
       if (options.platformScope === true) {
         await client.query('SELECT set_config($1, $2, true)', ['app.platform_scope', 'on']);
       }
+      this.#txTenant.set(tx, { home: tenantId, switched: false });
       const result = await fn(tx);
       await client.query('COMMIT');
       return result;
@@ -77,6 +81,42 @@ export class Database {
         client.release();
       } catch {
         // already released above
+      }
+    }
+  }
+
+  /**
+   * Runs `fn` with an open transaction switched to ANOTHER tenant, then switches it back.
+   * Everything stays in the one transaction, so work done for both tenants commits or rolls
+   * back together. Used only by platform-operator actions on a customer tenant (create a
+   * tenant, renew its company card, recover an Owner). Cannot be nested, and works ONLY in a
+   * transaction that was opened for the operator tenant: a customer's transaction can never
+   * be switched, whatever the permission tables say.
+   * Do not roll back to a savepoint taken inside `fn` after it returns: that would restore the
+   * other tenant's id.
+   */
+  async withinTenant<T>(tx: Tx, tenantId: string, fn: () => Promise<T>): Promise<T> {
+    if (!isUuid(tenantId)) throw new Error('withinTenant: tenant id is not a UUID');
+    const state = this.#txTenant.get(tx);
+    if (!state) throw new Error('withinTenant: not a transaction opened by withTenantTx');
+    if (state.home !== PLATFORM_TENANT_ID) throw new Error('withinTenant: only a transaction of the operator tenant can be switched');
+    if (state.switched) throw new Error('withinTenant: already switched to another tenant');
+    state.switched = true;
+    await tx.query('SELECT set_config($1, $2, true)', ['app.tenant_id', tenantId]);
+    let failed = true;
+    try {
+      const result = await fn();
+      failed = false;
+      return result;
+    } finally {
+      // Always go back, so that code which catches an error cannot keep writing as the other
+      // tenant. If the transaction is already aborted this statement fails too; the original
+      // error is the one that matters and the whole transaction rolls back anyway.
+      try {
+        await tx.query('SELECT set_config($1, $2, true)', ['app.tenant_id', state.home]);
+        state.switched = false;
+      } catch (err) {
+        if (!failed) throw err;
       }
     }
   }
@@ -127,7 +167,7 @@ export class Database {
 }
 
 /** The newest migration this build of the API expects. Checked by the readiness endpoint. */
-export const EXPECTED_SCHEMA_VERSION = '20261002000600';
+export const EXPECTED_SCHEMA_VERSION = '20261003000700';
 
 /** The LegacyAI operator tenant (seeded by the first migration). */
 export const PLATFORM_TENANT_ID = '00000000-0000-7000-8000-000000000001';

@@ -1,6 +1,6 @@
 # Schema diagram
 
-The database as built by `db/migrations/` (6 migrations, 33 tables). Verified against the live test database: **24 tenant-scoped tables with forced row-level security, 9 global tables** (asserted by `test/integration/rls.test.ts`).
+The database as built by `db/migrations/` (7 migrations, 33 tables; the 7th, Phase 1.1, adds two operator permissions and two allowed values — no tables). Verified against the live test database: **24 tenant-scoped tables with forced row-level security, 9 global tables** (asserted by `test/integration/rls.test.ts`).
 
 - **T** = tenant-scoped: has `tenant_id`, row-level security enabled **and forced**.
 - **G** = global: no tenant; the app role has only the narrow privileges noted.

@@ -139,9 +139,13 @@ export function hashRequest(operationId: string, params: unknown, body: unknown)
 export interface NotificationEvent {
   type:
     | 'card_issued' | 'card_locked' | 'card_unlocked' | 'card_suspended' | 'card_revoked' | 'card_renewed'
-    | 'card_replaced' | 'card_expiring' | 'unlock_capacity_low' | 'credential_added' | 'enrollment_token_issued';
+    | 'card_replaced' | 'card_expiring' | 'unlock_capacity_low' | 'credential_added' | 'enrollment_token_issued'
+    | 'tenant_created' | 'company_card_renewed' | 'owner_recovered';
   tenantId: string;
+  /** The card the event is about. */
   cardId?: string;
+  /** Who is told, when that is someone other than the holder of `cardId` (e.g. the other Owners). */
+  recipientCardId?: string;
 }
 
 export interface Notifier {
@@ -155,7 +159,7 @@ export class LogNotifier implements Notifier {
     this.#log = log;
   }
   async notify(event: NotificationEvent): Promise<void> {
-    this.#log.info({ notification: event.type, tenant_id: event.tenantId, card_id: event.cardId }, 'notification');
+    this.#log.info({ notification: event.type, tenant_id: event.tenantId, card_id: event.cardId, recipient_card_id: event.recipientCardId }, 'notification');
   }
 }
 

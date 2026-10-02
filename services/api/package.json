@@ -52,6 +52,7 @@
     "audit:verify": "node --env-file-if-exists=.env src/cli/verify-audit-chain.ts",
     "audit:anchor": "node --env-file-if-exists=.env src/cli/anchor-audit-head.ts",
     "platform:bootstrap": "node --env-file-if-exists=.env src/cli/bootstrap-platform.ts",
+    "platform:recover-operator": "node --env-file-if-exists=.env src/cli/recover-operator.ts",
     "cards:sweep-expired": "node --env-file-if-exists=.env src/cli/sweep-expired-cards.ts"
   }
 }

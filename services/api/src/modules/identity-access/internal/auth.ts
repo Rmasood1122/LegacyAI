@@ -46,7 +46,7 @@ const totpAad = (tenantId: string): string => `totp:${tenantId}`;
 
 type FailReason =
   | 'bad_txn' | 'unknown_card' | 'bad_factor' | 'factor_throttled' | 'bad_sc' | 'locked' | 'state' | 'expired'
-  | 'tenant_inactive' | 'bad_enrollment_token';
+  | 'tenant_inactive' | 'bad_enrollment_token' | 'superseded';
 
 interface AuthStateRow {
   sc_failed_count: number;
@@ -171,8 +171,8 @@ export class AuthService {
       const before = card === null ? null : await this.#authState(tx, card, false);
       const credentials = card === null ? [] : (await tx.query<StoredCredential>(
         `SELECT ${CREDENTIAL_COLUMNS} FROM credentials WHERE tenant_id = $1 AND card_id = $2 AND status = 'active'`, [tenantId, card.id])).rows;
-      const secret = card === null ? null : (await tx.query<{ sc_hash: string; pepper_id: string }>(
-        `SELECT sc_hash, pepper_id FROM card_secrets WHERE tenant_id = $1 AND card_id = $2 AND status = 'current'`, [tenantId, card.id])).rows[0] ?? null;
+      const secret = card === null ? null : (await tx.query<{ id: string; sc_hash: string; pepper_id: string }>(
+        `SELECT id, sc_hash, pepper_id FROM card_secrets WHERE tenant_id = $1 AND card_id = $2 AND status = 'current'`, [tenantId, card.id])).rows[0] ?? null;
 
       // SC - exactly one Argon2 computation (real or dummy) on every path.
       const scResult = await this.#d.hasher.verify(card?.id ?? null, body.sc, secret ? { hash: secret.sc_hash, pepperId: secret.pepper_id } : null);
@@ -205,6 +205,16 @@ export class AuthService {
 
       // Short critical section: lock the card's counters and decide.
       const state = await this.#authState(tx, card, true);
+      // A renewal, unlock or recovery may have committed while the slow checks above ran. Now that
+      // the row is locked, what was just verified must STILL be the card's current SC and an
+      // active factor - otherwise a sign-in already in flight would outlive the reset.
+      if (strong !== null || sc !== null) {
+        const stillActive = strong === null ? null : (await tx.query(
+          `SELECT 1 FROM credentials WHERE id = $1 AND tenant_id = $2 AND card_id = $3 AND status = 'active'`, [strong.credentialId, tenantId, card.id])).rowCount;
+        const currentSecret = (await tx.query<{ id: string }>(
+          `SELECT id FROM card_secrets WHERE tenant_id = $1 AND card_id = $2 AND status = 'current'`, [tenantId, card.id])).rows[0]?.id ?? null;
+        if (stillActive === 0 || (sc !== null && currentSecret !== secret?.id)) return fail('superseded', card);
+      }
       if (strong !== null && totpStep !== null) {
         if (state.last_totp_step != null && totpStep <= Number(state.last_totp_step)) {
           strong = null; // a concurrent request already used this code
@@ -493,6 +503,10 @@ export class AuthService {
       if (card.state === 'issued') {
         await tx.query('UPDATE cards SET activated_at = $2 WHERE id = $1', [card.id, ctx.now]);
         await this.#d.cards.transition(tx, { ...card, activated_at: ctx.now }, 'active', 'activated', card.id, ctx);
+      } else if (card.activated_at === null) {
+        // A card that expired before it was ever activated and was then renewed or recovered is
+        // 'active' with no activation date. Its first enrolled factor activates it.
+        await tx.query('UPDATE cards SET activated_at = $2 WHERE id = $1 AND activated_at IS NULL', [card.id, ctx.now]);
       }
       return true;
     });

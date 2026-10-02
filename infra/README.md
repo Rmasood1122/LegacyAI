@@ -47,7 +47,7 @@ You do **not** need any of this to run or test the product on your own computer.
    - `db:roles` ends by checking the roles and stops if any has more power than intended.
    - **If `db:roles` stops with a "permission denied" error:** this step has never been run against Neon (it needs your account), so an error here is possible. Send Claude the exact message.
    - **If it stops with an error about `BYPASSRLS`:** Neon did not let the setup role hand that right to the backup role (this is the one thing I could not verify without your account). In that case use the Neon setup role's connection string for backups (as `database-url-admin` in Part C), and tell Claude so the script can skip the backup role.
-   - `db:up` creates all 33 tables (6 migrations).
+   - `db:up` creates all 33 tables (7 migrations).
 6. **Where the connection strings go later:** the *app* one (`DATABASE_URL`, pooled host) goes into the secret `legacyai-database-url`. The *backup/admin* one goes into `legacyai-database-url-admin`. Never paste either into a file in this repository.
 
 > Neon's free database **sleeps after 5 minutes** and has about 400 hours of awake time per month. Do not point an uptime monitor at `/v1/ready` — it would keep the database awake until the allowance runs out, and then the database stops until next month. `/v1/health` is safe to monitor (it never touches the database).

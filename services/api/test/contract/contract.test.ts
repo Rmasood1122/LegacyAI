@@ -2,7 +2,7 @@
 //  - the server validates every REQUEST against it,
 //  - with VALIDATE_RESPONSES=true (all tests) the server validates every RESPONSE against it
 //    and turns a mismatch into a 500 - so every 2xx in the whole suite is a conformance check,
-//  - this file walks all 45 operations successfully at least once, and proves the validator
+//  - this file walks all 47 operations successfully at least once, and proves the validator
 //    really fires on a non-conforming response.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CONTRACT_PATH } from '../../src/app.ts';
@@ -24,9 +24,9 @@ beforeAll(async () => {
 afterAll(async () => t.close());
 
 describe('the contract file', () => {
-  it('is OpenAPI 3.1 with 45 operations, all under /v1, each with a unique operationId', () => {
+  it('is OpenAPI 3.1 with 47 operations, all under /v1, each with a unique operationId', () => {
     const c = loadContract(CONTRACT_PATH);
-    expect(c.operations.size).toBe(45);
+    expect(c.operations.size).toBe(47);
     for (const op of c.operations.values()) {
       expect(op.path.startsWith('/v1/')).toBe(true);
       expect(op.responses.size).toBeGreaterThanOrEqual(2);
@@ -42,8 +42,8 @@ describe('the contract file', () => {
     const count = (needle: string): number => yaml.split(needle).length - 1;
     expect(count('$ref: "#/components/parameters/Limit"')).toBe(5);
     expect(count('$ref: "#/components/parameters/Cursor"')).toBe(5);
-    expect(count('$ref: "#/components/parameters/IdempotencyKey"')).toBe(18);
-    expect(count('$ref: "#/components/responses/TooManyRequests"')).toBe(45);
+    expect(count('$ref: "#/components/parameters/IdempotencyKey"')).toBe(20);
+    expect(count('$ref: "#/components/responses/TooManyRequests"')).toBe(47);
     expect(yaml).toContain('openapi: 3.1.0');
   });
 });
@@ -167,7 +167,7 @@ describe('request validation on every endpoint', () => {
   });
 });
 
-describe('every one of the 45 operations returns a contract-conforming success', () => {
+describe('every one of the 47 operations returns a contract-conforming success', () => {
   it('walks them all (responses are validated by the server; a mismatch would be a 500)', async () => {
     const hit = new Set<string>();
     const ok = (id: string, res: Res, status: number): Res => {
@@ -186,6 +186,10 @@ describe('every one of the 45 operations returns a contract-conforming success',
     const created = ok('createTenant', await op.post('/v1/tenants', { name: 'Walk Co', slug: `walk-${Date.now().toString(36)}`, owner_display_name: 'Walk Owner', owner_email: 'walk.owner@example.test' }), 201);
     expect(created.body.company_card.card.kind).toBe('company');
     ok('listTenants', await op.get('/v1/tenants?limit=2'), 200);
+    const companyRenewed = ok('renewCompanyCard', await op.post(`/v1/tenants/${created.body.tenant.id}/company-card/renew`, { validity_days: 30 }), 200);
+    expect(companyRenewed.body.card.kind).toBe('company');
+    const recovered = ok('recoverOwnerCard', await op.post(`/v1/tenants/${created.body.tenant.id}/owner-recovery`, { card_id: created.body.owner_card.card.id, verification_reference: 'CASE-2026-0001' }), 201);
+    expect(recovered.body.notified_owner_count).toBe(0);
 
     // tenant + settings
     ok('getCurrentTenant', await o.get('/v1/tenants/current'), 200);
@@ -282,7 +286,7 @@ describe('every one of the 45 operations returns a contract-conforming success',
 
     const all = [...t.app.http.contract.operations.keys()].sort();
     expect([...hit].sort()).toEqual(all);
-    expect(hit.size).toBe(45);
+    expect(hit.size).toBe(47);
   });
 });
 

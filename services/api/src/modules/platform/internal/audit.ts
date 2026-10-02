@@ -11,7 +11,8 @@ export type AuditDetailValue = string | number | boolean | null;
 export interface AuditEntry {
   tenantId: string;
   actorCardId?: string | null;
-  actorKind: 'card' | 'system' | 'anonymous' | 'service';
+  /** 'operator': a LegacyAI platform operator acting on a customer tenant; actorCardId is the operator's card. */
+  actorKind: 'card' | 'system' | 'anonymous' | 'service' | 'operator';
   action: string;
   resourceType?: string | null;
   resourceId?: string | null;
@@ -28,6 +29,7 @@ const ALLOWED_DETAIL_KEYS: ReadonlySet<string> = new Set([
   'outcome', 'status', 'state_from', 'state_to', 'role_key', 'reason', 'scope', 'resource_type', 'operation',
   'factor_type', 'credential_id', 'new_card_id', 'old_card_id', 'person_id', 'export_id', 'rows', 'idempotent_replay',
   'restriction_type', 'limit_key', 'changed', 'target_tenant_id', 'session_reason', 'count', 'anchor_seq', 'obligations',
+  'verification_ref', 'target_card_id',
 ]);
 
 const FORBIDDEN_VALUE = /\b\d{16}\b/;

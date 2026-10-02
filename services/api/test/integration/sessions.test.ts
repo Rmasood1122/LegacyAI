@@ -5,7 +5,7 @@ import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { SESSION_COOKIE } from '../../src/modules/platform/index.ts';
 import { TEST_ORIGIN } from '../helpers/env.ts';
-import { addMember, Client, createTenant, login, startApp, superuser, tryLogin, type TestApp, type TestTenant } from '../helpers/harness.ts';
+import { addMember, Client, createTenant, login, renewCompanyCard, startApp, superuser, tryLogin, type TestApp, type TestTenant } from '../helpers/harness.ts';
 
 let t: TestApp;
 let su: pg.Client;
@@ -225,7 +225,8 @@ describe('expiry: 14-day read-only grace, then nothing (except Owner export)', (
     // Day 89: renew the COMPANY card and the Owner card so only the admin's card expires at day 90.
     t.clock.advance(89 * DAY);
     let owner = await login(t, ten.ownerCard, { passkey: ten.ownerPasskey });
-    const company = await owner.post(`/v1/cards/${ten.companyCard.id}/renew`, {});
+    expect((await owner.post(`/v1/cards/${ten.companyCard.id}/renew`, {})).status).toBe(403); // not from inside the tenant
+    const company = await renewCompanyCard(t, ten.tenantId);
     expect(company.status).toBe(200);
     const ownerRenew = await owner.post(`/v1/cards/${ten.ownerCard.id}/renew`, {});
     expect(ownerRenew.status).toBe(200);
