@@ -331,6 +331,10 @@ export class CardService {
   }
 
   async unlock(tx: Tx, card: CardRow, actorCardId: string, ctx: RequestContext): Promise<IssuedSecrets> {
+    const state = effectiveState(card, ctx.now);
+    if (card.kind !== 'person' || (state !== 'active' && state !== 'expired')) {
+      throw problems.conflict('illegal-transition', `A card that is ${state} cannot be unlocked`);
+    }
     if (!(await isLocked(tx, card.id))) throw problems.conflict('not-locked', 'This card is not locked');
     // The old SC was forgotten or under attack, so unlocking always issues a new one.
     const sc = await this.rotateSecret(tx, card, actorCardId, ctx.now);
@@ -349,7 +353,9 @@ export class CardService {
     settings: TenantSettings, ctx: RequestContext,
   ): Promise<IssuedSecrets> {
     const current = await this.materializeExpiry(tx, card, ctx);
+    if (card.kind === 'company') throw problems.conflict('illegal-transition', 'A company card cannot be replaced');
     // 1. Kill the old card first: its number, SC and sessions stop working immediately.
+    //    (A suspended card cannot be replaced - the state machine refuses - so replacing can never undo a suspension.)
     await this.transition(tx, current, 'replaced', 'replaced', actorCardId, ctx);
     await revokeSessionsForCard(tx, card.tenant_id, card.id, 'card_replaced', ctx.now);
     await tx.query(`UPDATE card_secrets SET status = 'retired', sc_hash = NULL, retired_at = $2 WHERE card_id = $1 AND status = 'current'`, [card.id, ctx.now]);
@@ -374,10 +380,7 @@ export class CardService {
     await this.#notifier.notify({ type: 'card_replaced', tenantId: card.tenant_id, cardId: next.id });
 
     const result: IssuedSecrets = { card: next, sc };
-    if (card.kind === 'company') {
-      await tx.query('UPDATE cards SET activated_at = $2 WHERE id = $1', [next.id, ctx.now]);
-      next = await this.transition(tx, { ...next, activated_at: ctx.now }, 'active', 'activated', actorCardId, ctx);
-    } else if (p.resetCredentials || current.activated_at === null) {
+    if (p.resetCredentials || current.activated_at === null) {
       // Lost or compromised device: the old strong factors must not carry over.
       await tx.query(`UPDATE credentials SET status = 'revoked' WHERE tenant_id = $1 AND card_id = $2`, [card.tenant_id, card.id]);
       const enrollment = await this.#newEnrollmentToken(tx, next, 'initial', actorCardId, ctx.now);
@@ -404,6 +407,8 @@ export class CardService {
       await revokeSessionsForCard(tx, card.tenant_id, card.id, 'credentials_reset', ctx.now);
     }
     const enrollment = await this.#newEnrollmentToken(tx, card, card.activated_at === null ? 'initial' : 'reset', actorCardId, ctx.now);
+    // The cardholder is always told that someone can now add a sign-in factor to their card.
+    await this.#notifier.notify({ type: 'enrollment_token_issued', tenantId: card.tenant_id, cardId: card.id });
     await this.event(tx, card, 'enrollment_token_issued', actorCardId, ctx);
     await this.#audit(tx, card, 'card:reset_credentials', 'ENROLLMENT_TOKEN_ISSUED', actorCardId, ctx);
     return enrollment;

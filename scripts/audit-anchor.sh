@@ -18,5 +18,5 @@ mkdir -p "$ANCHOR_DIR"
 file="$ANCHOR_DIR/anchors-$stamp.jsonl"
 
 ( cd "$here/../services/api" && node src/cli/anchor-audit-head.ts --out "$file" )
-[ -f "$file" ] || { echo "audit-anchor: no anchor file was produced" >&2; exit 1; }
+[ -s "$file" ] || { echo "audit-anchor: no anchor file was produced, or it is empty" >&2; exit 1; }
 echo "audit-anchor: OK file=$file lines=$(wc -l < "$file" | tr -d ' ')"

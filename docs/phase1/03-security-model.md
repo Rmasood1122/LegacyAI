@@ -110,7 +110,7 @@ Consequences:
 - **An attacker who only knows the card number can never move the SC counter**, because they cannot pass step 3. They cannot lock anyone out.
 - An attacker who *has* the victim's passkey device or authenticator seed gets at most 5 guesses out of 1,000 (0.5%) before the card locks — and at that point locking the card is exactly what we want.
 - **Passkey users cannot be throttled by strangers at all:** a passkey signature cannot be guessed, so we never need to slow it down.
-- **TOTP users:** a 6-digit code *can* be guessed, so failed TOTP attempts must be limited. After 5 failed TOTP attempts for a card in 15 minutes, TOTP for that card is paused for 15 minutes (doubling on repeat, capped at 1 hour, auto-expiring). **Residual risk, stated honestly:** someone who knows a TOTP-only user's card number can keep that user's TOTP login paused for as long as they keep attacking. It is temporary, never permanent, visible in the audit log, and it does not affect a passkey on the same card. This is why passkey is the recommended default and TOTP the fallback (see `08-open-decisions.md`).
+- **TOTP users:** a 6-digit code *can* be guessed, so failed TOTP attempts must be limited. After 5 failed TOTP attempts for a card in 15 minutes, TOTP for that card is paused for 15 minutes (doubling on repeat, capped at 1 hour, auto-expiring). **Changed after the independent review:** during a pause a code is examined *only when the SC in the same request is correct*. A stranger (who does not know the SC) therefore learns nothing while the pause lasts, but the real cardholder — who does know the SC — can still sign in with a correct code, so a stranger can no longer keep a TOTP user out. Someone who knows the SC and guesses codes during a pause is counted toward the hard lock (3–5 tries). A code is also spent the moment it verifies, even if the SC was wrong, so one observed code cannot be reused to try several SCs. **Residual risk:** TOTP codes can still be phished in real time; passkey remains the recommended default (see `08-open-decisions.md`).
 
 ### Threshold
 
@@ -197,9 +197,13 @@ States: `issued`, `active`, `suspended`, `revoked`, `expired`, `replaced`. Termi
 | expired → active | renew | Owner, Admin | new SC, new dates |
 | expired → revoked | revoke | Owner, Admin | e.g. offboarding someone whose card has already expired |
 | active → active | renew (not a state change) | Owner, Admin | new SC, new dates |
-| active / suspended / expired → replaced | replace | Owner, Admin | new card number + new SC issued; old card terminal; `replaced_by_card_id` set |
+| active / expired → replaced | replace | Owner, Admin | new card number + new SC issued; old card terminal; `replaced_by_card_id` set |
 
-**Everything not in this table is illegal** — for example `revoked → active`, `replaced → anything`, `issued → suspended`, `expired → suspended`, `suspended → expired`. *(13 legal transitions. Changed from the approved table: `suspended → expired` was removed — a suspended card stays suspended, the stricter state, so expiry can never turn a suspension into read-only grace access — and `expired → revoked` was added.)* Illegal transitions are rejected by the state machine in code *and* by a database trigger.
+**Everything not in this table is illegal** — for example `revoked → active`, `replaced → anything`, `issued → suspended`, `expired → suspended`, `suspended → expired`, `suspended → replaced`. *(12 legal transitions. Changed from the approved table: `suspended → expired` was removed — a suspended card stays suspended, the stricter state, so expiry can never turn a suspension into read-only grace access; `suspended → replaced` was removed after the independent review, because replacing a suspended card would hand out a new, active card and so undo the suspension; `expired → revoked` was added.)*
+
+**The company card** is not a login and is protected separately: nobody can suspend, revoke, replace or restrict it (that would switch the whole tenant off, or — if it were revoked — remove the tenant's expiry clock). Only a Company Owner can renew it. A customer tenant with no live company card is treated as lapsed.
+
+**No peer takeover.** Renew, unlock, replace and "issue enrollment token" all hand the person doing them a way into the target card (a new SC, a new token, a new card). So the actor must rank strictly above the target: an Admin cannot do them to another Admin or to itself. Company Owners, as the top rank, can do them to each other. Whenever a sign-in factor is added to a card by token, the cardholder is notified and the card's sessions end. Illegal transitions are rejected by the state machine in code *and* by a database trigger.
 
 **Effective state.** `expired` is decided by the clock, not by whether a background job has run: `effectiveState(card, now)` returns `expired` as soon as `now ≥ expires_at` (for a card that is `issued` or `active`). A sweeper job later writes the state and the `expired` event for the record, but enforcement never waits for it.
 
@@ -212,7 +216,7 @@ States: `issued`, `active`, `suspended`, `revoked`, `expired`, `replaced`. Termi
 
 **Rules that protect the tenant from itself:** nobody can suspend, revoke or change roles on their own card; the last active Company Owner card cannot be suspended, revoked or have the owner role removed.
 
-**Tested by** (`test/unit/lifecycle.test.ts`): a table of **all 36 from/to pairs** (13 legal, 23 illegal) — each asserted legal or illegal; (`test/integration/lifecycle.test.ts`): the database trigger rejects an illegal transition even when the code is bypassed; renewal kills the old SC and sessions; grace is read-only; last-owner protection.
+**Tested by** (`test/unit/lifecycle.test.ts`): a table of **all 36 from/to pairs** (12 legal, 24 illegal) — each asserted legal or illegal; (`test/integration/lifecycle.test.ts`): the database trigger rejects an illegal transition even when the code is bypassed; renewal kills the old SC and sessions; grace is read-only; last-owner protection.
 
 ---
 

@@ -209,6 +209,22 @@ describe('hash chain', () => {
     expect(r).toMatchObject({ ok: false, first_broken_seq: head - 2, broken_reason: 'head_seq_mismatch' });
   });
 
+  it('a long chain is checked in bounded pieces, and a removed chain head is reported', async () => {
+    const tenant = await createTenant(t, 'audit-pieces');
+    await write(tenant.tenantId, 30);
+    const head = (await verify(tenant.tenantId)).head_seq;
+    const part = await t.app.db.withTenantTx(tenant.tenantId, (tx) => verifyChain(tx, tenant.tenantId, 1, undefined, 10));
+    expect(part).toMatchObject({ ok: true, complete: false, rows_checked: 10 });
+    const rest = await t.app.db.withTenantTx(tenant.tenantId, (tx) => verifyChain(tx, tenant.tenantId, 11));
+    expect(rest).toMatchObject({ ok: true, complete: true, rows_checked: head - 10 });
+    // someone with database control removes ALL rows and the head: that is not "an empty, healthy chain"
+    await asSuperuserWithoutTriggers(async () => {
+      await su.query('DELETE FROM audit_log WHERE tenant_id = $1', [tenant.tenantId]);
+      await su.query('DELETE FROM audit_chain_heads WHERE tenant_id = $1', [tenant.tenantId]);
+    });
+    expect(await verify(tenant.tenantId)).toMatchObject({ ok: false, broken_reason: 'head_missing' });
+  });
+
   it('chains are independent per tenant: tampering with one does not affect another', async () => {
     const one = await createTenant(t, 'audit-ind1');
     const two = await createTenant(t, 'audit-ind2');
@@ -298,8 +314,9 @@ describe('what gets written', () => {
   });
 
   it('an allowed request that then fails still leaves an audit row', async () => {
+    const target = await addMember(t, tenant.owner, [{ role_key: 'expert' }], { login: false });
     const before = (await verify(tenant.tenantId)).head_seq;
-    const res = await tenant.owner.post(`/v1/cards/${tenant.companyCard.id}/reinstate`); // company card is active: illegal transition
+    const res = await tenant.owner.post(`/v1/cards/${target.card.id}/reinstate`); // the card is active, not suspended: illegal transition
     expect(res.status).toBe(409);
     const { rows } = await su.query('SELECT action, decision, details FROM audit_log WHERE tenant_id = $1 AND seq > $2 ORDER BY seq', [tenant.tenantId, before]);
     expect(rows).toEqual([{ action: 'card:reinstate', decision: 'allow', details: '{"outcome":"failed","status":409}' }]);
@@ -317,7 +334,11 @@ describe('what gets written', () => {
 
     const v = await tenant.owner.request('POST', '/v1/audit/verify', {});
     expect(v.status).toBe(200);
-    expect(v.body.ok).toBe(true);
+    expect(v.body).toMatchObject({ ok: true, complete: true });
+    expect(v.body.rows_checked).toBe(v.body.head_seq);
+    // a range that starts beyond the end of the chain is empty, not "broken"
+    const beyond = await tenant.owner.request('POST', '/v1/audit/verify', { from_seq: v.body.head_seq + 500 });
+    expect(beyond.body).toMatchObject({ ok: true, rows_checked: 0 });
 
     const expert = await addMember(t, tenant.owner, [{ role_key: 'expert' }]);
     expect((await expert.client.get('/v1/audit/events')).status).toBe(403);

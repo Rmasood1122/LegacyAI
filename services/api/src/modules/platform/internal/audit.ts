@@ -96,6 +96,8 @@ export function computeRowHash(row: AuditRow): Buffer {
 
 export interface VerifyResult {
   ok: boolean;
+  /** false when the row limit stopped the check before the end of the requested range. */
+  complete: boolean;
   rows_checked: number;
   head_seq: number;
   head_hash: string | null;
@@ -107,9 +109,9 @@ export interface VerifyResult {
 const ZERO_HASH = Buffer.alloc(32);
 
 /** Recomputes the chain for the tenant of the current transaction and reports the first broken row. */
-export async function verifyChain(tx: Tx, tenantId: string, fromSeq = 1, toSeq?: number): Promise<VerifyResult> {
+export async function verifyChain(tx: Tx, tenantId: string, fromSeq = 1, toSeq?: number, maxRows = Number.MAX_SAFE_INTEGER): Promise<VerifyResult> {
   const result: VerifyResult = {
-    ok: true, rows_checked: 0, head_seq: 0, head_hash: null, first_broken_seq: null, broken_reason: null, last_anchor: null,
+    ok: true, complete: true, rows_checked: 0, head_seq: 0, head_hash: null, first_broken_seq: null, broken_reason: null, last_anchor: null,
   };
   const fail = (seq: number, reason: string): void => {
     if (result.ok) {
@@ -119,13 +121,18 @@ export async function verifyChain(tx: Tx, tenantId: string, fromSeq = 1, toSeq?:
     }
   };
 
+  const headRow = await tx.query<{ last_seq: string; last_hash: Buffer }>(
+    'SELECT last_seq::text AS last_seq, last_hash FROM audit_chain_heads WHERE tenant_id = $1', [tenantId]);
+  const headSeq = headRow.rows[0] ? Number(headRow.rows[0].last_seq) : 0;
+
   let expectedSeq = Math.max(1, fromSeq);
   let prevHash: Buffer = ZERO_HASH;
   if (expectedSeq > 1) {
     const prev = await tx.query<{ row_hash: Buffer }>(
       'SELECT row_hash FROM audit_log WHERE tenant_id = $1 AND seq = $2', [tenantId, expectedSeq - 1]);
     if (prev.rows[0]) prevHash = prev.rows[0].row_hash;
-    else fail(expectedSeq - 1, 'row_missing');
+    // A start beyond the end of the chain is an empty range, not a broken chain.
+    else if (expectedSeq - 1 <= headSeq) fail(expectedSeq - 1, 'row_missing');
   }
 
   const BATCH = 1000;
@@ -133,9 +140,14 @@ export async function verifyChain(tx: Tx, tenantId: string, fromSeq = 1, toSeq?:
   let lastHash: Buffer = prevHash;
   for (;;) {
     const upper = toSeq ?? Number.MAX_SAFE_INTEGER;
+    const remaining = maxRows - result.rows_checked;
+    if (remaining <= 0) {
+      result.complete = false;
+      break;
+    }
     const { rows } = await tx.query<AuditRow>(
       `SELECT ${ROW_COLUMNS} FROM audit_log WHERE tenant_id = $1 AND seq > $2 AND seq <= $3 ORDER BY audit_log.seq ASC LIMIT $4`,
-      [tenantId, lastSeq, upper, BATCH],
+      [tenantId, lastSeq, upper, Math.min(BATCH, remaining)],
     );
     if (rows.length === 0) break;
     for (const row of rows) {
@@ -148,21 +160,21 @@ export async function verifyChain(tx: Tx, tenantId: string, fromSeq = 1, toSeq?:
       lastHash = row.row_hash;
       expectedSeq = seq + 1;
     }
-    if (rows.length < BATCH) break;
+    if (rows.length < Math.min(BATCH, remaining)) break;
   }
 
   // The head row is written only by the trigger. A deleted tail shows up as a mismatch here.
-  const head = await tx.query<{ last_seq: string; last_hash: Buffer }>(
-    'SELECT last_seq::text AS last_seq, last_hash FROM audit_chain_heads WHERE tenant_id = $1', [tenantId]);
-  if (head.rows[0]) {
-    result.head_seq = Number(head.rows[0].last_seq);
-    result.head_hash = head.rows[0].last_hash.toString('hex');
-    if (toSeq === undefined) {
-      if (result.head_seq !== lastSeq) fail(lastSeq + 1, 'head_seq_mismatch');
-      else if (lastSeq > 0 && !head.rows[0].last_hash.equals(lastHash)) fail(lastSeq, 'head_hash_mismatch');
+  if (headRow.rows[0]) {
+    result.head_seq = headSeq;
+    result.head_hash = headRow.rows[0].last_hash.toString('hex');
+    if (toSeq === undefined && result.complete) {
+      if (headSeq !== lastSeq && !(result.rows_checked === 0 && fromSeq > headSeq + 1)) fail(lastSeq + 1, 'head_seq_mismatch');
+      else if (headSeq === lastSeq && lastSeq > 0 && !headRow.rows[0].last_hash.equals(lastHash)) fail(lastSeq, 'head_hash_mismatch');
     }
-  } else if (result.rows_checked > 0) {
-    fail(lastSeq, 'head_missing');
+  } else {
+    // Every tenant gets audit rows from the moment it is created, so a tenant with NO head row
+    // has had its audit trail removed.
+    fail(Math.max(lastSeq, 1), 'head_missing');
   }
 
   const anchor = await tx.query<{ seq: string; row_hash: Buffer; anchored_at: Date }>(

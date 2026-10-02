@@ -34,8 +34,15 @@ cycle() { # $1 = engine
   echo "migrations: [$1] OK applied=$files rolled_back=$files leftover_objects=0"
 }
 
+# Which engines can run here? REQUIRE_DBMATE=1 (set in CI) makes a missing dbmate a failure,
+# so the comparison below can never be skipped silently.
 engines="builtin"
-if MIGRATION_ENGINE=dbmate $setup up >/dev/null 2>&1 || [ "${REQUIRE_DBMATE:-0}" = "1" ]; then engines="dbmate builtin"; fi
+if [ "$($setup engine)" = "dbmate" ]; then
+  engines="dbmate builtin"
+elif [ "${REQUIRE_DBMATE:-0}" = "1" ]; then
+  echo "migrations: FAIL dbmate is required here but its binary cannot be executed" >&2
+  exit 1
+fi
 for e in $engines; do cycle "$e"; done
 
 if [ "$engines" = "dbmate builtin" ]; then

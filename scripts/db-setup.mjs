@@ -93,6 +93,10 @@ function tryDbmate(args) {
     url.searchParams.set('sslmode', 'disable');
   }
   const res = spawnSync(bin, ['--url', url.toString(), '--migrations-dir', migrationsDir, '--no-dump-schema', ...args], { stdio: 'inherit' });
+  if (res.signal) {
+    console.error(`db-setup: dbmate was killed by ${res.signal}`);
+    process.exit(1);
+  }
   if (res.error || res.status === null) return false; // could not be executed at all
   if (res.status !== 0) {
     console.error(`db-setup: dbmate ${args.join(' ')} failed`);
@@ -116,6 +120,8 @@ function readMigrations() {
 
 async function builtin(direction) {
   await withClient(need('DATABASE_URL_ADMIN'), async (c) => {
+    // One runner at a time (held until this connection closes).
+    await c.query('SELECT pg_advisory_lock(721402)');
     await c.query('CREATE TABLE IF NOT EXISTS schema_migrations (version varchar(128) PRIMARY KEY)');
     const applied = new Set((await c.query('SELECT version FROM schema_migrations')).rows.map((r) => r.version));
     const all = readMigrations();
@@ -157,7 +163,8 @@ async function migrate(direction) {
     console.error('db-setup: MIGRATION_ENGINE must be auto, dbmate or builtin');
     process.exit(2);
   }
-  if (engine !== 'builtin' && tryDbmate([direction])) return;
+  // dbmate "migrate" / "rollback" (not "up"): the database already exists and the migrator may not create one.
+  if (engine !== 'builtin' && tryDbmate([direction === 'up' ? 'migrate' : 'rollback'])) return;
   if (engine === 'dbmate') {
     console.error('db-setup: MIGRATION_ENGINE=dbmate but the dbmate binary could not be executed');
     process.exit(1);
@@ -198,7 +205,13 @@ else if (cmd === 'down-all') {
   const count = readMigrations().length;
   for (let i = 0; i < count; i += 1) await migrate('down');
 } else if (cmd === 'reset') await reset();
+else if (cmd === 'engine') {
+  // Prints which migration engine can run on this machine. Used by the CI migration check.
+  const bin = dbmateBinary();
+  const probe = bin === null ? null : spawnSync(bin, ['--version'], { encoding: 'utf8' });
+  console.log(probe && !probe.error && probe.status === 0 ? 'dbmate' : 'builtin');
+}
 else {
-  console.error('db-setup: expected one of: roles | up | down | down-all | reset');
+  console.error('db-setup: expected one of: roles | up | down | down-all | reset | engine');
   process.exit(2);
 }

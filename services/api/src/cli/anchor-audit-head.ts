@@ -9,7 +9,7 @@ import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp, type App } from '../app.ts';
-import { listTenants, loadConfig, PLATFORM_TENANT_ID, recordAnchor } from '../modules/platform/index.ts';
+import { listTenants, loadConfig, PLATFORM_TENANT_ID } from '../modules/platform/index.ts';
 
 export interface AnchorLine {
   tenant_id: string;
@@ -18,14 +18,28 @@ export interface AnchorLine {
   anchored_at: string;
 }
 
-export async function anchorAll(app: App, objectUri: string, now: Date): Promise<AnchorLine[]> {
+/** Reads every tenant's chain head. Writes nothing. */
+export async function readHeads(app: App, now: Date): Promise<AnchorLine[]> {
   const tenants = await app.db.withTenantTx(PLATFORM_TENANT_ID, (tx) => listTenants(tx, 100_000, null), { platformScope: true });
   const lines: AnchorLine[] = [];
   for (const t of tenants) {
-    const head = await app.db.withTenantTx(t.id, (tx) => recordAnchor(tx, t.id, objectUri));
+    const head = await app.db.withTenantTx(t.id, async (tx) => {
+      const { rows } = await tx.query<{ last_seq: string; last_hash: Buffer }>(
+        'SELECT last_seq::text AS last_seq, last_hash FROM audit_chain_heads WHERE tenant_id = $1', [t.id]);
+      return rows[0] && Number(rows[0].last_seq) > 0 ? { seq: Number(rows[0].last_seq), row_hash: rows[0].last_hash.toString('hex') } : null;
+    });
     if (head) lines.push({ tenant_id: t.id, seq: head.seq, row_hash: head.row_hash, anchored_at: now.toISOString() });
   }
   return lines;
+}
+
+/** Records in the database that these heads were stored at `objectUri`. Call ONLY after the external write succeeded. */
+export async function recordAnchors(app: App, lines: AnchorLine[], objectUri: string): Promise<void> {
+  for (const l of lines) {
+    await app.db.withTenantTx(l.tenant_id, (tx) => tx.query(
+      'INSERT INTO audit_anchors (tenant_id, seq, row_hash, object_uri) VALUES ($1, $2, $3, $4)',
+      [l.tenant_id, l.seq, Buffer.from(l.row_hash, 'hex'), objectUri]));
+  }
 }
 
 export function renderAnchors(lines: AnchorLine[]): string {
@@ -65,15 +79,18 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const name = `anchors-${now.toISOString().replace(/[:.]/g, '-')}.jsonl`;
   const app = await createApp(loadConfig(process.env));
   try {
+    const lines = await readHeads(app, now);
+    // Order matters: the external copy is written FIRST. The database only records an anchor
+    // that really exists outside it.
     if (bucket !== undefined) {
-      const lines = await anchorAll(app, `gs://${bucket}/anchors/${name}`, now);
       await uploadToGcs(bucket, `anchors/${name}`, renderAnchors(lines));
+      await recordAnchors(app, lines, `gs://${bucket}/anchors/${name}`);
       console.log(JSON.stringify({ anchored_tenants: lines.length, object: `gs://${bucket}/anchors/${name}` }));
     } else {
       const file = out as string;
-      const lines = await anchorAll(app, `file:${path.basename(file)}`, now);
       // 'wx' = fail if the file exists: an anchor file is never overwritten.
       writeFileSync(file, renderAnchors(lines), { flag: 'wx' });
+      await recordAnchors(app, lines, `file:${path.basename(file)}`);
       console.log(JSON.stringify({ anchored_tenants: lines.length, file }));
     }
   } catch (err) {

@@ -82,6 +82,7 @@ export function createIdentityAccess(deps: IdentityAccessDeps): IdentityAccess {
       tenantOfToken,
       resolveSession,
       authorize: (tx, subject, action, resource, ctx) => authorizer.authorize(tx, subject, action, resource, ctx),
+      recordDecision: (tx, subject, action, resource, decision, ctx) => authorizer.record(tx, subject, action, resource, decision, ctx),
     },
     cards,
     authorizer,

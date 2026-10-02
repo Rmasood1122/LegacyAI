@@ -39,7 +39,10 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
       - name: Log in to Artifact Registry with the short-lived token
-        run: echo "${{ steps.auth.outputs.access_token }}" | docker login -u oauth2accesstoken --password-stdin "https://${{ vars.GCP_REGION }}-docker.pkg.dev"
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          REGISTRY_HOST: ${{ vars.GCP_REGION }}-docker.pkg.dev
+        run: echo "$ACCESS_TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://$REGISTRY_HOST"
       - name: Build and push
         run: |
           set -euo pipefail

@@ -84,6 +84,10 @@ describe('the database trigger enforces the same state machine as the code', () 
       await expect(inTx(`UPDATE cards SET card_number = '0000000000000000' WHERE id = $1`, [tenant.ownerCard.id])).rejects.toThrow(/immutable/);
       await expect(inTx(`UPDATE cards SET kind = 'company', person_id = NULL WHERE id = $1`, [tenant.ownerCard.id])).rejects.toThrow();
       await expect(inTx(`UPDATE cards SET state = 'banana' WHERE id = $1`, [tenant.ownerCard.id])).rejects.toBeTruthy();
+      // a card cannot be handed to a different person, and its id cannot change
+      const other = await tenant.owner.post('/v1/people', { display_name: 'Card Thief' });
+      await expect(inTx('UPDATE cards SET person_id = $2 WHERE id = $1', [tenant.ownerCard.id, other.body.id])).rejects.toThrow(/immutable/);
+      await expect(inTx('UPDATE cards SET id = uuidv7() WHERE id = $1', [tenant.ownerCard.id])).rejects.toThrow(/immutable/);
     } finally {
       await app.end();
     }
@@ -287,7 +291,7 @@ describe('expiry is written down by the sweeper, but never depends on it', () =>
     const { sweepExpiredCards } = await import('../../src/cli/sweep-expired-cards.ts');
     const ten = await createTenant(t, 'sweep');
     const m = await addMember(t, ten.owner, [{ role_key: 'expert' }], { login: false });
-    await su.query(`UPDATE cards SET expires_at = now() - interval '1 day', renewal_due = now() - interval '15 days', grace_until = now() + interval '13 days' WHERE id = $1`, [m.card.id]);
+    await su.query(`UPDATE cards SET issued_at = now() - interval '91 days', expires_at = now() - interval '1 day', renewal_due = now() - interval '15 days', grace_until = now() + interval '13 days' WHERE id = $1`, [m.card.id]);
     expect(await stateOf(m.card.id)).toBe('active'); // stored state lags...
     expect((await ten.owner.get(`/v1/cards/${m.card.id}`)).body.state).toBe('expired'); // ...but the API already says expired
     const swept = await sweepExpiredCards(t.app, new Date());
@@ -295,5 +299,32 @@ describe('expiry is written down by the sweeper, but never depends on it', () =>
     expect(await stateOf(m.card.id)).toBe('expired');
     expect((await events(m.card.id)).at(-1)).toBe('expired');
     expect(await sweepExpiredCards(t.app, new Date())).toBe(0); // idempotent
+  });
+
+  it('housekeeping removes only rows that are long dead (so tables that only grow cannot fill the database)', async () => {
+    const { purgeOldRows } = await import('../../src/cli/sweep-expired-cards.ts');
+    const ten = await createTenant(t, 'purge');
+    const m = await addMember(t, ten.owner, [{ role_key: 'expert' }]);
+    await ten.owner.post(`/v1/cards/${m.card.id}/suspend`, { reason: 'purge test' }); // revokes m's session
+    const count = async (table: string): Promise<number> => (await su.query(`SELECT count(*)::int AS n FROM ${table} WHERE tenant_id = $1`, [ten.tenantId])).rows[0].n;
+    const sessions = await count('sessions');
+    const tokens = await count('enrollment_tokens');
+    expect(sessions).toBeGreaterThanOrEqual(2);
+
+    // Today: nothing is old enough. Nothing in this tenant is removed.
+    await purgeOldRows(t.app, new Date());
+    expect(await count('sessions')).toBe(sessions);
+    expect(await count('enrollment_tokens')).toBe(tokens);
+    expect((await ten.owner.get('/v1/auth/session')).status).toBe(200);
+
+    // 45 days from now: revoked / expired sessions and spent tokens are gone; the cards and the audit log are untouched.
+    const audit = await count('audit_log');
+    const cards = await count('cards');
+    const removed = await purgeOldRows(t.app, new Date(Date.now() + 45 * 86_400_000));
+    expect(removed.sessions).toBeGreaterThanOrEqual(sessions);
+    expect(await count('sessions')).toBe(0);
+    expect(await count('enrollment_tokens')).toBe(0);
+    expect(await count('audit_log')).toBe(audit);
+    expect(await count('cards')).toBe(cards);
   });
 });

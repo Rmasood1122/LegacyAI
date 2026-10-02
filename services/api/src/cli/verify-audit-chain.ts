@@ -6,7 +6,8 @@
 // --anchors takes a file of chain heads that was stored OUTSIDE the database (the anchor
 // bucket). Without it, someone with full database control could rewrite the whole chain
 // consistently and this command would not notice; with it, they would be caught.
-// Exit code: 0 = every chain intact, 1 = at least one problem, 2 = bad arguments.
+// Exit code: 0 = every chain intact, 3 = at least one chain is broken, 2 = bad arguments,
+// 1 = the command itself failed (could not connect, bad configuration, ...).
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createApp, type App } from '../app.ts';
@@ -78,5 +79,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   } finally {
     await app.close();
   }
-  process.exit(failed ? 1 : 0);
+  process.exit(failed ? 3 : 0);
 }

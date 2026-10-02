@@ -42,6 +42,9 @@ async function bareServer(decision: Decision, calls: string[] = []): Promise<Htt
       calls.push(action);
       return decision;
     },
+    recordDecision: async (_tx, _s, action, _r, d) => {
+      calls.push(`recorded ${action} ${d.effect}`);
+    },
   };
   return createHttpServer({
     config: loadConfig(testEnv()), db: t.app.db, log: createLogger('silent'), clock: systemClock, auth,
@@ -127,17 +130,19 @@ describe('the handler never runs unless the policy decision point said allow', (
     const res = await server.app.inject({ method: 'GET', url: '/v1/tenants/current', cookies: { '__Host-lai_session': FAKE_TOKEN } });
     expect(res.statusCode).toBe(403);
     expect(ran).toBe(0);
-    expect(calls).toEqual(['tenant:read']);
+    expect(calls).toEqual(['tenant:read', 'recorded tenant:read deny']); // asked, and the denial was written down
     await server.app.close();
   });
 
   it('allow -> handler runs exactly once', async () => {
     let ran = 0;
-    const server = await bareServer(allow());
+    const calls: string[] = [];
+    const server = await bareServer(allow(), calls);
     server.defineRoutes([tenantRoute(async () => { ran += 1; return { body: tenantBody }; })]);
     const res = await server.app.inject({ method: 'GET', url: '/v1/tenants/current', cookies: { '__Host-lai_session': FAKE_TOKEN } });
     expect(res.statusCode).toBe(200);
     expect(ran).toBe(1);
+    expect(calls).toEqual(['tenant:read', 'recorded tenant:read allow']); // every decision is recorded, allow included
     await server.app.close();
   });
 
@@ -163,6 +168,7 @@ describe('the handler never runs unless the policy decision point said allow', (
       tenantOfToken: () => PLATFORM_TENANT_ID,
       resolveSession: async () => ({ subject: fakeSubject(), csrfToken: 'csrf' }),
       authorize: async () => { throw new Error('policy store unavailable'); },
+      recordDecision: async () => undefined,
     };
     const s2 = await createHttpServer({
       config: loadConfig(testEnv()), db: t.app.db, log: createLogger('silent'), clock: systemClock, auth,

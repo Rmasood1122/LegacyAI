@@ -30,7 +30,8 @@ export class Database {
       max: poolMax,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,
-      statement_timeout: 15_000,
+      // Client-side limit for every statement (works through transaction-mode poolers too).
+      query_timeout: 20_000,
     });
     // A dropped idle connection must not crash the process.
     this.#pool.on('error', () => undefined);
@@ -53,6 +54,9 @@ export class Database {
     try {
       await client.query('BEGIN');
       await client.query('SELECT set_config($1, $2, true)', ['app.tenant_id', tenantId]);
+      // Per-transaction, not a connection start-up parameter: transaction-mode poolers
+      // (PgBouncer, as used by Neon's pooled host) reject unknown start-up parameters.
+      await client.query('SELECT set_config($1, $2, true)', ['statement_timeout', '15000']);
       if (options.platformScope === true) {
         await client.query('SELECT set_config($1, $2, true)', ['app.platform_scope', 'on']);
       }
@@ -123,7 +127,7 @@ export class Database {
 }
 
 /** The newest migration this build of the API expects. Checked by the readiness endpoint. */
-export const EXPECTED_SCHEMA_VERSION = '20261002000500';
+export const EXPECTED_SCHEMA_VERSION = '20261002000600';
 
 /** The LegacyAI operator tenant (seeded by the first migration). */
 export const PLATFORM_TENANT_ID = '00000000-0000-7000-8000-000000000001';

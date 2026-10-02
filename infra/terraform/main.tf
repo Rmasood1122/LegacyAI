@@ -20,12 +20,14 @@ locals {
     "cloudscheduler.googleapis.com",
     "billingbudgets.googleapis.com",
     "monitoring.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
+    "sts.googleapis.com",
   ]
 
   # Names only. Terraform never sees a secret VALUE: you add values by hand.
   secrets = {
     database-url           = "Connection string for the app role (legacyai_app). No superuser, no BYPASSRLS."
-    database-url-admin     = "Connection string for migrations and backups. NOT mounted into the API."
+    database-url-admin     = "Connection string for BACKUPS: a role that can read every tenant. NOT mounted into the API."
     sc-pepper-keyring      = "JSON keyring: pepper for the 3-digit secret code."
     credential-enc-keyring = "JSON keyring: encrypts authenticator-app seeds."
     hmac-index-key         = "Key for one-way fingerprints of IPs and card numbers."
@@ -56,22 +58,25 @@ resource "google_artifact_registry_repository" "containers" {
   format        = "DOCKER"
   description   = "LegacyAI container images"
 
-  # Keep the two newest versions of each image; delete the rest. Keeps storage under the 0.5 GB free allowance.
+  # Keep the three newest versions of each image; delete anything else once it is a week old
+  # (tagged or not). This keeps storage near the 0.5 GB free allowance.
+  # CAUTION: always deploy one of the three newest images. An older image that is still
+  # deployed would be deleted, and Cloud Run could then not start new instances of it.
   cleanup_policy_dry_run = false
 
   cleanup_policies {
-    id     = "keep-two-newest"
+    id     = "keep-three-newest"
     action = "KEEP"
     most_recent_versions {
-      keep_count = 2
+      keep_count = 3
     }
   }
 
   cleanup_policies {
-    id     = "delete-everything-else"
+    id     = "delete-older-than-a-week"
     action = "DELETE"
     condition {
-      older_than = "86400s"
+      older_than = "604800s"
     }
   }
 
@@ -84,30 +89,40 @@ resource "google_service_account" "api" {
   project      = var.project_id
   account_id   = "legacyai-api"
   display_name = "LegacyAI API runtime"
+
+  depends_on = [google_project_service.enabled]
 }
 
 resource "google_service_account" "ai" {
   project      = var.project_id
   account_id   = "legacyai-ai"
   display_name = "LegacyAI AI service runtime"
+
+  depends_on = [google_project_service.enabled]
 }
 
 resource "google_service_account" "backup" {
   project      = var.project_id
   account_id   = "legacyai-backup"
   display_name = "LegacyAI backup job"
+
+  depends_on = [google_project_service.enabled]
 }
 
 resource "google_service_account" "anchor" {
   project      = var.project_id
   account_id   = "legacyai-anchor"
   display_name = "LegacyAI audit-anchor job"
+
+  depends_on = [google_project_service.enabled]
 }
 
 resource "google_service_account" "scheduler" {
   project      = var.project_id
   account_id   = "legacyai-scheduler"
   display_name = "LegacyAI scheduler (starts the two jobs)"
+
+  depends_on = [google_project_service.enabled]
 }
 
 # ------------------------------------------------------------------ secrets (names only)
@@ -260,8 +275,10 @@ resource "google_cloud_run_v2_service" "api" {
         value = "production"
       }
       env {
+        # Trust exactly ONE proxy hop (Cloud Run's front end) for the client address.
+        # Never "true": that would let callers choose their own IP via X-Forwarded-For.
         name  = "TRUST_PROXY"
-        value = "true"
+        value = "1"
       }
       env {
         name  = "VALIDATE_RESPONSES"
@@ -352,6 +369,10 @@ resource "google_cloud_run_v2_service_iam_member" "api_public" {
   member   = "allUsers"
 }
 
+# NOTE (Phase 2): with internal-only ingress, the API can reach this service only if the
+# API's outbound traffic goes through a VPC (Direct VPC egress), which is NOT configured
+# here because it must be costed first. In Phase 1 nothing calls the AI stub, so it is
+# deliberately unreachable from outside. Decide the networking when Phase 2 starts.
 resource "google_cloud_run_v2_service" "ai" {
   for_each            = local.service_regions
   project             = var.project_id
@@ -419,10 +440,12 @@ resource "google_cloud_run_v2_job" "backup" {
         image   = "${local.registry}/backup-tools:${var.tools_image_tag}"
         command = ["backup.sh"]
 
+        # /tmp on Cloud Run is held in memory, and the dump is written there before upload.
+        # 1 GiB leaves room for the compressed dump of a full 0.5 GB database.
         resources {
           limits = {
             cpu    = "1"
-            memory = "512Mi"
+            memory = "1Gi"
           }
         }
 
@@ -517,11 +540,23 @@ resource "google_cloud_run_v2_job" "anchor" {
   }
 }
 
-resource "google_project_iam_member" "scheduler_runs_jobs" {
-  count   = var.deploy_services ? 1 : 0
-  project = var.project_id
-  role    = "roles/run.invoker"
-  member  = "serviceAccount:${google_service_account.scheduler.email}"
+# The scheduler account may start these two jobs and nothing else (no project-wide role).
+resource "google_cloud_run_v2_job_iam_member" "scheduler_runs_backup" {
+  count    = var.deploy_services ? 1 : 0
+  project  = var.project_id
+  location = var.primary_region
+  name     = google_cloud_run_v2_job.backup[0].name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.scheduler.email}"
+}
+
+resource "google_cloud_run_v2_job_iam_member" "scheduler_runs_anchor" {
+  count    = var.deploy_services ? 1 : 0
+  project  = var.project_id
+  location = var.primary_region
+  name     = google_cloud_run_v2_job.anchor[0].name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.scheduler.email}"
 }
 
 resource "google_cloud_scheduler_job" "nightly_backup" {

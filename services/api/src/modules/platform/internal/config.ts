@@ -41,7 +41,8 @@ export interface Config {
   webauthn: { rpId: string; rpName: string };
   allowedOrigins: string[];
   argon2: { memoryKiB: number; iterations: number; parallelism: number; maxConcurrency: number };
-  trustProxy: boolean;
+  /** How many reverse proxies in front of the API to trust for the client address. 0 = none. */
+  trustProxyHops: number;
   validateResponses: boolean;
   exportDir: string;
 }
@@ -225,10 +226,21 @@ export function loadConfig(env: Env): Config {
       parallelism: integer('ARGON2_PARALLELISM', ARGON2_FLOOR.parallelism, ARGON2_FLOOR.parallelism, 8),
       maxConcurrency: integer('ARGON2_MAX_CONCURRENCY', 4, 1, 64),
     },
-    trustProxy: bool('TRUST_PROXY', false),
+    // A NUMBER of hops, never "true": trusting every hop would let any caller choose its own
+    // IP address through X-Forwarded-For and so defeat per-IP rate limits and network restrictions.
+    trustProxyHops: raw('TRUST_PROXY') === 'false' ? 0 : integer('TRUST_PROXY', 0, 0, 5),
     validateResponses: bool('VALIDATE_RESPONSES', nodeEnv !== 'production'),
     exportDir: raw('EXPORT_DIR') ?? './exports',
   };
+
+  // The placeholder keys from .env.example decode to text starting with "FAKE-". They must
+  // never protect real data.
+  if (nodeEnv === 'production') {
+    const keys = [...config.scPepper.keys.values(), ...config.credentialEnc.keys.values(), config.hmacIndexKey];
+    if (keys.some((k) => k.reveal().subarray(0, 5).toString('utf8') === 'FAKE-') || serviceToken.startsWith('fake-')) {
+      problems.push('a placeholder key from .env.example is in use; generate real keys for production');
+    }
+  }
 
   if (problems.length > 0) throw new ConfigError(problems);
   return config;

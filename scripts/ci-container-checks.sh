@@ -9,7 +9,7 @@ for image in legacyai-api legacyai-ai legacyai-backup-tools; do
   uid="$(docker run --rm --entrypoint id "$image" -u)"
   [ "$uid" != "0" ] || fail "$image runs with uid 0"
   # No environment variable in the image may look like a credential.
-  if docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$image" | grep -Eiq '(password|secret|token|pepper|database_url|_key)='; then
+  if docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$image" | grep -Eiq '^[^=]*(password|secret|token|pepper|keyring|database_url|_key)[^=]*='; then
     fail "$image has a secret-looking environment variable baked in"
   fi
   echo "container-checks: $image user=$user uid=$uid size=$(docker image inspect -f '{{.Size}}' "$image" | awk '{printf "%.0f MB", $1/1000000}')"
@@ -32,6 +32,8 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 [ "$ok" = "1" ] || fail "the AI stub did not answer /health"
-[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/docs)" = "404" ] || fail "the AI stub exposes /docs"
-echo "container-checks: AI stub /health ok, /docs 404"
+for path in / /docs /redoc /openapi.json /v1/ask; do
+  [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:18080$path")" = "404" ] || fail "the AI stub answers $path"
+done
+echo "container-checks: AI stub /health ok; /, /docs, /redoc, /openapi.json, /v1/ask all 404"
 echo "container-checks: PASS"

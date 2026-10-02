@@ -30,12 +30,12 @@ You do **not** need any of this to run or test the product on your own computer.
    node -e "for(let i=0;i<3;i++)console.log(require('crypto').randomBytes(24).toString('base64url'))"
    ```
    Call them *migrator password*, *app password*, *backup password*. Keep them in your password manager.
-4. In a terminal, in the `services/api` folder, set four variables **for this terminal window only** (replace the parts in capitals; use the *direct*, not the *pooled*, host for these):
+4. Open **Git Bash** (it comes with Git for Windows; the commands in this guide are written for it, not for PowerShell). In the `services/api` folder, set four variables **for this terminal window only** (replace the parts in capitals; use the *direct*, not the *pooled*, host except where noted). **Type a space before each `export`** — Git Bash then keeps the line, and the password in it, out of its history file:
    ```
-   export DATABASE_URL_SUPERUSER='postgresql://neondb_owner:NEON_PASSWORD@NEON_HOST/legacyai?sslmode=require'
-   export DATABASE_URL_ADMIN='postgresql://legacyai_migrator:MIGRATOR_PASSWORD@NEON_HOST/legacyai?sslmode=require'
-   export DATABASE_URL='postgresql://legacyai_app:APP_PASSWORD@NEON_POOLED_HOST/legacyai?sslmode=require'
-   export DATABASE_URL_BACKUP='postgresql://legacyai_backup:BACKUP_PASSWORD@NEON_HOST/legacyai?sslmode=require'
+    export DATABASE_URL_SUPERUSER='postgresql://neondb_owner:NEON_PASSWORD@NEON_HOST/legacyai?sslmode=require'
+    export DATABASE_URL_ADMIN='postgresql://legacyai_migrator:MIGRATOR_PASSWORD@NEON_HOST/legacyai?sslmode=require'
+    export DATABASE_URL='postgresql://legacyai_app:APP_PASSWORD@NEON_POOLED_HOST/legacyai?sslmode=require'
+    export DATABASE_URL_BACKUP='postgresql://legacyai_backup:BACKUP_PASSWORD@NEON_HOST/legacyai?sslmode=require'
    ```
 5. Create the three database roles, then the tables:
    ```
@@ -44,8 +44,10 @@ You do **not** need any of this to run or test the product on your own computer.
    npm run db:up
    ```
    - `db:roles` creates `legacyai_migrator`, `legacyai_app` and `legacyai_backup` with the passwords you chose.
-   - **If `db:roles` stops with an error about `BYPASSRLS`:** Neon did not let the setup role hand that right to the backup role (this is the one thing I could not verify without your account). In that case use the Neon setup role's connection string for backups (as `database-url-admin` in Part C), and tell Claude so the script can skip the backup role.
-   - `db:up` creates all 33 tables.
+   - `db:roles` ends by checking the roles and stops if any has more power than intended.
+   - **If `db:roles` stops with a "permission denied" error:** this step has never been run against Neon (it needs your account), so an error here is possible. Send Claude the exact message.
+   - **If it stops with an error about `BYPASSRLS`:** Neon did not let the setup role hand that right to the backup role (this is the one thing I could not verify without your account). In that case use the Neon setup role's connection string for backups (as `database-url-admin` in Part C), and tell Claude so the script can skip the backup role.
+   - `db:up` creates all 33 tables (6 migrations).
 6. **Where the connection strings go later:** the *app* one (`DATABASE_URL`, pooled host) goes into the secret `legacyai-database-url`. The *backup/admin* one goes into `legacyai-database-url-admin`. Never paste either into a file in this repository.
 
 > Neon's free database **sleeps after 5 minutes** and has about 400 hours of awake time per month. Do not point an uptime monitor at `/v1/ready` — it would keep the database awake until the allowance runs out, and then the database stops until next month. `/v1/health` is safe to monitor (it never touches the database).
@@ -64,7 +66,7 @@ You do **not** need any of this to run or test the product on your own computer.
    terraform init
    terraform plan
    ```
-   Read the plan. It should list about **30 things to add** and **nothing to change or destroy**: 9 enabled APIs, 1 registry, 5 service accounts, 6 secrets, about 11 access rules, 2 buckets, 1 email channel, 1 budget. **No Cloud Run service, no job.**
+   Read the plan. It should list about **40 things to add** and **nothing to change or destroy**: 11 enabled APIs, 1 registry, 5 service accounts, 6 secrets, 13 access rules, 2 buckets, 1 email channel, 1 budget. **No Cloud Run service, no job.**
 7. If the plan looks right: `terraform apply`. (This is the step Claude will never do for you.)
 
 ---
@@ -80,7 +82,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 | Secret name | What to put in it |
 |---|---|
 | `legacyai-database-url` | The **app** connection string from Part A (pooled host) |
-| `legacyai-database-url-admin` | The **backup** connection string from Part A |
+| `legacyai-database-url-admin` | The **backup** connection string from Part A (`legacyai_backup`, direct host). Despite the name it is used only by the backup job. Not the migrator's. |
 | `legacyai-sc-pepper-keyring` | `{"current":"v1","keys":{"v1":"<random key>"}}` |
 | `legacyai-credential-enc-keyring` | `{"current":"k1","keys":{"k1":"<another random key>"}}` |
 | `legacyai-hmac-index-key` | `<another random key>` |
@@ -88,9 +90,9 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
 To add a value without it landing in your terminal history, put it in a temporary file and run:
 ```
-gcloud secrets versions add legacyai-sc-pepper-keyring --data-file=TEMP_FILE
+gcloud secrets versions add legacyai-sc-pepper-keyring --project=YOUR_PROJECT_ID --data-file=TEMP_FILE
 ```
-then delete the temporary file.
+then delete the temporary file. Create the temporary file **outside this repository folder** (for example on your Desktop), with no blank line at the end.
 
 **Write the pepper and the encryption key down somewhere safe (password manager).** If the pepper is lost, nobody can log in until every card is renewed. If the encryption key is lost, every authenticator-app enrollment must be redone.
 
@@ -102,7 +104,7 @@ then delete the temporary file.
 
 Backups are encrypted so that the backup job itself cannot read them.
 
-1. Install `age` (<https://age-encryption.org>) on your computer and run `age-keygen -o legacyai-backup-key.txt`.
+1. Install `age` (<https://age-encryption.org>) on your computer. **Leave the repository folder first** (for example `cd ~/Desktop`) so the key file can never be committed by accident, then run `age-keygen -o legacyai-backup-key.txt`.
 2. The file contains a **private** key. Store it **offline**: password manager plus a printed copy. **If you lose it, the backups cannot be restored by anyone.** Never upload it, never put it in a secret, never commit it.
 3. The command prints a **public** key starting with `age1…`. Put that in `terraform.tfvars` as `backup_age_recipient`. A public key is not a secret.
 
@@ -136,6 +138,8 @@ Backups are encrypted so that the backup job itself cannot read them.
    It prints a card number, a 3-digit code and a one-time token **once**. Write them down.
 5. Check: open the API address that Terraform printed, followed by `/v1/health`. You should see `{"status":"ok",…}`.
 
+**Known limits of this step (Phase 1):** tenant exports are written to the container's temporary disk, which disappears when the service scales down — fine for a skeleton, not for real use. The AI service cannot be reached by anything yet (see the cost document). The budget is in US dollars and will be refused if your billing account uses another currency. If your Google organisation forbids public services, the step that makes the API reachable will fail.
+
 ---
 
 ## Things that are irreversible or cost money — stop and think
@@ -143,10 +147,10 @@ Backups are encrypted so that the backup job itself cannot read them.
 | Action | Why to pause |
 |---|---|
 | `lock_audit_anchor_retention = true` | **Permanent.** Nobody can ever shorten or remove the retention rule on that bucket. Leave `false` during the pilot. |
-| Raising `api_max_instances` above 2 | This cap is what bounds the worst-case bill (about $120/month if attacked non-stop at 2 instances — an estimate). |
+| Raising `api_max_instances` above 2 | The cap bounds CPU and memory charges (about $126/month at 2 instances flat-out — an estimate). It does **not** cap per-request or data charges: there is no hard ceiling on the bill under attack. |
 | Adding an `eu` region | EU regions have **no** Cloud Storage free allowance. |
 | Adding a 7th secret, or a 4th scheduled job | Small monthly charges begin. |
-| `terraform destroy` | Buckets with retention refuse to be deleted until every object has aged out. |
+| `terraform destroy` | Buckets with retention refuse to be deleted until every object has aged out. The services and jobs have deletion protection switched on, so destroying or replacing them fails until you turn it off deliberately. |
 
 ## What has and has not been proven
 

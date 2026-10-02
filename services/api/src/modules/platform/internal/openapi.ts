@@ -62,6 +62,11 @@ export function loadContract(filePath: string): Contract {
   // Query strings arrive as text; coerce "25" to 25 and fill in declared defaults.
   const coercing = new Ajv2020({ allErrors: true, strict: false, coerceTypes: true, useDefaults: true });
   addFormats(coercing);
+  // The stock "uuid" format also accepts "urn:uuid:..." and upper case, which PostgreSQL or our
+  // own checks would then reject with an error. One canonical spelling only.
+  const canonicalUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  strict.addFormat('uuid', canonicalUuid);
+  coercing.addFormat('uuid', canonicalUuid);
 
   const operations = new Map<string, Operation>();
   const paths = (doc.paths ?? {}) as Record<string, Record<string, Json>>;

@@ -51,6 +51,8 @@ export interface ResourceRef {
   owner_person_id?: string | null;
   department_id?: string | null;
   sensitivity?: number;
+  /** For card resources: a company card is the tenant's identity and subscription clock, not a login. */
+  card_kind?: 'person' | 'company';
   /** Highest role rank held by the target card (for the rank guard). */
   target_rank?: number;
   /** Highest rank among roles being granted or removed. */

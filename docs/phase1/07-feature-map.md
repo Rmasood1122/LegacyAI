@@ -2,7 +2,7 @@
 
 ## In plain language
 
-For each of your features: which phase delivers it, and — for Phase 1 features — exactly which module, tables, endpoints and tests cover it. Test file names are the planned ones from the design; the Step 7 report will replace "planned" with real test output.
+For each of your features: which phase delivers it, and — for Phase 1 features — exactly which module, tables, endpoints and tests cover it. Test file names below are the real files under `services/api/test/`; results are in `REPORT.md`.
 
 Source: the feature list you sent on 2026-10-02 (30 numbered features, sections A–G).
 
@@ -91,7 +91,7 @@ Buying-urgency tools (Risk Calculator, free 7-day gap scan, Clock Dashboard, pri
 | Module | `identity-access` (`cards`, `card-number`, `secret-code`, `auth`, `lifecycle`) |
 | Tables | `cards`, `card_directory`, `card_secrets`, `card_auth_state`, `credentials`, `enrollment_tokens`, `people` |
 | Endpoints | `POST /v1/cards`, `GET /v1/cards`, `GET /v1/cards/{id}`, `POST /v1/cards/{id}/renew`, `POST /v1/cards/{id}/unlock`, `POST /v1/auth/login/*`, `POST /v1/auth/enrollment/*`, `POST /v1/tenants` (issues the company card and first Owner card) |
-| Tests (planned) | `unit/card-number`, `unit/secret-code`, `integration/cards` (global uniqueness, one live card per person, person card linked to its company), `integration/lockout`, `integration/renewal`, `security/card-sc-alone`, `security/enumeration` |
+| Tests | `unit/card-number`, `unit/secret-code`, `integration/smoke`, `integration/lifecycle` (one live card per person, renewal with SC rotation), `integration/lockout`, `integration/features` (pepper rotation, bootstrap), `security/card-sc-alone`, `security/enumeration` |
 | From your list, covered | unique number with check digit · company card with person cards linked · SC stored only as a salted hash (plus pepper) · never the only login · lock after 3–5 wrong codes with admin alert (via the notification interface; console/log only for now) · rotation on renewal |
 | From your list, **not** in Phase 1 | SSO or a device check as the strong factor (Phase 1: passkey or authenticator app). Email delivery of alerts. |
 
@@ -101,7 +101,7 @@ Buying-urgency tools (Risk Calculator, free 7-day gap scan, Clock Dashboard, pri
 | Module | `identity-access` (`roles`, `policy`) |
 | Tables | `roles`, `permissions`, `role_permissions`, `card_roles`, `tenant_settings.enabled_roles`, `departments` |
 | Endpoints | `GET /v1/roles`, `GET/POST/PUT /v1/cards/{id}/roles`, `DELETE /v1/cards/{id}/roles/{role_key}`, `POST /v1/internal/policy/check` |
-| Tests (planned) | `unit/policy` (table-driven, deny by default, all 8 roles × all permissions), `integration/resource-filter`, `security/route-policy-coverage` |
+| Tests | `unit/policy` (84 table-driven cases plus garbage-input checks, deny by default), `integration/resource-filter` (all 8 roles, filter == decide on every row), `security/route-policy-coverage` |
 | Notes | 4 roles on by default; the other 4 exist but are off. Reviewer capability granted to Admin and Expert by `pilot_reviewer` rows. "Contractor: time-limited" is covered by a shorter card validity + restrictions (feature 5). "Owner: billing" has nothing to grant until Phase 4. |
 
 ### Feature 3 — Card lifecycle
@@ -111,7 +111,7 @@ Buying-urgency tools (Risk Calculator, free 7-day gap scan, Clock Dashboard, pri
 | Tables | `cards` (state, dates), `card_events`, `sessions` (revocation) |
 | Endpoints | `POST /v1/cards`, `…/suspend`, `…/reinstate`, `…/revoke`, `…/replace`, `…/enrollment-token`; `PATCH /v1/people/{id}` with `status: departed` revokes that person's card in the same transaction |
 | CLI | `sweep-expired-cards` (records expiry; enforcement does not depend on it) |
-| Tests (planned) | `unit/lifecycle` (all 36 state pairs), `integration/lifecycle` (DB trigger, replacement kills the old number and code at once, session revocation, grace read-only, last-owner protection, departed → revoked) |
+| Tests | `unit/lifecycle` (all 36 state pairs), `integration/lifecycle` (DB trigger on all 36 pairs, replacement kills the old number and code at once, offboarding, rank and self-action guards, expiry sweep), `integration/sessions` (revocation, grace read-only) |
 | **Not** in Phase 1 | The admin screen (frontend). Automatic offboarding driven by an HR system (needs SCIM, feature 16). |
 
 ### Feature 5 — Card-level permissions and usage history
@@ -120,7 +120,7 @@ Buying-urgency tools (Risk Calculator, free 7-day gap scan, Clock Dashboard, pri
 | Module | `identity-access` (`cards`, `policy` step 12) |
 | Tables | `card_restrictions`, `card_usage_counters`, `card_events`, `card_auth_state` |
 | Endpoints | `GET /v1/cards/{id}/events`, `GET/PUT /v1/cards/{id}/restrictions` |
-| Tests (planned) | `unit/policy` (each restriction type → deny), `integration/card-restrictions`, `integration/card-events` |
+| Tests | `unit/policy` (each restriction type → deny), `integration/features` (read-only, usage cap, network, hours through the API), `integration/lifecycle` (usage history with device) |
 | From your list, covered | what the card did and when, and from which device (the credential used + a fingerprint of the browser, never a raw address in the response) · business-hours-only · read-only · usage caps · "one site only" as a network allow-list |
 | Design only | **Unusual-use lock** ("new country at 3 a.m."): hook is `card_auth_state.lock_reason = 'anomaly'`. No detection code, and no location lookup (that needs a paid or third-party data source). |
 
@@ -131,7 +131,7 @@ Buying-urgency tools (Risk Calculator, free 7-day gap scan, Clock Dashboard, pri
 | Tables | `audit_log`, `audit_chain_heads`, `audit_anchors` |
 | Endpoints | `GET /v1/audit/events`, `POST /v1/audit/verify`; audit rows are included in the tenant export |
 | CLI | `audit:verify`, `audit:anchor` |
-| Tests (planned) | `integration/audit` (append-only by grant and by trigger, chain verification, tamper detection as superuser, anchor mismatch), `security/no-secrets` |
+| Tests | `integration/audit` (append-only by grant and by trigger, chain verification, tamper detection as superuser, anchor mismatch), `security/no-secrets` |
 | Honest wording | Your list says "tamper-proof". We deliver **tamper-evident**: changes are detectable, not impossible. Please use that word with buyers. Phase 1 records card events, decisions and exports; capture, edit and question events arrive with the features that create them. |
 
 ### Feature 29 — Multi-tenant admin console (API, basic)
@@ -141,7 +141,7 @@ Buying-urgency tools (Risk Calculator, free 7-day gap scan, Clock Dashboard, pri
 | Tables | `tenants`, `tenant_settings`, `plan_limits` |
 | Endpoints | `POST /v1/tenants`, `GET /v1/tenants`, `GET /v1/tenants/current`, `GET/PATCH /v1/tenants/current/settings`, `GET /v1/tenants/current/usage` |
 | CLI | `bootstrap-platform` (creates the operator tenant once) |
-| Tests (planned) | `integration/rls`, `integration/tenants` (settings ranges, platform-only permissions) |
+| Tests | `integration/rls` (isolation, platform-only permissions), `integration/features` (settings ranges, usage), `integration/lockout` (threshold range) |
 | **Not** in Phase 1 | Billing, metering, invoicing (Phase 4). Bulk card issuing. Workspaces per division inside one company (today: one tenant = one workspace). |
 
 ### Feature 30 — Export + backup / disaster-recovery skeleton
@@ -152,7 +152,7 @@ Buying-urgency tools (Risk Calculator, free 7-day gap scan, Clock Dashboard, pri
 | Endpoints | `POST /v1/exports`, `GET /v1/exports/{id}` |
 | Scripts | `scripts/backup.sh`, `scripts/restore-test.sh` |
 | Infra | backups bucket, backup job + schedule (Terraform, plan-only) |
-| Tests (planned) | `integration/export` (only own tenant's rows, no secrets in export, allowed in grace and after expiry), restore test in CI |
+| Tests | `integration/features` (own tenant's rows only, checksummed manifest), `security/no-secrets` (no secret columns), `integration/sessions` (export allowed after expiry), `scripts/backup-restore-selftest.sh` |
 | **Not** in Phase 1 | The Living Knowledge Graph itself. |
 
 ## Phase 1 — design-only hooks

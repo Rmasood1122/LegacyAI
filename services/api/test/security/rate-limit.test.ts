@@ -102,6 +102,42 @@ describe('general per-IP limit on every endpoint', () => {
   });
 });
 
+describe('the client address cannot be forged', () => {
+  const PROXY = '10.10.10.10'; // the reverse proxy (Cloud Run's front end) - the only hop that is trusted
+
+  it('behind one trusted proxy, a caller-written X-Forwarded-For does not let it dodge the per-IP limit', async () => {
+    const t = await startApp({ generalLimit: { limit: 3, windowSeconds: 60 } }, { TRUST_PROXY: '1' });
+    try {
+      const statuses: number[] = [];
+      for (let i = 0; i < 5; i += 1) {
+        const c = from(t, PROXY);
+        // The attacker invents a new "client address" each time; the proxy appends the real one (203.0.113.77).
+        const res = await c.request('GET', '/v1/health', undefined, { headers: { 'x-forwarded-for': `198.18.${i}.${i}, 203.0.113.77` } });
+        statuses.push(res.status);
+      }
+      expect(statuses).toEqual([200, 200, 200, 429, 429]);
+      // a genuinely different client behind the same proxy is not affected
+      const other = await from(t, PROXY).request('GET', '/v1/health', undefined, { headers: { 'x-forwarded-for': '203.0.113.78' } });
+      expect(other.status).toBe(200);
+    } finally {
+      await t.close();
+    }
+  });
+
+  it('with no trusted proxy (the default) X-Forwarded-For is ignored entirely', async () => {
+    const t = await startApp({ generalLimit: { limit: 2, windowSeconds: 60 } });
+    try {
+      const statuses: number[] = [];
+      for (let i = 0; i < 4; i += 1) {
+        statuses.push((await from(t, '198.51.100.99').request('GET', '/v1/health', undefined, { headers: { 'x-forwarded-for': `198.18.9.${i}` } })).status);
+      }
+      expect(statuses).toEqual([200, 200, 429, 429]);
+    } finally {
+      await t.close();
+    }
+  });
+});
+
 describe('the limiter itself', () => {
   it('counts exactly, per key and per window, and stores no raw key', async () => {
     const limiter = new PostgresRateLimiter(seed.app.db, Buffer.alloc(32, 7));

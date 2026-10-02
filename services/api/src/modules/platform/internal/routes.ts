@@ -16,6 +16,9 @@ const collection = (type: string) => async ({ subject }: { subject: Subject }): 
   type, tenant_id: subject.tenant_id, collection: true,
 });
 
+/** One API call checks at most this many rows, so a long chain cannot tie up a request. Continue with from_seq. */
+const VERIFY_ROWS_PER_REQUEST = 20_000;
+
 export function encodeCursor(value: string | number): string {
   return Buffer.from(String(value), 'utf8').toString('base64url');
 }
@@ -70,6 +73,7 @@ export function platformRoutes(deps: { config: Config; db: Database; exports: Ex
       policy: { resource: collection('audit') },
       handler: async ({ tx, subject, query }) => {
         const before = decodeCursor(query.cursor);
+        if (before !== null && !/^[0-9]{1,15}$/.test(before)) throw problems.badRequest([{ path: 'query/cursor', message: 'invalid cursor' }]);
         const rows = await queryAudit(tx, subject.tenant_id, query, query.limit + 1, before === null ? null : Number(before));
         const page = rows.slice(0, query.limit);
         const last = page[page.length - 1];
@@ -86,7 +90,7 @@ export function platformRoutes(deps: { config: Config; db: Database; exports: Ex
       kind: 'session',
       policy: { resource: collection('audit') },
       handler: async ({ tx, subject, body }) => ({
-        body: await verifyChain(tx, subject.tenant_id, body.from_seq ?? 1, body.to_seq),
+        body: await verifyChain(tx, subject.tenant_id, body.from_seq ?? 1, body.to_seq, VERIFY_ROWS_PER_REQUEST),
       }),
     },
     {

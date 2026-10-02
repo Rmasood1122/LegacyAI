@@ -11,7 +11,7 @@ import type { CardState } from '../../src/shared/policy-types.ts';
 const LEGAL = new Set([
   'issued>active', 'issued>revoked', 'issued>expired',
   'active>suspended', 'active>revoked', 'active>expired', 'active>replaced',
-  'suspended>active', 'suspended>revoked', 'suspended>replaced',
+  'suspended>active', 'suspended>revoked',
   'expired>active', 'expired>revoked', 'expired>replaced',
 ]);
 

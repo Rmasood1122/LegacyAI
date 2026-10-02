@@ -6,6 +6,8 @@
 *.key
 *.age
 age-key*.txt
+*backup-key*
+*identity*.txt
 
 # dependencies and build output
 node_modules/

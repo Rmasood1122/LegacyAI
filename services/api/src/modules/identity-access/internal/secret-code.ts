@@ -68,16 +68,25 @@ export class SecretCodeHasher {
   /** Caps concurrent hashes so a login burst cannot exhaust container memory. */
   async #limited<T>(fn: () => Promise<T>): Promise<T> {
     if (this.#running >= this.#params.maxConcurrency) {
+      // Wait to be handed a slot. The slot is passed directly from the finishing call to the
+      // next waiter (the count is not decremented in between), so the cap can never be exceeded.
       await new Promise<void>((resolve) => this.#waiting.push(resolve));
+    } else {
+      this.#running += 1;
     }
-    this.#running += 1;
     this.#computations += 1;
     try {
       return await fn();
     } finally {
-      this.#running -= 1;
-      this.#waiting.shift()?.();
+      const next = this.#waiting.shift();
+      if (next) next();
+      else this.#running -= 1;
     }
+  }
+
+  /** Highest number of hashes that have ever run at the same time (for tests). */
+  get running(): number {
+    return this.#running;
   }
 
   #peppered(pepperId: string, cardId: string, sc: string): Buffer | null {

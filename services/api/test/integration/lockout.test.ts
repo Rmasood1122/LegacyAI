@@ -3,7 +3,7 @@
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
-  addMember, appRoleClient, Client, createTenant, enrollTotp, fromSecrets, login, startApp, superuser, tryLogin, VirtualPasskey,
+  addMember, appRoleClient, Client, createTenant, enrollTotp, fromSecrets, login, startApp, superuser, totpCode, tryLogin, VirtualPasskey,
   type TestApp, type TestMember, type TestTenant,
 } from '../helpers/harness.ts';
 
@@ -166,11 +166,14 @@ describe('authenticator-app (TOTP) guessing is throttled - temporarily, never pe
     secret = await enrollTotp(t, card);
   });
 
-  const guess = async (code: string) => {
+  /** One login attempt with a chosen SC and TOTP code. */
+  const attempt = async (sc: string, code: string) => {
     const c = new Client(t);
     const begin = await c.request('POST', '/v1/auth/login/begin', { card_number: card.number });
-    return c.request('POST', '/v1/auth/login/verify', { login_txn: begin.body.login_txn, sc: card.sc, factor: { type: 'totp', code } });
+    return c.request('POST', '/v1/auth/login/verify', { login_txn: begin.body.login_txn, sc, factor: { type: 'totp', code } });
   };
+  /** What a stranger can do: they know the card number only, so both the SC and the code are guesses. */
+  const strangerGuess = () => attempt(wrongSc(card.sc), '000000');
 
   it('a code cannot be replayed', async () => {
     const first = await tryLogin(t, card.number, card.sc, { totp: secret });
@@ -182,25 +185,61 @@ describe('authenticator-app (TOTP) guessing is throttled - temporarily, never pe
     t.clock.advance(31_000);
   });
 
-  it('5 wrong codes pause TOTP for this card; the SC counter is untouched; the pause ends by itself', async () => {
-    // (the replay above already counted as one failed TOTP attempt in this window)
-    for (let i = 0; i < 5; i += 1) expect((await guess('000000')).status).toBe(401);
-    const state = await authState(card.id);
-    expect(state.factor_throttled_until).not.toBeNull();
-    expect(state.sc_failed_count).toBe(0);
-    expect(state.locked_at).toBeNull();
-
-    // During the pause even the right code is refused - with the same generic answer.
-    const during = await tryLogin(t, card.number, card.sc, { totp: secret });
-    expect(during.res.status).toBe(401);
-    expect(await lastReason(card.id)).toBe('factor_throttled');
-
-    t.clock.advance(15 * 60_000 + 1000);
+  it('a valid code is spent even when the SC was wrong (it cannot be reused to try other SCs)', async () => {
+    const code = await totpCode(secret, t);
+    expect((await attempt(wrongSc(card.sc), code)).status).toBe(401); // right code, wrong SC
+    expect((await attempt(card.sc, code)).status).toBe(401);          // same code again, now with the right SC: refused
+    await su.query('UPDATE card_auth_state SET sc_failed_count = 0, factor_failed_count = 0, factor_window_start = NULL WHERE card_id = $1', [card.id]);
+    t.clock.advance(31_000);
     expect((await tryLogin(t, card.number, card.sc, { totp: secret })).res.status).toBe(200);
-    expect((await authState(card.id)).factor_throttled_until).toBeNull();
+    t.clock.advance(31_000);
   });
 
-  it('a passkey on the same card keeps working while TOTP is paused', async () => {
+  it('a stranger guessing codes pauses TOTP for the card - but can neither lock it nor keep the real cardholder out', async () => {
+    for (let i = 0; i < 5; i += 1) expect((await strangerGuess()).status).toBe(401);
+    const paused = await authState(card.id);
+    expect(paused.factor_throttled_until).not.toBeNull();
+    expect(paused.sc_failed_count).toBe(0);
+    expect(paused.locked_at).toBeNull();
+
+    // While paused, the stranger's further guesses are not even examined, and still move no counter.
+    for (let i = 0; i < 10; i += 1) expect((await strangerGuess()).status).toBe(401);
+    expect(await lastReason(card.id)).toBe('factor_throttled');
+    expect(await authState(card.id)).toMatchObject({ sc_failed_count: 0, locked_at: null });
+
+    // The REAL cardholder knows the SC, so their correct code is examined and they get in - during the pause.
+    expect((await tryLogin(t, card.number, card.sc, { totp: secret })).res.status).toBe(200);
+    expect((await authState(card.id)).factor_throttled_until).toBeNull();
+    t.clock.advance(31_000);
+  });
+
+  it('the pause also ends by itself', async () => {
+    for (let i = 0; i < 5; i += 1) await strangerGuess();
+    expect((await authState(card.id)).factor_throttled_until).not.toBeNull();
+    t.clock.advance(15 * 60_000 + 1000);
+    await strangerGuess(); // examined again now (and wrong): proves the pause is over without a successful login
+    expect(await lastReason(card.id)).toBe('bad_factor');
+    expect((await tryLogin(t, card.number, card.sc, { totp: secret })).res.status).toBe(200);
+    t.clock.advance(31_000);
+  });
+
+  it('someone who knows the SC and guesses codes during a pause locks the card (hard lock, admin unlock needed)', async () => {
+    for (let i = 0; i < 5; i += 1) await strangerGuess();
+    expect((await authState(card.id)).factor_throttled_until).not.toBeNull();
+    for (let i = 0; i < 5; i += 1) expect((await attempt(card.sc, '000000')).status).toBe(401);
+    const state = await authState(card.id);
+    expect(state.locked_at).not.toBeNull();
+    expect(state.lock_reason).toBe('sc_attempts');
+    expect((await tryLogin(t, card.number, card.sc, { totp: secret })).res.status).toBe(401);
+    const unlocked = await tenant.owner.post(`/v1/cards/${card.id}/unlock`);
+    expect(unlocked.status).toBe(200);
+    card.sc = unlocked.body.sc;
+    t.clock.advance(61 * 60_000);
+    expect((await tryLogin(t, card.number, card.sc, { totp: secret })).res.status).toBe(200);
+    t.clock.advance(31_000);
+  });
+
+  it('a passkey on the same card is never affected by a TOTP pause', async () => {
     // The admin issues an enrollment token so the cardholder can add a passkey as well.
     const token = await tenant.owner.post(`/v1/cards/${card.id}/enrollment-token`, {});
     expect(token.status).toBe(201);
@@ -212,11 +251,42 @@ describe('authenticator-app (TOTP) guessing is throttled - temporarily, never pe
     const passkey = new VirtualPasskey();
     expect((await c.request('POST', '/v1/auth/enrollment/complete', { enrollment_txn: begin.body.enrollment_txn, attestation: passkey.attest(begin.body.webauthn_options) })).status).toBe(204);
 
-    t.clock.advance(31_000);
-    for (let i = 0; i < 5; i += 1) await guess('000000');
+    for (let i = 0; i < 5; i += 1) await strangerGuess();
     expect((await authState(card.id)).factor_throttled_until).not.toBeNull();
-    expect((await tryLogin(t, card.number, card.sc, { totp: secret })).res.status).toBe(401);
     expect((await login(t, card, { passkey })).cookie).toBeTruthy();
-    t.clock.advance(61 * 60_000);
+    t.clock.reset();
+  });
+
+  it('a mistyped code during enrollment does not use up the 72-hour enrollment token', async () => {
+    const person = await tenant.owner.post('/v1/people', { display_name: 'Clumsy Enroller' });
+    const issued = fromSecrets((await tenant.owner.post('/v1/cards', { person_id: person.body.id, roles: [{ role_key: 'expert' }] })).body);
+    const start = () => new Client(t).request('POST', '/v1/auth/enrollment/begin', {
+      card_number: issued.number, sc: issued.sc, enrollment_token: issued.enrollmentToken, factor_type: 'totp',
+    });
+    const first = await start();
+    expect((await new Client(t).request('POST', '/v1/auth/enrollment/complete', { enrollment_txn: first.body.enrollment_txn, totp_code: '000000' })).status).toBe(401);
+    expect((await su.query('SELECT state FROM cards WHERE id = $1', [issued.id])).rows[0].state).toBe('issued');
+    // Same token, second try, correct code this time.
+    const second = await start();
+    expect(second.status).toBe(200);
+    const done = await new Client(t).request('POST', '/v1/auth/enrollment/complete', {
+      enrollment_txn: second.body.enrollment_txn, totp_code: await totpCode(second.body.totp.secret, t),
+    });
+    expect(done.status).toBe(204);
+    expect((await su.query('SELECT state FROM cards WHERE id = $1', [issued.id])).rows[0].state).toBe('active');
+    // ...and now the token really is spent.
+    expect((await start()).status).toBe(401);
+  });
+
+  it('replacing a lost card keeps an authenticator-app user able to sign in (the seed moves with the person)', async () => {
+    const person = await tenant.owner.post('/v1/people', { display_name: 'Totp Replace' });
+    const old = fromSecrets((await tenant.owner.post('/v1/cards', { person_id: person.body.id, roles: [{ role_key: 'expert' }] })).body);
+    const seed = await enrollTotp(t, old);
+    const rep = await tenant.owner.post(`/v1/cards/${old.id}/replace`, { reason: 'lost' });
+    expect(rep.status).toBe(201);
+    expect(rep.body.card.state).toBe('active');
+    expect((await tryLogin(t, rep.body.card.card_number, rep.body.sc, { totp: seed })).res.status).toBe(200);
+    expect((await tryLogin(t, old.number, old.sc, { totp: seed })).res.status).toBe(401);
+    t.clock.reset();
   });
 });

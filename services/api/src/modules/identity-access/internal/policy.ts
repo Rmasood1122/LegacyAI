@@ -61,6 +61,17 @@ const LAPSED_ALLOWED: ReadonlySet<string> = new Set(['export:create', 'export:re
 /** Nobody may do these to their own card. */
 const SELF_FORBIDDEN: ReadonlySet<string> = new Set([
   'card:suspend', 'card:revoke', 'card:replace', 'card:unlock', 'card:reset_credentials',
+  'card_restrictions:update', 'card_roles:assign', 'card_roles:remove', 'person:update',
+]);
+/**
+ * Actions that hand the actor a way INTO the target card (a new SC, a new enrollment token,
+ * a new card). For these the actor must rank strictly ABOVE the target - an Admin cannot do
+ * them to another Admin (or to itself) - unless the actor is a Company Owner.
+ */
+const TAKEOVER_CAPABLE: ReadonlySet<string> = new Set(['card:renew', 'card:unlock', 'card:reset_credentials', 'card:replace']);
+/** The company card is the tenant's identity and subscription clock. Only renewal (by an Owner) is possible. */
+const COMPANY_CARD_FORBIDDEN: ReadonlySet<string> = new Set([
+  'card:suspend', 'card:reinstate', 'card:revoke', 'card:replace', 'card:unlock', 'card:reset_credentials',
   'card_restrictions:update', 'card_roles:assign', 'card_roles:remove',
 ]);
 /** Actions on a card that require the actor to rank at least as high as the target and the role involved. */
@@ -86,6 +97,7 @@ interface SubjectEvaluation {
   grants: Array<Grant & { role_department_id: string | null }>;
   obligations: Obligation[];
   subjectRank: number;
+  isOwner: boolean;
 }
 
 function worstPhase(a: AccessPhase, b: AccessPhase): AccessPhase {
@@ -114,6 +126,10 @@ function evaluateSubject(subject: Subject, action: string, ctx: PolicyContext): 
     if (ctx.companyCard.state !== 'active' && ctx.companyCard.state !== 'expired') return deny('DENY_TENANT_INACTIVE');
     tenantPhase = accessPhase(ctx.companyCard, ctx.now);
     if (ctx.companyCard.state === 'expired' && tenantPhase === 'normal') tenantPhase = 'lapsed';
+  } else if (subject.is_platform_tenant !== true) {
+    // A customer tenant with NO live company card has no valid subscription clock: treat it as
+    // lapsed (fail closed) rather than as "never expires". Only the operator tenant has no company card.
+    tenantPhase = 'lapsed';
   }
   const phase = worstPhase(cardPhase, tenantPhase);
   const tenantCaused = tenantPhase === phase && cardPhase !== phase;
@@ -146,7 +162,7 @@ function evaluateSubject(subject: Subject, action: string, ctx: PolicyContext): 
   if (grants.length === 0) return deny('DENY_DEFAULT');
 
   const subjectRank = roles.reduce((max, r) => (Number.isFinite(r.rank) && r.rank > max ? r.rank : max), 0);
-  return { permission, grants, obligations, subjectRank };
+  return { permission, grants, obligations, subjectRank, isOwner: roles.some((r) => r.role_key === 'company_owner') };
 }
 
 // ---------------------------------------------------------------- card restrictions
@@ -183,6 +199,7 @@ function networkAllowed(config: Record<string, unknown>, ip: string): boolean {
     if (typeof cidr !== 'string') return false;
     const [net, prefixText] = cidr.split('/');
     const netFamily = isIP(net ?? '');
+    if (prefixText !== undefined && !/^[0-9]{1,3}$/.test(prefixText)) return false; // "10.0.0.0/" must not mean "/0"
     const prefix = prefixText === undefined ? (netFamily === 4 ? 32 : 128) : Number(prefixText);
     if (netFamily === 0 || !Number.isInteger(prefix) || prefix < 0 || prefix > (netFamily === 4 ? 32 : 128)) return false;
     list.addSubnet(net as string, prefix, netFamily === 4 ? 'ipv4' : 'ipv6');
@@ -277,11 +294,17 @@ function decideUnsafe(subject: Subject, action: string, resource: ResourceRef, c
 
   // Guard rules.
   if (SELF_FORBIDDEN.has(action) && resource.owner_card_id === subject.card_id) return deny('DENY_SELF_ACTION');
+  if (resource.card_kind === 'company' && COMPANY_CARD_FORBIDDEN.has(action)) return deny('DENY_COMPANY_CARD');
   if (RANK_GUARDED.has(action)) {
+    // The rank of what is being acted on MUST be known. A caller that does not supply it is
+    // refused: a missing value must never switch the guard off.
+    const required = resource.collection === true ? resource.role_rank : resource.target_rank;
+    if (required === undefined) return deny('DENY_RANK');
     for (const rank of [resource.target_rank, resource.role_rank]) {
       if (rank === undefined) continue;
       if (typeof rank !== 'number' || !Number.isFinite(rank) || rank > ev.subjectRank) return deny('DENY_RANK');
     }
+    if (TAKEOVER_CAPABLE.has(action) && !ev.isOwner && (resource.target_rank as number) >= ev.subjectRank) return deny('DENY_RANK');
   }
   if (resource.removes_last_owner !== undefined && resource.removes_last_owner !== false) return deny('DENY_LAST_OWNER');
 

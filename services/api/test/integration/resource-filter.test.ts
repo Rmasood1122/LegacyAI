@@ -85,7 +85,8 @@ function subject(roles: SubjectRole[], over: Partial<Subject> = {}): Subject {
 function ctx(over: Partial<PolicyContext> = {}): PolicyContext {
   return {
     now: NOW, ip: '10.1.1.1', tenant: { status: 'active' }, settings: { enabled_roles: ALL_ROLES, pilot_reviewer_grant: true }, matrix,
-    companyCard: null, restrictions: [], usage: new Map(), planAllows: true, ...over,
+    companyCard: { state: 'active', expires_at: new Date(NOW.getTime() + 60 * DAY), grace_until: new Date(NOW.getTime() + 74 * DAY) },
+    restrictions: [], usage: new Map(), planAllows: true, ...over,
   };
 }
 const role = (k: RoleKey, department_id: string | null = null): SubjectRole => ({ role_key: k, department_id, rank: RANK[k] });
@@ -132,6 +133,7 @@ describe('buildResourceFilter agrees with decide() on every row', () => {
     variants.push({ name: 'owner, off-site', s: subject([role('company_owner')]), c: ctx({ restrictions: [offSite] }) });
     variants.push({ name: 'owner, company card lapsed', s: subject([role('company_owner')]), c: ctx({ companyCard: { state: 'active', ...lapsed } }) });
     variants.push({ name: 'reviewer, company card in grace', s: subject([role('reviewer')]), c: ctx({ companyCard: { state: 'active', ...expiredGrace } }) });
+    variants.push({ name: 'owner, tenant with no company card at all', s: subject([role('company_owner')]), c: ctx({ companyCard: null }) });
     variants.push({ name: 'owner of tenant B', s: subject([role('company_owner')], { tenant_id: b.tenantId, card_id: b.ownerCard.id }), c: ctx() });
 
     let nonEmpty = 0;

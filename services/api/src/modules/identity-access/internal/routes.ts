@@ -56,6 +56,21 @@ const toApiPerson = (p: PersonRow): Record<string, unknown> => ({
   created_at: p.created_at.toISOString(),
 });
 
+const COMPANY_CARD_RANK = 100;
+
+/** Per-tenant, per-transaction lock used by every route that changes roles or could remove the last Owner. */
+async function lockTenantRoles(tx: Tx, tenantId: string): Promise<void> {
+  await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 42))', [`roles:${tenantId}`]);
+}
+
+const UUID_CURSOR = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** Cursor for id-ordered lists. Anything that is not a UUID is a 400, never a database error. */
+function uuidCursor(raw: unknown): string | null {
+  const value = decodeCursor(raw);
+  if (value !== null && !UUID_CURSOR.test(value)) throw problems.badRequest([{ path: 'query/cursor', message: 'invalid cursor' }]);
+  return value;
+}
+
 async function roleRanks(tx: Tx): Promise<Map<string, number>> {
   const { rows } = await tx.query<{ role_key: string; rank: number }>('SELECT role_key, rank FROM roles');
   return new Map(rows.map((r) => [r.role_key, r.rank]));
@@ -68,14 +83,19 @@ function rankOf(ranks: Map<string, number>, roleKeys: readonly string[]): number
 
 /** Describes a card to the policy decision point. `lastOwnerCheck` asks "would this leave no active Owner?". */
 async function cardResource(
-  tx: Tx, subject: Subject, cardId: string, now: Date, opts: { lastOwnerCheck?: boolean } = {},
+  tx: Tx, subject: Subject, cardId: string, now: Date, opts: { lastOwnerCheck?: boolean; serialize?: boolean } = {},
 ): Promise<{ ref: ResourceRef; card: CardRow } | null> {
+  // Changes to who holds which role (and who is the last Owner) are decided one at a time per
+  // tenant, so two simultaneous requests cannot each see "there is still another Owner".
+  if (opts.lastOwnerCheck === true || opts.serialize === true) await lockTenantRoles(tx, subject.tenant_id);
   const card = await getCard(tx, cardId);
   if (!card) return null;
   const roles = await loadRoles(tx, card.tenant_id, card.id);
   const ref: ResourceRef = {
     type: 'card', id: card.id, tenant_id: card.tenant_id, owner_card_id: card.id, owner_person_id: card.person_id,
-    department_id: await personDepartment(tx, card.person_id), target_rank: maxRank(roles),
+    department_id: await personDepartment(tx, card.person_id), card_kind: card.kind,
+    // The company card ranks with the Company Owner: nobody below an Owner may act on it.
+    target_rank: card.kind === 'company' ? COMPANY_CARD_RANK : maxRank(roles),
   };
   if (opts.lastOwnerCheck === true && roles.some((r) => r.role_key === 'company_owner') && card.state === 'active') {
     ref.removes_last_owner = (await otherActiveOwners(tx, subject.tenant_id, card.id, now)) === 0;
@@ -83,7 +103,7 @@ async function cardResource(
   return { ref, card };
 }
 
-const cardLoader = (opts: { lastOwnerCheck?: boolean } = {}) =>
+const cardLoader = (opts: { lastOwnerCheck?: boolean; serialize?: boolean } = {}) =>
   async ({ tx, subject, params, ctx }: { tx: Tx; subject: Subject; params: { card_id: string }; ctx: RequestContext }): Promise<ResourceRef | null> =>
     (await cardResource(tx, subject, params.card_id, ctx.now, opts))?.ref ?? null;
 
@@ -114,7 +134,7 @@ function validateRestrictions(restrictions: Array<{ type: string; config: Record
         const [net, prefix] = cidr.split('/');
         const family = isIP(net ?? '');
         const bits = prefix === undefined ? 0 : Number(prefix);
-        if (family === 0 || !Number.isInteger(bits) || bits < 0 || bits > (family === 4 ? 32 : 128)) {
+        if (family === 0 || (prefix !== undefined && !/^[0-9]{1,3}$/.test(prefix)) || bits > (family === 4 ? 32 : 128)) {
           throw problems.unprocessable('Invalid network range', [{ path: 'body/restrictions', message: 'each entry must be an IP address or CIDR range' }]);
         }
       }
@@ -222,11 +242,17 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
         },
       },
       handler: async ({ tx, subject, params, ctx }) => {
+        // Lock the card so two simultaneous removals cannot each think "one factor will remain".
+        await tx.query('SELECT 1 FROM cards WHERE id = $1 FOR UPDATE', [subject.card_id]);
         const { rows } = await tx.query<{ n: string }>(
           `SELECT count(*)::text AS n FROM credentials WHERE tenant_id = $1 AND card_id = $2 AND status = 'active'`,
           [subject.tenant_id, subject.card_id]);
         if (Number(rows[0]?.n ?? 0) <= 1) throw problems.conflict('last-credential', 'The last strong factor cannot be removed');
         await tx.query(`UPDATE credentials SET status = 'revoked' WHERE id = $1`, [params.credential_id]);
+        // Sessions that were opened with the removed factor end now.
+        await tx.query(
+          `UPDATE sessions SET revoked_at = $3, revoked_reason = 'credentials_reset'
+            WHERE tenant_id = $1 AND credential_id = $2 AND revoked_at IS NULL`, [subject.tenant_id, params.credential_id, ctx.now]);
         await cards.event(tx, { id: subject.card_id, tenant_id: subject.tenant_id }, 'credential_removed', subject.card_id, ctx, {}, params.credential_id);
         await writeAudit(tx, {
           tenantId: subject.tenant_id, actorCardId: subject.card_id, actorKind: 'card', action: 'self:credential_remove',
@@ -260,7 +286,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
       kind: 'session',
       policy: { resource: collection('card') },
       handler: async ({ tx, subject, query, ctx }) => {
-        const after = decodeCursor(query.cursor);
+        const after = uuidCursor(query.cursor);
         // The retrieval-time filter narrows the result set to what this card may see.
         const filter = await authorizer.filter(tx, subject, 'card:list', CARD_DESCRIPTOR, ctx, 6);
         const { rows } = await tx.query<CardRow>(
@@ -357,7 +383,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
       kind: 'session',
       policy: { resource: cardLoader() },
       handler: async ({ tx, params, query }) => {
-        const before = decodeCursor(query.cursor);
+        const before = uuidCursor(query.cursor);
         const { rows } = await tx.query<{
           id: string; card_id: string; occurred_at: Date; event_type: string; actor_card_id: string | null;
           credential_id: string | null; device_hash: Buffer | null; request_id: string | null; metadata: Record<string, unknown>;
@@ -445,7 +471,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
       kind: 'session',
       policy: {
         resource: async ({ tx, subject, params, body, ctx }) => {
-          const loaded = await cardResource(tx, subject, params.card_id, ctx.now);
+          const loaded = await cardResource(tx, subject, params.card_id, ctx.now, { serialize: true });
           return loaded ? { ...loaded.ref, role_rank: rankOf(await roleRanks(tx), [body.role_key]) } : null;
         },
       },
@@ -466,7 +492,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
       kind: 'session',
       policy: {
         resource: async ({ tx, subject, params, body, ctx }) => {
-          const loaded = await cardResource(tx, subject, params.card_id, ctx.now);
+          const loaded = await cardResource(tx, subject, params.card_id, ctx.now, { serialize: true });
           if (!loaded) return null;
           const current = (await loadRoles(tx, loaded.card.tenant_id, loaded.card.id)).map((r) => r.role_key as string);
           const next = (body.roles as RoleInput[]).map((r) => r.role_key as string);
@@ -503,7 +529,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
       kind: 'session',
       policy: {
         resource: async ({ tx, subject, params, ctx }) => {
-          const loaded = await cardResource(tx, subject, params.card_id, ctx.now);
+          const loaded = await cardResource(tx, subject, params.card_id, ctx.now, { serialize: true });
           if (!loaded) return null;
           const isOwnerRemoval = params.role_key === 'company_owner' && loaded.card.state === 'active';
           return {
@@ -550,7 +576,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
       kind: 'session',
       policy: { resource: collection('person') },
       handler: async ({ tx, subject, query, ctx }) => {
-        const after = decodeCursor(query.cursor);
+        const after = uuidCursor(query.cursor);
         const filter = await authorizer.filter(tx, subject, 'person:read', PERSON_DESCRIPTOR, ctx, 5);
         const { rows } = await tx.query<PersonRow>(
           // eslint-disable-next-line no-restricted-syntax -- filter.sql is built by the policy module from code constants; all values are bound
@@ -588,19 +614,21 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
           const { rows } = await tx.query<PersonRow>(`SELECT ${PERSON_COLUMNS} FROM people WHERE id = $1`, [params.person_id]);
           const p = rows[0];
           if (!p) return null;
-          const ref: ResourceRef = { type: 'person', id: p.id, tenant_id: subject.tenant_id, owner_person_id: p.id, department_id: p.department_id };
-          if (body.status === 'departed') {
-            // Offboarding revokes the person's card, so the same guards as revoking a card apply.
-            const live = await tx.query<{ id: string; state: string }>(
-              `SELECT id, state FROM cards WHERE person_id = $1 AND state NOT IN ('revoked', 'replaced')`, [p.id]);
-            const card = live.rows[0];
-            if (card) {
-              const roles = await loadRoles(tx, subject.tenant_id, card.id);
-              ref.owner_card_id = card.id;
-              ref.target_rank = maxRank(roles);
-              if (roles.some((r) => r.role_key === 'company_owner') && card.state === 'active') {
-                ref.removes_last_owner = (await otherActiveOwners(tx, subject.tenant_id, card.id, ctx.now)) === 0;
-              }
+          await lockTenantRoles(tx, subject.tenant_id);
+          // Changing a person is guarded like acting on their card: not on yourself, and not on someone who outranks you.
+          const ref: ResourceRef = {
+            type: 'person', id: p.id, tenant_id: subject.tenant_id, owner_person_id: p.id, department_id: p.department_id, target_rank: 0,
+          };
+          const live = await tx.query<{ id: string; state: string }>(
+            `SELECT id, state FROM cards WHERE person_id = $1 AND state NOT IN ('revoked', 'replaced')`, [p.id]);
+          const card = live.rows[0];
+          if (card) {
+            const roles = await loadRoles(tx, subject.tenant_id, card.id);
+            ref.owner_card_id = card.id;
+            ref.target_rank = maxRank(roles);
+            // Offboarding revokes the card, so it must not remove the last active Owner.
+            if (body.status === 'departed' && roles.some((r) => r.role_key === 'company_owner') && card.state === 'active') {
+              ref.removes_last_owner = (await otherActiveOwners(tx, subject.tenant_id, card.id, ctx.now)) === 0;
             }
           }
           return ref;
@@ -710,7 +738,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
       kind: 'session',
       policy: { resource: collection('tenant') },
       handler: async ({ subject, query }) => {
-        const after = decodeCursor(query.cursor);
+        const after = uuidCursor(query.cursor);
         // Read-only cross-tenant listing: reached only after the policy point allowed tenant:list
         // (a platform-only permission).
         const rows = await db.withTenantTx(subject.tenant_id, (ptx) => listTenants(ptx, query.limit + 1, after), { platformScope: true });
@@ -779,9 +807,18 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
       handler: async ({ ctx, body }) => {
         const decision = await db.withTenantTx(body.tenant_id, async (tx) => {
           // The subject is re-loaded from the database; nothing about it is trusted from the caller.
+          // This endpoint exists for the knowledge layer (Phase 2). It answers knowledge questions only:
+          // card and people administration is decided on the session routes, where the target's rank,
+          // ownership and last-owner status are loaded from the database.
+          if (!String(body.action).startsWith('knowledge:')) {
+            return { effect: 'deny' as const, reason_code: 'DENY_INTERNAL_ACTION_NOT_ALLOWED', obligations: [] };
+          }
           const subject = await subjectForCard(tx, body.tenant_id, body.card_id);
           if (!subject) return { effect: 'deny' as const, reason_code: 'DENY_UNKNOWN_SUBJECT', obligations: [] };
-          return authorizer.authorize(tx, subject, body.action, { ...body.resource, tenant_id: body.tenant_id }, ctx);
+          const resource = { ...body.resource, tenant_id: body.tenant_id };
+          const decision = await authorizer.authorize(tx, subject, body.action, resource, ctx);
+          await authorizer.record(tx, subject, body.action, resource, decision, ctx, 'service');
+          return decision;
         });
         return { body: decision };
       },

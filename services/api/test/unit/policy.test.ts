@@ -21,6 +21,9 @@ const perms: PermissionDef[] = [
   { permission_key: 'card:list', is_write: false, platform_only: false },
   { permission_key: 'card:issue', is_write: true, platform_only: false },
   { permission_key: 'card:suspend', is_write: true, platform_only: false },
+  { permission_key: 'card:renew', is_write: true, platform_only: false },
+  { permission_key: 'card:reset_credentials', is_write: true, platform_only: false },
+  { permission_key: 'person:update', is_write: true, platform_only: false },
   { permission_key: 'card_roles:assign', is_write: true, platform_only: false },
   { permission_key: 'export:create', is_write: true, platform_only: false },
   { permission_key: 'export:read', is_write: false, platform_only: false },
@@ -33,8 +36,8 @@ const perms: PermissionDef[] = [
 const g = (role_key: RoleKey, permission_key: string, scope: Grant['scope'], max_sensitivity = 0, grant_source: Grant['grant_source'] = 'base'): Grant =>
   ({ role_key, permission_key, scope, max_sensitivity, grant_source });
 const grants: Grant[] = [
-  ...['card:read', 'card:list', 'card:issue', 'card:suspend', 'card_roles:assign', 'export:create', 'export:read', 'tenant:create'].map((p) => g('company_owner', p, 'tenant', 3)),
-  ...['card:read', 'card:list', 'card:issue', 'card:suspend', 'card_roles:assign'].map((p) => g('admin', p, 'tenant', 2)),
+  ...['card:read', 'card:list', 'card:issue', 'card:suspend', 'card:renew', 'card:reset_credentials', 'person:update', 'card_roles:assign', 'export:create', 'export:read', 'tenant:create'].map((p) => g('company_owner', p, 'tenant', 3)),
+  ...['card:read', 'card:list', 'card:issue', 'card:suspend', 'card:renew', 'card:reset_credentials', 'person:update', 'card_roles:assign'].map((p) => g('admin', p, 'tenant', 2)),
   g('department_manager', 'card:read', 'department', 1), g('department_manager', 'card:list', 'department', 1),
   g('department_manager', 'knowledge:read', 'department', 1),
   g('expert', 'card:read', 'own'), g('expert', 'card:list', 'own'), g('expert', 'knowledge:read', 'own', 1),
@@ -56,14 +59,18 @@ function subject(roles: SubjectRole[], over: Partial<Subject> = {}): Subject {
     is_platform_tenant: false, session_id: 's', session_idle_expires_at: NOW, session_absolute_expires_at: NOW, ...over,
   };
 }
+const LIVE_COMPANY_CARD = { state: 'active' as const, expires_at: new Date(NOW.getTime() + 60 * DAY), grace_until: new Date(NOW.getTime() + 74 * DAY) };
+
 function ctx(over: Partial<PolicyContext> = {}): PolicyContext {
   return {
     now: NOW, ip: '10.0.0.5', tenant: { status: 'active' },
     settings: { enabled_roles: ['company_owner', 'admin', 'expert', 'successor'], pilot_reviewer_grant: true },
-    matrix, companyCard: null, restrictions: [], usage: new Map(), planAllows: true, ...over,
+    matrix, companyCard: LIVE_COMPANY_CARD, restrictions: [], usage: new Map(), planAllows: true, ...over,
   };
 }
-const res = (over: Partial<ResourceRef> = {}): ResourceRef => ({ type: 'card', id: OTHER_CARD, tenant_id: T1, owner_card_id: OTHER_CARD, ...over });
+// A normal target: somebody else's Expert card (rank 30).
+const res = (over: Partial<ResourceRef> = {}): ResourceRef => ({ type: 'card', id: OTHER_CARD, tenant_id: T1, owner_card_id: OTHER_CARD, target_rank: 30, card_kind: 'person', ...over });
+const companyCard = (over: Partial<ResourceRef> = {}): ResourceRef => res({ owner_person_id: null, card_kind: 'company', target_rank: 100, ...over });
 const allRoles = (): PolicyContext['settings'] => ({ enabled_roles: ['company_owner', 'admin', 'department_manager', 'expert', 'successor', 'reviewer'], pilot_reviewer_grant: true });
 
 interface Row {
@@ -160,6 +167,28 @@ const rows: Row[] = [
   { name: 'cannot remove the last owner', s: subject([role('company_owner')]), action: 'card:suspend', r: res({ target_rank: 100, removes_last_owner: true }), effect: 'deny', reason: 'DENY_LAST_OWNER' },
   { name: 'last-owner flag of the wrong type fails closed', s: subject([role('company_owner')]), action: 'card:suspend', r: res({ target_rank: 100, removes_last_owner: 'no' as never }), effect: 'deny', reason: 'DENY_LAST_OWNER' },
 
+  { name: 'a rank-guarded action with NO target rank supplied is refused (a missing value never switches the guard off)', s: subject([role('company_owner')]), action: 'card:suspend', r: res({ target_rank: undefined }), effect: 'deny', reason: 'DENY_RANK' },
+  { name: 'issuing with no role rank supplied is refused', s: subject([role('company_owner')]), action: 'card:issue', r: res({ id: undefined, collection: true, target_rank: undefined }), effect: 'deny', reason: 'DENY_RANK' },
+  { name: 'nobody edits their own person record', s: subject([role('admin')]), action: 'person:update', r: res({ type: 'person', id: PERSON, owner_person_id: PERSON, owner_card_id: CARD, target_rank: 80 }), effect: 'deny', reason: 'DENY_SELF_ACTION' },
+  { name: 'admin cannot edit an Owner\'s person record', s: subject([role('admin')]), action: 'person:update', r: res({ type: 'person', target_rank: 100 }), effect: 'deny', reason: 'DENY_RANK' },
+
+  // ---- account takeover by a peer: renew / reset hand the actor a way into the target card
+  { name: 'admin renews an Expert\'s card (lower rank)', s: subject([role('admin')]), action: 'card:renew', r: res(), effect: 'allow', reason: 'ALLOW' },
+  { name: 'admin cannot renew ANOTHER ADMIN\'s card (would receive its new SC)', s: subject([role('admin')]), action: 'card:renew', r: res({ target_rank: 80 }), effect: 'deny', reason: 'DENY_RANK' },
+  { name: 'admin cannot issue an enrollment token for another admin', s: subject([role('admin')]), action: 'card:reset_credentials', r: res({ target_rank: 80 }), effect: 'deny', reason: 'DENY_RANK' },
+  { name: 'admin cannot renew its own card (extend its own access)', s: subject([role('admin')]), action: 'card:renew', r: res({ id: CARD, owner_card_id: CARD, target_rank: 80 }), effect: 'deny', reason: 'DENY_RANK' },
+  { name: 'an Owner may renew another Owner (the top rank manages its peers)', s: subject([role('company_owner')]), action: 'card:renew', r: res({ target_rank: 100 }), effect: 'allow', reason: 'ALLOW' },
+
+  // ---- the company card: the tenant's identity and subscription clock
+  { name: 'admin cannot suspend the company card (would switch the whole tenant off)', s: subject([role('admin')]), action: 'card:suspend', r: companyCard(), effect: 'deny', reason: 'DENY_COMPANY_CARD' },
+  { name: 'even an Owner cannot suspend the company card', s: subject([role('company_owner')]), action: 'card:suspend', r: companyCard(), effect: 'deny', reason: 'DENY_COMPANY_CARD' },
+  { name: 'admin cannot renew the company card (extend the subscription)', s: subject([role('admin')]), action: 'card:renew', r: companyCard(), effect: 'deny', reason: 'DENY_RANK' },
+  { name: 'an Owner may renew the company card (until billing does it, Phase 4)', s: subject([role('company_owner')]), action: 'card:renew', r: companyCard(), effect: 'allow', reason: 'ALLOW' },
+  { name: 'company card can be read', s: subject([role('admin')]), action: 'card:read', r: companyCard(), effect: 'allow', reason: 'ALLOW' },
+  { name: 'a customer tenant with NO company card is treated as lapsed, not as "never expires"', s: subject([role('admin')]), action: 'card:read', r: res(), c: ctx({ companyCard: null }), effect: 'deny', reason: 'DENY_TENANT_EXPIRED' },
+  { name: '...its Owner can still export', s: subject([role('company_owner')]), action: 'export:create', r: res({ type: 'export', id: undefined, collection: true }), c: ctx({ companyCard: null }), effect: 'allow', reason: 'ALLOW', obligations: ['export_only'] },
+  { name: 'the operator (platform) tenant has no company card and is not lapsed', s: subject([role('company_owner')], { is_platform_tenant: true }), action: 'card:read', r: res(), c: ctx({ companyCard: null }), effect: 'allow', reason: 'ALLOW' },
+
   // ---- plan limit hook
   { name: 'plan limit reached', s: subject([role('company_owner')]), action: 'card:read', r: res(), c: ctx({ planAllows: false }), effect: 'deny', reason: 'DENY_PLAN_LIMIT' },
   { name: 'plan answer missing fails closed', s: subject([role('company_owner')]), action: 'card:read', r: res(), c: ctx({ planAllows: undefined as never }), effect: 'deny', reason: 'DENY_PLAN_LIMIT' },
@@ -179,6 +208,7 @@ const rows: Row[] = [
   { name: 'one site only: IPv4-mapped IPv6 address is recognised', s: subject([role('admin')]), action: 'card:read', r: res(), c: ctx({ ip: '::ffff:10.0.0.5', restrictions: [restriction('network_allowlist', { cidrs: ['10.0.0.0/24'] })] }), effect: 'allow', reason: 'ALLOW' },
   { name: 'one site only: garbage address fails closed', s: subject([role('admin')]), action: 'card:read', r: res(), c: ctx({ ip: 'not-an-ip', restrictions: [restriction('network_allowlist', { cidrs: ['10.0.0.0/24'] })] }), effect: 'deny', reason: 'DENY_CARD_NETWORK' },
   { name: 'one site only: empty list fails closed', s: subject([role('admin')]), action: 'card:read', r: res(), c: ctx({ restrictions: [restriction('network_allowlist', { cidrs: [] })] }), effect: 'deny', reason: 'DENY_CARD_NETWORK' },
+  { name: 'one site only: a range with an EMPTY prefix ("10.0.0.0/") does not mean "everything"', s: subject([role('admin')]), action: 'card:read', r: res(), c: ctx({ ip: '203.0.113.9', restrictions: [restriction('network_allowlist', { cidrs: ['10.0.0.0/'] })] }), effect: 'deny', reason: 'DENY_CARD_NETWORK' },
   { name: 'one site only: malformed range fails closed', s: subject([role('admin')]), action: 'card:read', r: res(), c: ctx({ restrictions: [restriction('network_allowlist', { cidrs: ['10.0.0.0/99'] })] }), effect: 'deny', reason: 'DENY_CARD_NETWORK' },
   { name: 'usage cap: under the cap -> allowed and counted', s: subject([role('admin')]), action: 'card:read', r: res(), c: ctx({ restrictions: [restriction('usage_cap', { limit_key: 'requests', window_seconds: 3600, max_count: 5 })], usage: new Map([[usageKey('requests', 3600), 4]]) }), effect: 'allow', reason: 'ALLOW', obligations: ['count_usage'] },
   { name: 'usage cap: at the cap -> denied', s: subject([role('admin')]), action: 'card:read', r: res(), c: ctx({ restrictions: [restriction('usage_cap', { limit_key: 'requests', window_seconds: 3600, max_count: 5 })], usage: new Map([[usageKey('requests', 3600), 5]]) }), effect: 'deny', reason: 'DENY_CARD_LIMIT' },
@@ -192,7 +222,7 @@ const rows: Row[] = [
 
 describe('policy decision point (table-driven)', () => {
   it(`has ${rows.length} cases`, () => {
-    expect(rows.length).toBeGreaterThanOrEqual(80);
+    expect(rows.length).toBeGreaterThanOrEqual(100);
   });
 
   it.each(rows)('$name', (row) => {

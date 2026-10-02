@@ -54,7 +54,7 @@ Each step can only deny or narrow. Allow is reached only at the end.
 | 7 | **Permission matrix:** at least one of the subject's enabled roles must hold the permission. Rows marked `pilot_reviewer` count only if `pilot_reviewer_grant` is true. | `DENY_DEFAULT` |
 | 8 | **Scope** of the matching grant: `tenant` → any resource in the tenant; `department` → resource's department must equal the role's department; `own` → resource must belong to the subject's own card/person | `DENY_SCOPE` |
 | 9 | **Sensitivity label:** `resource.sensitivity ≤ grant.max_sensitivity` | `DENY_SENSITIVITY` |
-| 10 | **Guard rules** (data-driven list): cannot act on your own card for suspend / revoke / role changes; cannot grant or remove a role ranked above your own highest role; cannot remove the last active Company Owner | `DENY_SELF_ACTION`, `DENY_RANK`, `DENY_LAST_OWNER` |
+| 10 | **Guard rules** (data-driven lists): cannot act on your own card or person record for suspend / revoke / replace / unlock / restrictions / role changes / person edits; cannot act on, or grant a role to, anything ranked above your own highest role — and the target's rank **must be supplied** (a missing value is a denial, never "no guard"); for renew / unlock / replace / enrollment token the target must rank strictly *below* the actor unless the actor is a Company Owner (no peer takeover); the company card cannot be suspended, revoked, replaced or restricted by anyone; cannot remove the last active Company Owner (role changes are serialised per tenant so two simultaneous requests cannot both pass) | `DENY_SELF_ACTION`, `DENY_RANK`, `DENY_COMPANY_CARD`, `DENY_LAST_OWNER` |
 | 11 | **Plan limits hook:** `billing.checkLimit(tenant, action)` — the Phase 1 stub always answers "within limits" | `DENY_PLAN_LIMIT` |
 | 12 | **Card-level restrictions (feature 5):** each enabled `card_restrictions` row is checked — usage cap reached; outside the allowed hours; request from a network not on the card's allow-list; write attempted on a read-only card | `DENY_CARD_LIMIT`, `DENY_CARD_HOURS`, `DENY_CARD_NETWORK`, `DENY_CARD_READ_ONLY` |
 | 13 | Otherwise | `ALLOW` (+ obligations collected above) |
@@ -96,10 +96,11 @@ The matrix is loaded from the database and cached in memory for 60 seconds.
 | `card_roles:assign` / `remove` | ✔ | ✔ (not Owner — rank rule) | — | — | — | — | — | — |
 | `audit:read` / `audit:verify` | ✔ | ✔ | — | — | — | — | ✔ | — |
 | `export:create` / `export:read` | ✔ | — | — | — | — | — | — | — |
-| `knowledge:read` *(Phase 2 placeholder)* | ✔ | — | D | O | role-scoped, verified only (Phase 2 attribute) | queue only | — | O |
+| `knowledge:read` *(Phase 2 placeholder)* | ✔ | — | D | O | ✔ at sensitivity 0 only ("verified, for their role" needs Phase 2 attributes that do not exist yet) | ✔ up to sensitivity 1 ("queue only" likewise) | — | O |
+| `self:read` / `self:logout` / `self:credential_remove` (own session and own strong factors) | O | O | O | O | O | O | O | O |
 | `knowledge:contribute` *(placeholder)* | — | — | — | ✔ | — | — | — | — |
 | `knowledge:verify` *(Reviewer capability)* | — | ✔ pilot | — | ✔ pilot | — | ✔ | — | — |
-| `tenant:create` / `tenant:list` *(platform only)* | platform tenant only | — | — | — | — | — | — | — |
+| `tenant:create` / `tenant:list` *(platform only)* | platform tenant only — the grant row exists for every Owner; the `platform_only` flag makes the policy decision point refuse it outside the LegacyAI operator tenant | — | — | — | — | — | — | — |
 
 "✔ pilot" = granted through a `pilot_reviewer` row: this is how "Reviewer capabilities are temporarily granted to Admin and Expert" is implemented, and turning off one tenant setting removes it. The `knowledge:*` rows have no endpoints in Phase 1; they exist so Phase 2 needs no matrix redesign. The full matrix is the seed file; this table is a summary and Gate 1 is the moment to correct it.
 

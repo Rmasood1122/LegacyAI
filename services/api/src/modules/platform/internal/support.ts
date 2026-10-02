@@ -139,7 +139,7 @@ export function hashRequest(operationId: string, params: unknown, body: unknown)
 export interface NotificationEvent {
   type:
     | 'card_issued' | 'card_locked' | 'card_unlocked' | 'card_suspended' | 'card_revoked' | 'card_renewed'
-    | 'card_replaced' | 'card_expiring' | 'unlock_capacity_low';
+    | 'card_replaced' | 'card_expiring' | 'unlock_capacity_low' | 'credential_added' | 'enrollment_token_issued';
   tenantId: string;
   cardId?: string;
 }

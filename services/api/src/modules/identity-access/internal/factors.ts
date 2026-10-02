@@ -213,6 +213,7 @@ const DUMMY_TOTP_SECRET = generateSecret();
 
 export async function verifyTotpCode(p: {
   cipher: SeedCipher;
+  aad: string;
   cardId: string | null;
   credentials: readonly StoredCredential[];
   code: string;
@@ -226,7 +227,7 @@ export async function verifyTotpCode(p: {
   }
   for (const c of candidates) {
     if (!c.totp_secret_enc || !c.totp_key_id) continue;
-    const secret = p.cipher.decrypt(c.totp_secret_enc, c.totp_key_id, p.cardId);
+    const secret = p.cipher.decrypt(c.totp_secret_enc, c.totp_key_id, p.aad);
     if (secret === null) continue;
     const step = await checkTotp(secret, p.code, p.now, p.lastStep);
     if (step !== null) return { proof: new StrongFactorProof(MINT, p.cardId, c.id, 'totp'), step };

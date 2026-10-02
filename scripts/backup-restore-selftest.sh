@@ -43,7 +43,7 @@ echo "selftest: generating a throwaway age key pair"
 tools legacyai-backup-tools sh -c 'age-keygen -o /work/key.txt 2>/dev/null && age-keygen -y /work/key.txt > /work/key.pub && chmod 0644 /work/key.txt'
 recipient="$(tools legacyai-backup-tools cat /work/key.pub)"
 
-echo "selftest: 1/5 backup"
+echo "selftest: 1/6 backup"
 tools -e DATABASE_URL_BACKUP="postgres://legacyai_backup:$BACKUP_PW@$PG_CONTAINER:5432/$SOURCE_DB" \
       -e BACKUP_AGE_RECIPIENT="$recipient" -e BACKUP_DEST=/work/out legacyai-backup-tools backup.sh
 
@@ -53,15 +53,15 @@ restore() { # $1 = backup file inside /work, $2 = manifest inside /work, $3 = KE
         legacyai-backup-tools sh -c 'BACKUP_FILE=$(ls $BACKUP_FILE) BACKUP_MANIFEST=$(ls $BACKUP_MANIFEST) restore-test.sh'
 }
 
-echo "selftest: 2/5 restore + checks"
+echo "selftest: 2/6 restore + checks"
 restore '/work/out/*.dump.age' '/work/out/*.manifest.json' 1
 
-echo "selftest: 3/5 audit-chain verification on the RESTORED database"
+echo "selftest: 3/6 audit-chain verification on the RESTORED database"
 # The verifier starts the API's normal (fail-closed) configuration, so it needs well-formed keys.
 # These are random, generated for this run only, and protect nothing.
 k() { node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"; }
-verify() { # $1 = database name, $2 = output file. Exit code 1 only means "a broken chain was found".
-  ( cd "$repo/services/api" &&     NODE_ENV=test LOG_LEVEL=silent     DATABASE_URL="postgres://legacyai_app:$APP_PW@${TEST_PG_HOST:-127.0.0.1}:${TEST_PG_PORT:-55432}/$1"     SC_PEPPER_KEYRING="{\"current\":\"v1\",\"keys\":{\"v1\":\"$(k)\"}}"     CREDENTIAL_ENC_KEYRING="{\"current\":\"k1\",\"keys\":{\"k1\":\"$(k)\"}}"     HMAC_INDEX_KEY="$(k)" INTERNAL_SERVICE_TOKEN="$(k)"     WEBAUTHN_RP_ID=localhost ALLOWED_ORIGINS=http://localhost:3000     node src/cli/verify-audit-chain.ts --tenant all > "$2" 2>/dev/null ) || [ $? -eq 1 ]
+verify() { # $1 = database name, $2 = output file. Exit code 3 means "ran fine, found a broken chain"; anything else non-zero is a crash.
+  ( cd "$repo/services/api" &&     NODE_ENV=test LOG_LEVEL=silent     DATABASE_URL="postgres://legacyai_app:$APP_PW@${TEST_PG_HOST:-127.0.0.1}:${TEST_PG_PORT:-55432}/$1"     SC_PEPPER_KEYRING="{\"current\":\"v1\",\"keys\":{\"v1\":\"$(k)\"}}"     CREDENTIAL_ENC_KEYRING="{\"current\":\"k1\",\"keys\":{\"k1\":\"$(k)\"}}"     HMAC_INDEX_KEY="$(k)" INTERNAL_SERVICE_TOKEN="$(k)"     WEBAUTHN_RP_ID=localhost ALLOWED_ORIGINS=http://localhost:3000     node src/cli/verify-audit-chain.ts --tenant all > "$2" 2>/dev/null ) || [ $? -eq 3 ]
 }
 out="${TMPDIR:-/tmp}"
 verify "$SOURCE_DB" "$out/legacyai-selftest-source.jsonl"
@@ -79,18 +79,30 @@ if ! diff -q "$out/legacyai-selftest-source.jsonl" "$out/legacyai-selftest-resto
 fi
 echo "selftest: restored audit chains match the source exactly"
 
-echo "selftest: 4/5 negative control - a corrupted backup must FAIL"
-tools legacyai-backup-tools sh -c 'f=$(ls /work/out/*.dump.age); cp "$f" /work/corrupt.dump.age; printf "XXXX" | dd of=/work/corrupt.dump.age bs=1 seek=400 conv=notrunc 2>/dev/null; cp /work/out/*.manifest.json /work/corrupt.manifest.json'
-if restore /work/corrupt.dump.age /work/corrupt.manifest.json 0 >/dev/null 2>&1; then
-  echo "selftest: FAIL - the restore test accepted a corrupted backup" >&2; exit 1
-fi
-echo "selftest: corrupted backup was rejected (as it should be)"
+# A negative control only counts if the restore test fails FOR THE EXPECTED REASON.
+must_fail() { # $1 = text that must appear in the failure message; the rest = restore arguments
+  expected="$1"; shift
+  set +e
+  output="$(restore "$@" 2>&1)"; status=$?
+  set -e
+  [ "$status" -ne 0 ] || { echo "selftest: FAIL - the restore test accepted a bad backup" >&2; exit 1; }
+  printf '%s' "$output" | grep -q "restore-test: FAIL - .*$expected" \
+    || { echo "selftest: FAIL - the restore test failed, but not for the expected reason. Output: $output" >&2; exit 1; }
+}
 
-echo "selftest: 5/5 negative control - a manifest with a wrong row count must FAIL"
+echo "selftest: 4/6 negative control - a backup that does not match its manifest must FAIL (checksum)"
+tools legacyai-backup-tools sh -c 'f=$(ls /work/out/*.dump.age); cp "$f" /work/corrupt.dump.age; printf "XXXX" | dd of=/work/corrupt.dump.age bs=1 seek=400 conv=notrunc 2>/dev/null; cp /work/out/*.manifest.json /work/corrupt.manifest.json'
+must_fail "checksum mismatch" /work/corrupt.dump.age /work/corrupt.manifest.json 0
+echo "selftest: rejected (checksum mismatch)"
+
+echo "selftest: 5/6 negative control - a corrupted backup whose manifest was ALSO forged must FAIL at decryption"
+tools legacyai-backup-tools sh -c 'sha=$(sha256sum /work/corrupt.dump.age | cut -d" " -f1); sed -E "s/\"sha256\": \"[0-9a-f]+\"/\"sha256\": \"$sha\"/" /work/corrupt.manifest.json > /work/forged.manifest.json'
+must_fail "decrypt or pg_restore failed" /work/corrupt.dump.age /work/forged.manifest.json 0
+echo "selftest: rejected (decryption failed)"
+
+echo "selftest: 6/6 negative control - a manifest with a wrong row count must FAIL"
 tools legacyai-backup-tools sh -c 'sed -E "s/\"cards\" *: *([0-9]+)/\"cards\": 999999/" /work/out/*.manifest.json > /work/wrong.manifest.json'
-if restore '/work/out/*.dump.age' /work/wrong.manifest.json 0 >/dev/null 2>&1; then
-  echo "selftest: FAIL - the restore test accepted a manifest with wrong row counts" >&2; exit 1
-fi
-echo "selftest: wrong manifest was rejected (as it should be)"
+must_fail "row counts differ" '/work/out/*.dump.age' /work/wrong.manifest.json 0
+echo "selftest: rejected (row counts differ)"
 
 echo "selftest: PASS"

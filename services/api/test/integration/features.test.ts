@@ -199,18 +199,26 @@ describe('internal policy check (service-to-service)', () => {
 
     const after = (await su.query('SELECT count(*)::int AS n FROM audit_log WHERE actor_card_id = $1', [expert.card.id])).rows[0].n;
     expect(after - before).toBe(5);
+    // ...and they are marked as asked by a service, not as something the cardholder did in a session
+    const kinds = await su.query(`SELECT DISTINCT actor_kind FROM audit_log WHERE actor_card_id = $1 AND action LIKE 'knowledge:%'`, [expert.card.id]);
+    expect(kinds.rows).toEqual([{ actor_kind: 'service' }]);
   });
 
   it('denies for an unknown card, a card of another tenant, and a company card; the caller cannot claim roles', async () => {
     const other = await createTenant(t, 'internal-other');
-    const unknown = await call({ tenant_id: tenant.tenantId, card_id: '11111111-1111-4111-8111-111111111111', action: 'card:read', resource: { type: 'card' } });
+    const unknown = await call({ tenant_id: tenant.tenantId, card_id: '11111111-1111-4111-8111-111111111111', action: 'knowledge:read', resource: { type: 'knowledge' } });
     expect(unknown.json()).toMatchObject({ effect: 'deny', reason_code: 'DENY_UNKNOWN_SUBJECT' });
-    const crossed = await call({ tenant_id: tenant.tenantId, card_id: other.ownerCard.id, action: 'card:read', resource: { type: 'card' } });
+    const crossed = await call({ tenant_id: tenant.tenantId, card_id: other.ownerCard.id, action: 'knowledge:read', resource: { type: 'knowledge' } });
     expect(crossed.json()).toMatchObject({ effect: 'deny', reason_code: 'DENY_UNKNOWN_SUBJECT' });
-    const company = await call({ tenant_id: tenant.tenantId, card_id: tenant.companyCard.id, action: 'card:read', resource: { type: 'card' } });
+    const company = await call({ tenant_id: tenant.tenantId, card_id: tenant.companyCard.id, action: 'knowledge:read', resource: { type: 'knowledge' } });
     expect(company.json().effect).toBe('deny');
-    const claims = await call({ tenant_id: tenant.tenantId, card_id: tenant.ownerCard.id, action: 'card:read', resource: { type: 'card' }, roles: ['company_owner'] });
+    const claims = await call({ tenant_id: tenant.tenantId, card_id: tenant.ownerCard.id, action: 'knowledge:read', resource: { type: 'knowledge' }, roles: ['company_owner'] });
     expect(claims.statusCode).toBe(400); // extra fields are not part of the contract
+    // The endpoint answers knowledge questions only. Card administration (where the target's rank matters) is never decided here.
+    for (const action of ['card:suspend', 'card_roles:assign', 'card:read', 'tenant_settings:update', 'export:create']) {
+      const res = await call({ tenant_id: tenant.tenantId, card_id: tenant.ownerCard.id, action, resource: { type: 'card', id: other.ownerCard.id } });
+      expect(res.json(), action).toMatchObject({ effect: 'deny', reason_code: 'DENY_INTERNAL_ACTION_NOT_ALLOWED' });
+    }
   });
 });
 

@@ -41,6 +41,9 @@ export const DEFAULT_AUTH_LIMITS: AuthLimits = {
 
 const TXN_TTL_SECONDS = 300;
 
+/** Associated data for encrypted TOTP seeds: bound to the tenant, so a seed survives a card replacement. */
+const totpAad = (tenantId: string): string => `totp:${tenantId}`;
+
 type FailReason =
   | 'bad_txn' | 'unknown_card' | 'bad_factor' | 'factor_throttled' | 'bad_sc' | 'locked' | 'state' | 'expired'
   | 'tenant_inactive' | 'bad_enrollment_token';
@@ -81,11 +84,12 @@ export class AuthService {
   async #enforceLimits(ctx: RequestContext): Promise<void> {
     const { rateLimiter, limits } = this.#d;
     const perIp = await rateLimiter.hit(`login-ip:${ctx.ip}`, limits.loginPerIp.limit, limits.loginPerIp.windowSeconds, ctx.now);
+    // A caller already over its own limit is turned away BEFORE the shared budget is touched;
+    // otherwise one address could use up the global allowance and block sign-in for everyone.
+    if (!perIp.allowed) throw problems.tooManyRequests(perIp.retryAfterSeconds);
     // The global cap bounds total Argon2 work, so a flood cannot run up CPU cost.
     const global = await rateLimiter.hit('login-global', limits.loginGlobal.limit, limits.loginGlobal.windowSeconds, ctx.now);
-    if (!perIp.allowed || !global.allowed) {
-      throw problems.tooManyRequests(Math.max(perIp.allowed ? 0 : perIp.retryAfterSeconds, global.allowed ? 0 : global.retryAfterSeconds));
-    }
+    if (!global.allowed) throw problems.tooManyRequests(global.retryAfterSeconds);
   }
 
   #cardHmac(digitsOrInput: string): Buffer {
@@ -161,18 +165,24 @@ export class AuthService {
         return null;
       };
 
-      const card = cardId === null ? null : (await tx.query<CardRow>(`SELECT ${CARD_COLUMNS} FROM cards WHERE id = $1 FOR UPDATE`, [cardId])).rows[0] ?? null;
-      const state = card === null ? null : await this.#authState(tx, card);
+      // Everything slow (signature check, Argon2) happens BEFORE any row is locked, so a known
+      // card and an unknown card behave the same under concurrent requests.
+      const card = cardId === null ? null : (await tx.query<CardRow>(`SELECT ${CARD_COLUMNS} FROM cards WHERE id = $1`, [cardId])).rows[0] ?? null;
+      const before = card === null ? null : await this.#authState(tx, card, false);
       const credentials = card === null ? [] : (await tx.query<StoredCredential>(
         `SELECT ${CREDENTIAL_COLUMNS} FROM credentials WHERE tenant_id = $1 AND card_id = $2 AND status = 'active'`, [tenantId, card.id])).rows;
       const secret = card === null ? null : (await tx.query<{ sc_hash: string; pepper_id: string }>(
         `SELECT sc_hash, pepper_id FROM card_secrets WHERE tenant_id = $1 AND card_id = $2 AND status = 'current'`, [tenantId, card.id])).rows[0] ?? null;
 
-      // 3. Strong factor - exactly one verification (real or dummy) on every path.
+      // SC - exactly one Argon2 computation (real or dummy) on every path.
+      const scResult = await this.#d.hasher.verify(card?.id ?? null, body.sc, secret ? { hash: secret.sc_hash, pepperId: secret.pepper_id } : null);
+      const sc: ScProof | null = scResult.proof;
+
+      // Strong factor - exactly one verification (real or dummy) on every path.
       let strong: StrongFactorProof | null = null;
       let newSignCount: number | null = null;
       let totpStep: number | null = null;
-      let throttled = false;
+      const throttled = body.factor.type === 'totp' && before?.factor_throttled_until != null && before.factor_throttled_until.getTime() > ctx.now.getTime();
       if (body.factor.type === 'passkey') {
         const res = await verifyPasskeyAssertion({
           webauthn: this.#d.webauthn, cardId: card?.id ?? null, credentials, assertion: body.factor.assertion,
@@ -180,22 +190,36 @@ export class AuthService {
         });
         if (res) ({ proof: strong, newSignCount } = res);
       } else {
-        throttled = state?.factor_throttled_until != null && state.factor_throttled_until.getTime() > ctx.now.getTime();
+        // While TOTP is paused for this card (too many wrong codes), a code is examined ONLY when
+        // the SC in the same request is right. A stranger guessing codes therefore learns nothing
+        // during the pause, while the real cardholder - who knows the SC - can still sign in.
+        const examine = !throttled || sc !== null;
         const res = await verifyTotpCode({
-          cipher: this.#d.cipher, cardId: throttled ? null : (card?.id ?? null), credentials, code: body.factor.code, now: ctx.now,
-          lastStep: state?.last_totp_step == null ? null : Number(state.last_totp_step),
+          cipher: this.#d.cipher, aad: totpAad(tenantId), cardId: examine ? (card?.id ?? null) : null, credentials, code: body.factor.code,
+          now: ctx.now, lastStep: before?.last_totp_step == null ? null : Number(before.last_totp_step),
         });
         if (res) ({ proof: strong, step: totpStep } = res);
       }
 
-      // 4. SC - exactly one Argon2 computation (real or dummy) on every path.
-      const scResult = await this.#d.hasher.verify(card?.id ?? null, body.sc, secret ? { hash: secret.sc_hash, pepperId: secret.pepper_id } : null);
-      const sc: ScProof | null = scResult.proof;
+      if (card === null || before === null) return fail(txn === null ? 'bad_txn' : 'unknown_card', null);
 
-      if (card === null || state === null) return fail(txn === null ? 'bad_txn' : 'unknown_card', null);
+      // Short critical section: lock the card's counters and decide.
+      const state = await this.#authState(tx, card, true);
+      if (strong !== null && totpStep !== null) {
+        if (state.last_totp_step != null && totpStep <= Number(state.last_totp_step)) {
+          strong = null; // a concurrent request already used this code
+        } else {
+          // The code is spent the moment it verifies - even if the SC turns out wrong - so it cannot be replayed.
+          await tx.query('UPDATE card_auth_state SET last_totp_step = $3 WHERE tenant_id = $1 AND card_id = $2', [tenantId, card.id, totpStep]);
+        }
+      }
 
       if (strong === null) {
-        if (throttled) return fail('factor_throttled', card);
+        if (throttled) {
+          // Paused, right SC, wrong code: someone who knows the SC is guessing codes. That counts toward the hard lock.
+          if (sc !== null) await this.#countScFailure(tx, card, state, ctx);
+          return fail('factor_throttled', card);
+        }
         if (body.factor.type === 'totp') await this.#countTotpFailure(tx, card, state, ctx);
         return fail('bad_factor', card);
       }
@@ -230,10 +254,9 @@ export class AuthService {
 
       await tx.query(
         `UPDATE card_auth_state SET sc_failed_count = 0, factor_failed_count = 0, factor_window_start = NULL,
-                factor_throttle_level = 0, factor_throttled_until = NULL, last_login_at = $3,
-                last_totp_step = COALESCE($4, last_totp_step)
+                factor_throttle_level = 0, factor_throttled_until = NULL, last_login_at = $3
           WHERE tenant_id = $1 AND card_id = $2`,
-        [tenantId, card.id, ctx.now, totpStep]);
+        [tenantId, card.id, ctx.now]);
       await tx.query('UPDATE credentials SET last_used_at = $2, webauthn_sign_count = COALESCE($3, webauthn_sign_count) WHERE id = $1', [
         strong.credentialId, ctx.now, newSignCount,
       ]);
@@ -257,14 +280,20 @@ export class AuthService {
     return { body: result.body, setSessionCookie: result.token };
   }
 
-  async #authState(tx: Tx, card: CardRow): Promise<AuthStateRow> {
+  async #authState(tx: Tx, card: CardRow, lock: boolean): Promise<AuthStateRow> {
+    const read = async (): Promise<AuthStateRow | undefined> => (await tx.query<AuthStateRow>(
+      lock
+        ? `SELECT sc_failed_count, locked_at, factor_failed_count, factor_window_start, factor_throttle_level, factor_throttled_until,
+                  last_totp_step::text AS last_totp_step
+             FROM card_auth_state WHERE tenant_id = $1 AND card_id = $2 FOR UPDATE`
+        : `SELECT sc_failed_count, locked_at, factor_failed_count, factor_window_start, factor_throttle_level, factor_throttled_until,
+                  last_totp_step::text AS last_totp_step
+             FROM card_auth_state WHERE tenant_id = $1 AND card_id = $2`,
+      [card.tenant_id, card.id])).rows[0];
+    const existing = await read();
+    if (existing) return existing;
     await tx.query('INSERT INTO card_auth_state (tenant_id, card_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [card.tenant_id, card.id]);
-    const { rows } = await tx.query<AuthStateRow>(
-      `SELECT sc_failed_count, locked_at, factor_failed_count, factor_window_start, factor_throttle_level, factor_throttled_until,
-              last_totp_step::text AS last_totp_step
-         FROM card_auth_state WHERE tenant_id = $1 AND card_id = $2 FOR UPDATE`,
-      [card.tenant_id, card.id]);
-    return rows[0] as AuthStateRow;
+    return (await read()) as AuthStateRow;
   }
 
   /** Wrong SC after a valid strong factor. At the tenant's threshold (3-5) the card locks. */
@@ -321,8 +350,7 @@ export class AuthService {
     const cardHmac = this.#cardHmac(normalizeCardNumber(body.card_number) ?? String(body.card_number));
 
     const response = await this.#d.db.withTenantTx<Record<string, unknown> | null>(tenantId, async (tx) => {
-      const card = resolved === null ? null : (await tx.query<CardRow>(`SELECT ${CARD_COLUMNS} FROM cards WHERE id = $1 FOR UPDATE`, [resolved.cardId])).rows[0] ?? null;
-      const state = card === null ? null : await this.#authState(tx, card);
+      const card = resolved === null ? null : (await tx.query<CardRow>(`SELECT ${CARD_COLUMNS} FROM cards WHERE id = $1`, [resolved.cardId])).rows[0] ?? null;
       const secret = card === null ? null : (await tx.query<{ sc_hash: string; pepper_id: string }>(
         `SELECT sc_hash, pepper_id FROM card_secrets WHERE tenant_id = $1 AND card_id = $2 AND status = 'current'`, [tenantId, card.id])).rows[0] ?? null;
       // The enrollment token (256 random bits) is the strong secret for this step.
@@ -342,8 +370,9 @@ export class AuthService {
         return null;
       };
 
-      if (card === null || state === null) return fail('unknown_card');
+      if (card === null) return fail('unknown_card');
       if (tokenRow === null) return fail('bad_enrollment_token');
+      const state = await this.#authState(tx, card, true);
       if (scResult.proof === null) {
         await this.#countScFailure(tx, card, state, ctx);
         return fail('bad_sc');
@@ -370,7 +399,7 @@ export class AuthService {
         out.webauthn_options = reg.options;
       } else {
         const totp = newTotpSecret(this.#d.webauthn.rpName, maskCardNumber(card.card_number));
-        const enc = this.#d.cipher.encrypt(totp.secret, card.id);
+        const enc = this.#d.cipher.encrypt(totp.secret, totpAad(tenantId));
         payload.totp_secret_enc = enc.ciphertext.toString('base64');
         payload.totp_key_id = enc.keyId;
         out.totp = { secret: totp.secret, otpauth_uri: totp.uri };
@@ -409,37 +438,48 @@ export class AuthService {
       if (!card) return false;
       const effective = effectiveState(card, ctx.now);
       if (effective !== 'issued' && effective !== 'active') return false;
-      // The enrollment token is single use: claim it now, inside the same transaction.
+      // Prove the new factor works FIRST. A mistyped code or a failed passkey ceremony must not
+      // use up the 72-hour enrollment token: the person simply starts the enrollment again.
+      const reg = txn.payload.factor_type === 'passkey'
+        ? await verifyPasskeyRegistration({ webauthn: this.#d.webauthn, attestation: body.attestation, expectedChallenge: txn.challenge })
+        : null;
+      let totpSecretEnc: Buffer | null = null;
+      let totpStep: number | null = null;
+      if (txn.payload.factor_type === 'passkey') {
+        if (!reg) return false;
+      } else {
+        if (typeof body.totp_code !== 'string' || !txn.payload.totp_secret_enc || !txn.payload.totp_key_id) return false;
+        totpSecretEnc = Buffer.from(txn.payload.totp_secret_enc, 'base64');
+        const secret = this.#d.cipher.decrypt(totpSecretEnc, txn.payload.totp_key_id, totpAad(txn.tenant_id));
+        if (secret === null) return false;
+        totpStep = await verifyTotpEnrollment(secret, body.totp_code, ctx.now);
+        if (totpStep === null) return false;
+      }
+
+      // Only now is the single-use token claimed, inside the same transaction as the new credential.
       const claimed = await tx.query(
         'UPDATE enrollment_tokens SET used_at = $2 WHERE id = $1 AND used_at IS NULL AND expires_at > $2', [txn.payload.enrollment_token_id, ctx.now]);
       if (claimed.rowCount !== 1) return false;
 
       let credentialId: string;
-      if (txn.payload.factor_type === 'passkey') {
-        const reg = await verifyPasskeyRegistration({ webauthn: this.#d.webauthn, attestation: body.attestation, expectedChallenge: txn.challenge });
-        if (!reg) return false;
+      if (reg) {
         const inserted = await tx.query<{ id: string }>(
           `INSERT INTO credentials (tenant_id, card_id, type, label, webauthn_credential_id, webauthn_public_key, webauthn_sign_count, webauthn_transports)
            VALUES ($1, $2, 'passkey', $3, $4, $5, $6, $7) ON CONFLICT (webauthn_credential_id) DO NOTHING RETURNING id`,
           [txn.tenant_id, card.id, txn.payload.label, reg.credentialId, reg.publicKey, reg.signCount, reg.transports]);
-        if (!inserted.rows[0]) return false;
+        // A passkey that is already registered somewhere is refused; throwing rolls the token claim back.
+        if (!inserted.rows[0]) throw problems.authFailed();
         credentialId = inserted.rows[0].id;
       } else {
-        if (typeof body.totp_code !== 'string' || !txn.payload.totp_secret_enc || !txn.payload.totp_key_id) return false;
-        const enc = Buffer.from(txn.payload.totp_secret_enc, 'base64');
-        const secret = this.#d.cipher.decrypt(enc, txn.payload.totp_key_id, card.id);
-        if (secret === null) return false;
-        const step = await verifyTotpEnrollment(secret, body.totp_code, ctx.now);
-        if (step === null) return false;
         const inserted = await tx.query<{ id: string }>(
           `INSERT INTO credentials (tenant_id, card_id, type, label, totp_secret_enc, totp_key_id) VALUES ($1, $2, 'totp', $3, $4, $5) RETURNING id`,
-          [txn.tenant_id, card.id, txn.payload.label, enc, txn.payload.totp_key_id]);
+          [txn.tenant_id, card.id, txn.payload.label, totpSecretEnc, txn.payload.totp_key_id]);
         credentialId = (inserted.rows[0] as { id: string }).id;
         // The code just used to enrol cannot be replayed to log in.
         await tx.query(
           `INSERT INTO card_auth_state (tenant_id, card_id, last_totp_step) VALUES ($1, $2, $3)
            ON CONFLICT (tenant_id, card_id) DO UPDATE SET last_totp_step = EXCLUDED.last_totp_step`,
-          [txn.tenant_id, card.id, step]);
+          [txn.tenant_id, card.id, totpStep]);
       }
 
       await this.#d.cards.event(tx, card, 'credential_added', card.id, ctx, { factor_type: txn.payload.factor_type }, credentialId);
@@ -448,6 +488,8 @@ export class AuthService {
         decision: 'event', reasonCode: 'CREDENTIAL_ADDED', requestId: ctx.requestId, ip: ctx.ip,
         details: { factor_type: txn.payload.factor_type, credential_id: credentialId },
       });
+      await this.#d.cards.revokeSessions(tx, card, 'credentials_reset', ctx.now);
+      await this.#d.notifier.notify({ type: 'credential_added', tenantId: txn.tenant_id, cardId: card.id });
       if (card.state === 'issued') {
         await tx.query('UPDATE cards SET activated_at = $2 WHERE id = $1', [card.id, ctx.now]);
         await this.#d.cards.transition(tx, { ...card, activated_at: ctx.now }, 'active', 'activated', card.id, ctx);

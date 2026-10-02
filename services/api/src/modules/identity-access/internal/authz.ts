@@ -80,7 +80,7 @@ export class Authorizer {
     }
   }
 
-  /** The policy decision point as the HTTP layer sees it: decide, count usage, audit. */
+  /** The policy decision point as the HTTP layer sees it: decide and count usage. The HTTP layer then calls record(). */
   async authorize(tx: Tx, subject: Subject, action: string, resource: ResourceRef, ctx: RequestContext): Promise<Decision> {
     const decision = await this.decideOnly(tx, subject, action, resource, ctx);
 
@@ -101,10 +101,21 @@ export class Authorizer {
       );
     }
 
+    return decision;
+  }
+
+  /**
+   * Writes one decision to the audit log. Every decision - allow and deny - is recorded.
+   * `actorKind` is 'service' when another service asked on a card's behalf (no session existed).
+   */
+  async record(
+    tx: Tx, subject: Subject, action: string, resource: ResourceRef, decision: Decision, ctx: RequestContext,
+    actorKind: 'card' | 'service' = 'card',
+  ): Promise<void> {
     await writeAudit(tx, {
       tenantId: subject.tenant_id,
       actorCardId: subject.card_id,
-      actorKind: 'card',
+      actorKind,
       action,
       resourceType: resource.type,
       resourceId: resource.id ?? null,
@@ -114,7 +125,6 @@ export class Authorizer {
       ip: ctx.ip,
       details: decision.obligations.length > 0 ? { obligations: decision.obligations.map((o) => o.type).sort().join(',') } : undefined,
     });
-    return decision;
   }
 
   /** Retrieval-time filter for list queries (feature 17 hook). */

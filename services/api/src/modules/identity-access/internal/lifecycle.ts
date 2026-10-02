@@ -14,8 +14,7 @@ export const LEGAL_TRANSITIONS: ReadonlyArray<readonly [CardState, CardState]> =
   ['active', 'expired'],     // clock passed expires_at
   ['active', 'replaced'],
   ['suspended', 'active'],   // reinstate
-  ['suspended', 'revoked'],
-  ['suspended', 'replaced'],
+  ['suspended', 'revoked'],      // (a suspended card is NOT replaceable: that would undo the suspension)
   ['expired', 'active'],     // renew
   ['expired', 'revoked'],
   ['expired', 'replaced'],

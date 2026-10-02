@@ -196,9 +196,74 @@ describe('cross-tenant access attempts (as the app role, in SQL)', () => {
     await app.query(`SELECT set_config('app.tenant_id', $1, true)`, [a.tenantId]);
     await app.query(`SELECT set_config('app.platform_scope', 'on', true)`);
     expect((await app.query('SELECT count(*)::int AS n FROM tenants')).rows[0].n).toBeGreaterThanOrEqual(3);
-    expect((await app.query(`UPDATE tenants SET name = 'Hacked' WHERE id = $1`, [b.tenantId])).rowCount).toBe(0);
     expect((await app.query('SELECT count(*)::int AS n FROM cards WHERE tenant_id = $1', [b.tenantId])).rows[0].n).toBe(0);
+    // The app role cannot change ANY tenant row - not another tenant's, not even its own (status, plan, platform flag).
+    await expect(app.query(`UPDATE tenants SET name = 'Hacked' WHERE id = $1`, [b.tenantId])).rejects.toMatchObject({ code: '42501' });
     await app.query('ROLLBACK');
+    await asTenant(a.tenantId, async () => {
+      await expect(app.query(`UPDATE tenants SET status = 'active', is_platform = true WHERE id = $1`, [a.tenantId])).rejects.toMatchObject({ code: '42501' });
+    });
+  });
+
+  it('references to cards and credentials cannot point into another tenant (composite foreign keys on every reference column)', async () => {
+    const cred = (await su.query('SELECT id FROM credentials WHERE card_id = $1 LIMIT 1', [b.ownerCard.id])).rows[0].id;
+    const attempts: Array<[string, unknown[]]> = [
+      [`INSERT INTO sessions (tenant_id, card_id, token_hash, csrf_hash, credential_id, idle_expires_at, absolute_expires_at)
+        VALUES ($1, $2, '\\x01', '\\x01', $3, now(), now())`, [a.tenantId, a.ownerCard.id, cred]],
+      [`INSERT INTO card_events (tenant_id, card_id, event_type, actor_card_id) VALUES ($1, $2, 'issued', $3)`, [a.tenantId, a.ownerCard.id, b.ownerCard.id]],
+      [`UPDATE cards SET replaced_by_card_id = $2 WHERE id = $1`, [a.ownerCard.id, b.ownerCard.id]],
+      [`UPDATE cards SET issued_by_card_id = $2 WHERE id = $1`, [a.ownerCard.id, b.ownerCard.id]],
+      [`INSERT INTO card_roles (tenant_id, card_id, role_key, assigned_by_card_id) VALUES ($1, $2, 'admin', $3)`, [a.tenantId, a.ownerCard.id, b.ownerCard.id]],
+      [`UPDATE tenant_settings SET updated_by_card_id = $2 WHERE tenant_id = $1`, [a.tenantId, b.ownerCard.id]],
+      [`INSERT INTO export_jobs (tenant_id, requested_by_card_id) VALUES ($1, $2)`, [a.tenantId, b.ownerCard.id]],
+      [`INSERT INTO idempotency_keys (tenant_id, actor_card_id, key, operation_id, request_hash, expires_at) VALUES ($1, $2, 'cross-tenant-key', 'x', '\\x00', now())`, [a.tenantId, b.ownerCard.id]],
+    ];
+    for (const [sql, params] of attempts) {
+      await asTenant(a.tenantId, async () => {
+        await expect(app.query(sql, params), sql.slice(0, 50)).rejects.toMatchObject({ code: '23503' });
+      });
+    }
+  });
+});
+
+describe('SECURITY DEFINER functions cannot be hijacked', () => {
+  it('the app role cannot create temporary tables (which could shadow a real table inside a definer function)', async () => {
+    await asTenant(a.tenantId, async () => {
+      await expect(app.query('CREATE TEMP TABLE audit_chain_heads (tenant_id uuid PRIMARY KEY, last_seq bigint, last_hash bytea)')).rejects.toMatchObject({ code: '42501' });
+    });
+  });
+
+  it('every function in the schema pins its search path with pg_temp last', async () => {
+    const { rows } = await su.query<{ proname: string; prosecdef: boolean; config: string[] | null }>(
+      `SELECT proname, prosecdef, proconfig AS config FROM pg_proc WHERE pronamespace = 'public'::regnamespace ORDER BY 1`);
+    expect(rows.map((r) => r.proname)).toEqual([
+      'app_current_tenant', 'audit_field', 'audit_log_chain', 'audit_log_reject_change', 'cards_enforce_lifecycle',
+      'cards_register_directory', 'purge_login_attempts', 'resolve_card',
+    ]);
+    for (const r of rows) {
+      const path = (r.config ?? []).find((c) => c.startsWith('search_path='));
+      expect(path, `${r.proname} has no pinned search_path`).toBeDefined();
+      expect(path!.endsWith('pg_temp'), `${r.proname}: ${path}`).toBe(true);
+      expect(path!.startsWith('search_path=pg_catalog'), `${r.proname}: ${path}`).toBe(true);
+    }
+    expect(rows.filter((r) => r.prosecdef).map((r) => r.proname)).toEqual(['audit_log_chain', 'cards_register_directory', 'purge_login_attempts', 'resolve_card']);
+  });
+
+  it('trigger functions cannot be called directly, and the purge function only removes OLD login attempts', async () => {
+    await asTenant(a.tenantId, async () => {
+      await expect(app.query('SELECT audit_log_chain()')).rejects.toBeTruthy();
+    });
+    await asTenant(a.tenantId, async () => {
+      await expect(app.query('SELECT purge_login_attempts(0)')).rejects.toThrow(/at least 30 days/);
+    });
+    await asTenant(a.tenantId, async () => {
+      await expect(app.query('SELECT purge_login_attempts(NULL)')).rejects.toThrow(/at least 30 days/);
+    });
+    const before = (await su.query('SELECT count(*)::int AS n FROM login_attempts')).rows[0].n;
+    expect(before).toBeGreaterThan(0);
+    const res = await app.query('SELECT purge_login_attempts(30) AS deleted');
+    expect(Number(res.rows[0].deleted)).toBe(0); // nothing here is 30 days old
+    expect((await su.query('SELECT count(*)::int AS n FROM login_attempts')).rows[0].n).toBe(before);
   });
 });
 

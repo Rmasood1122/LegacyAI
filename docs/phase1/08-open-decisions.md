@@ -1,5 +1,7 @@
 # 08 — Open decisions
 
+> **Status: all eight recommendations were ACCEPTED at Gate 1** (the founder replied "approved" on 2026-10-02). They are implemented as recommended. Decisions that came up *during* the build are in `REPORT.md` under "Decisions I need from the founder".
+
 Eight decisions I need from you. For each: the question in plain language, my recommendation, and what it costs if we get it wrong. **If you just reply "approved", I will go with every recommendation below.**
 
 ---

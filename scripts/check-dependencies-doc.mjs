@@ -9,20 +9,28 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const doc = readFileSync(path.join(root, 'docs', 'DEPENDENCIES.md'), 'utf8');
 const pkg = JSON.parse(readFileSync(path.join(root, 'services', 'api', 'package.json'), 'utf8'));
+const lines = doc.split('\n');
+// Name and exact version must appear on the SAME line (table row) of the record.
+const recorded = (name, version) => lines.some((l) => (l.includes(`| ${name} |`) || l.includes(`\`${name}\``) || l.toLowerCase().includes(`| ${name.toLowerCase()} `)) && l.includes(version));
 const missing = [];
 let checked = 0;
 
 for (const [name, version] of Object.entries({ ...pkg.dependencies, ...pkg.devDependencies })) {
   checked += 1;
   if (!/^\d+\.\d+\.\d+$/.test(version)) missing.push(`${name}: version "${version}" is not pinned exactly`);
-  else if (!doc.includes(name) || !doc.includes(version)) missing.push(`${name}@${version}`);
+  else if (!recorded(name, version)) missing.push(`${name}@${version}`);
 }
 for (const file of ['requirements.txt', 'requirements-dev.txt']) {
   for (const line of readFileSync(path.join(root, 'services', 'ai', file), 'utf8').split('\n')) {
-    const m = /^([A-Za-z0-9_.-]+)==([0-9][^\s#]*)/.exec(line.trim());
-    if (!m) continue;
+    const t = line.trim();
+    if (t === '' || t.startsWith('#') || t.startsWith('-r ')) continue;
+    const m = /^([A-Za-z0-9_.-]+)==([0-9][^\s#]*)/.exec(t);
+    if (!m) {
+      missing.push(`${file}: "${t}" is not pinned with ==`);
+      continue;
+    }
     checked += 1;
-    if (!doc.toLowerCase().includes(m[1].toLowerCase()) || !doc.includes(m[2])) missing.push(`${m[1]}==${m[2]}`);
+    if (!recorded(m[1], m[2])) missing.push(`${m[1]}==${m[2]}`);
   }
 }
 

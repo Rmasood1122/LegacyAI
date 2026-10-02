@@ -13,6 +13,10 @@ describe('config loader fails closed', () => {
     expect(c.env).toBe('test');
     expect(c.argon2.memoryKiB).toBe(19456);
     expect(c.allowedOrigins).toEqual(['https://app.legacyai.test']);
+    expect(c.trustProxyHops).toBe(0);
+    expect(loadConfig(testEnv({ TRUST_PROXY: '1' })).trustProxyHops).toBe(1);
+    expect(loadConfig(testEnv({ TRUST_PROXY: 'false' })).trustProxyHops).toBe(0);
+    expect(() => loadConfig(testEnv({ NODE_ENV: 'production' }))).not.toThrow();
   });
 
   const SECRETS = ['DATABASE_URL', 'SC_PEPPER_KEYRING', 'CREDENTIAL_ENC_KEYRING', 'HMAC_INDEX_KEY', 'INTERNAL_SERVICE_TOKEN'];
@@ -44,7 +48,11 @@ describe('config loader fails closed', () => {
     ['Argon2 memory negative', { ARGON2_MEMORY_KIB: '-19456' }],
     ['port not a number', { PORT: 'http' }],
     ['port out of range', { PORT: '70000' }],
-    ['boolean typo', { TRUST_PROXY: 'yes' }],
+    ['proxy trust that is not a hop count', { TRUST_PROXY: 'yes' }],
+    ['proxy trust "true" (would trust a caller-written X-Forwarded-For)', { TRUST_PROXY: 'true' }],
+    ['proxy trust of too many hops', { TRUST_PROXY: '9' }],
+    ['the placeholder keys from .env.example in production', { NODE_ENV: 'production', SC_PEPPER_KEYRING: JSON.stringify({ current: 'v1', keys: { v1: Buffer.from('FAKE-PEPPER-DO-NOT-USE-FAKE-PEPPER-').toString('base64') } }) }],
+    ['boolean typo', { VALIDATE_RESPONSES: 'yes' }],
     ['unknown environment', { NODE_ENV: 'staging' }],
     ['unknown log level', { LOG_LEVEL: 'chatty' }],
   ])('refuses: %s', (_name, override) => {

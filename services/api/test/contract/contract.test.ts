@@ -50,7 +50,7 @@ describe('the contract file', () => {
 
 describe('response validation really fires (seen firing)', () => {
   const server = async (body: unknown, status = 200) => {
-    const auth: AuthPort = { tenantOfToken: () => null, resolveSession: async () => null, authorize: async () => ({ effect: 'deny', reason_code: 'X', obligations: [] }) };
+    const auth: AuthPort = { tenantOfToken: () => null, resolveSession: async () => null, authorize: async () => ({ effect: 'deny', reason_code: 'X', obligations: [] }), recordDecision: async () => undefined };
     const s = await createHttpServer({
       config: loadConfig(testEnv()), db: t.app.db, log: createLogger('silent'), clock: systemClock, auth,
       rateLimiter: { hit: async () => ({ allowed: true, retryAfterSeconds: 0 }) }, idempotency: new PostgresIdempotencyStore(), contractPath: CONTRACT_PATH,
@@ -75,7 +75,7 @@ describe('response validation really fires (seen firing)', () => {
   });
 
   it('with validation switched off the same bad response would go out - which is why tests run with it on', async () => {
-    const auth: AuthPort = { tenantOfToken: () => null, resolveSession: async () => null, authorize: async () => ({ effect: 'deny', reason_code: 'X', obligations: [] }) };
+    const auth: AuthPort = { tenantOfToken: () => null, resolveSession: async () => null, authorize: async () => ({ effect: 'deny', reason_code: 'X', obligations: [] }), recordDecision: async () => undefined };
     const s = await createHttpServer({
       config: loadConfig(testEnv({ VALIDATE_RESPONSES: 'false' })), db: t.app.db, log: createLogger('silent'), clock: systemClock, auth,
       rateLimiter: { hit: async () => ({ allowed: true, retryAfterSeconds: 0 }) }, idempotency: new PostgresIdempotencyStore(), contractPath: CONTRACT_PATH,
@@ -102,6 +102,9 @@ describe('request validation on every endpoint', () => {
     ['SQL in a field with a pattern', 'POST', '/v1/tenants', { name: 'x', slug: "x'; DROP TABLE cards;--", owner_display_name: 'x' }],
     ['restriction with a bad time', 'PUT', '/v1/cards/11111111-1111-4111-8111-111111111111/restrictions', { restrictions: [{ type: 'time_window', enabled: true, config: { timezone: 'UTC', days: [1], start: '25:00', end: '26:00' } }] }],
     ['restriction of unknown type', 'PUT', '/v1/cards/11111111-1111-4111-8111-111111111111/restrictions', { restrictions: [{ type: 'moon', enabled: true, config: {} }] }],
+    ['restriction without a type', 'PUT', '/v1/cards/11111111-1111-4111-8111-111111111111/restrictions', { restrictions: [{ enabled: true, config: {} }] }],
+    ['network range with an empty prefix (would mean "everything")', 'PUT', '/v1/cards/11111111-1111-4111-8111-111111111111/restrictions', { restrictions: [{ type: 'network_allowlist', enabled: true, config: { cidrs: ['10.0.0.0/'] } }] }],
+    ['audit verify range beyond any possible sequence', 'POST', '/v1/audit/verify', { from_seq: 1e30 }],
     ['empty settings patch', 'PATCH', '/v1/tenants/current/settings', {}],
     ['settings: unknown key', 'PATCH', '/v1/tenants/current/settings', { is_platform: true }],
   ])('%s -> 400 with field-level problems and no echo of the input', async (_name, method, url, body) => {
@@ -121,6 +124,11 @@ describe('request validation on every endpoint', () => {
     ['unknown query parameter', '/v1/cards?admin=true'],
     ['bad filter value', '/v1/cards?state=banana'],
     ['garbage cursor', '/v1/cards?cursor=%00%00'],
+    ['cursor that is not an id', `/v1/cards?cursor=${Buffer.from('abc').toString('base64url')}`],
+    ['audit cursor that is not a number', `/v1/audit/events?cursor=${Buffer.from('abc').toString('base64url')}`],
+    ['audit cursor too large', `/v1/audit/events?cursor=${Buffer.from('9'.repeat(40)).toString('base64url')}`],
+    ['upper-case uuid in the path', '/v1/cards/11111111-1111-4111-8111-11111111AAAA'],
+    ['urn-style uuid in the path', '/v1/cards/urn:uuid:11111111-1111-4111-8111-111111111111'],
     ['cursor with SQL', `/v1/cards?cursor=${Buffer.from("' OR 1=1 --").toString('base64url')}`],
   ])('query/path: %s -> 400', async (_name, url) => {
     expect((await tenant.owner.get(url)).status).toBe(400);
@@ -216,6 +224,9 @@ describe('every one of the 45 operations returns a contract-conforming success',
     const eb2 = await anon.request('POST', '/v1/auth/enrollment/begin', { card_number: card.number, sc: card.sc, enrollment_token: tok.body.enrollment_token, factor_type: 'totp' });
     const { generate } = await import('otplib');
     await anon.request('POST', '/v1/auth/enrollment/complete', { enrollment_txn: eb2.body.enrollment_txn, totp_code: await generate({ secret: eb2.body.totp.secret, epoch: Math.floor(t.clock.now().getTime() / 1000) }) });
+    expect((await member.get('/v1/auth/credentials')).status).toBe(401); // adding a factor by token ends existing sessions
+    const lb2 = await member.request('POST', '/v1/auth/login/begin', { card_number: card.number });
+    expect((await member.request('POST', '/v1/auth/login/verify', { login_txn: lb2.body.login_txn, sc: card.sc, factor: { type: 'passkey', assertion: key.assert(lb2.body.webauthn_options) } })).status).toBe(200);
     const two = await member.get('/v1/auth/credentials');
     expect(two.body.items).toHaveLength(2);
     ok('removeOwnCredential', await member.request('DELETE', `/v1/auth/credentials/${two.body.items[1].id}`), 204);
@@ -258,7 +269,7 @@ describe('every one of the 45 operations returns a contract-conforming success',
     // internal
     const pol = await t.app.http.app.inject({
       method: 'POST', url: '/v1/internal/policy/check', headers: { authorization: `Bearer ${testEnv().INTERNAL_SERVICE_TOKEN}` },
-      payload: { tenant_id: tenant.tenantId, card_id: tenant.ownerCard.id, action: 'card:read', resource: { type: 'card', id: card.id } },
+      payload: { tenant_id: tenant.tenantId, card_id: tenant.ownerCard.id, action: 'knowledge:read', resource: { type: 'knowledge', id: 'item-1', sensitivity: 2 } },
     });
     expect(pol.statusCode).toBe(200);
     expect(pol.json()).toEqual({ effect: 'allow', reason_code: 'ALLOW', obligations: [] });
@@ -287,7 +298,7 @@ describe('errors use one format everywhere (RFC 9457 problem details)', () => {
       [403, await expert.client.post('/v1/people', { display_name: 'x' })],
       [404, await o.get('/v1/cards/11111111-1111-4111-8111-111111111111')],
       [404, await o.get('/v1/nope')],
-      [409, await o.post(`/v1/cards/${tenant.companyCard.id}/reinstate`)],
+      [409, await o.post(`/v1/cards/${expert.card.id}/reinstate`)],
       [413, await o.post('/v1/people', { display_name: 'y'.repeat(70_000) })],
       [422, await o.post('/v1/cards', { person_id: p.body.id, roles: [{ role_key: 'contractor' }] })],
     ];

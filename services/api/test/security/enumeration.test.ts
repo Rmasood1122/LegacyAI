@@ -43,7 +43,7 @@ beforeAll(async () => {
 
   for (let i = 0; i < 5; i += 1) await tryLogin(t, locked.card.number, wrong(locked.card.sc), { passkey: locked.passkey });
   await su.query(
-    `UPDATE cards SET expires_at = now() - interval '30 days', grace_until = now() - interval '16 days', renewal_due = now() - interval '44 days' WHERE id = $1`,
+    `UPDATE cards SET issued_at = now() - interval '120 days', expires_at = now() - interval '30 days', grace_until = now() - interval '16 days', renewal_due = now() - interval '44 days' WHERE id = $1`,
     [lapsed.card.id]);
   await tenant.owner.post(`/v1/cards/${suspended.card.id}/suspend`, { reason: 'test' });
   await tenant.owner.post(`/v1/cards/${revoked.card.id}/revoke`, { reason: 'test' });

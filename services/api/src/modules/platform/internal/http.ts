@@ -30,8 +30,10 @@ export interface AuthPort {
   tenantOfToken(token: string): string | null;
   /** Returns the subject for a live session whose card is still allowed to act, else null. */
   resolveSession(tx: Tx, token: string, ctx: RequestContext): Promise<{ subject: Subject; csrfToken: string } | null>;
-  /** The policy decision point. Writes the decision to the audit log inside `tx`. */
+  /** The policy decision point. */
   authorize(tx: Tx, subject: Subject, action: string, resource: ResourceRef, ctx: RequestContext): Promise<Decision>;
+  /** Writes a decision to the audit log inside `tx`. The HTTP layer calls this for EVERY decision. */
+  recordDecision(tx: Tx, subject: Subject, action: string, resource: ResourceRef, decision: Decision, ctx: RequestContext): Promise<void>;
 }
 
 export interface HandlerResult {
@@ -118,7 +120,9 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
     disableRequestLogging: true,
     bodyLimit: 64 * 1024,
     requestTimeout: 30_000,
-    trustProxy: config.trustProxy,
+    // Trust exactly N proxy hops for the client address (never "all"): anything further left in
+    // X-Forwarded-For was written by the caller and is ignored.
+    trustProxy: config.trustProxyHops === 0 ? false : (_address: string, hop: number) => hop < config.trustProxyHops,
     genReqId: () => randomUUID(),
   });
 
@@ -261,20 +265,31 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
         }
 
         const decision = await auth.authorize(tx, subject, action, loaded, ctx);
-        if (decision.effect !== 'allow') return { problem: problems.forbidden() };
+        if (decision.effect !== 'allow') {
+          await auth.recordDecision(tx, subject, action, loaded, decision, ctx);
+          return { problem: problems.forbidden() };
+        }
         // An obligation this layer does not understand cannot be honoured, so the request is refused.
         if (decision.obligations.some((o) => !KNOWN_OBLIGATIONS.has(o.type))) {
           req.log.error({ operation: op.operationId }, 'unknown policy obligation; denying');
+          await auth.recordDecision(tx, subject, action, loaded, { effect: 'deny', reason_code: 'DENY_UNKNOWN_OBLIGATION', obligations: [] }, ctx);
           return { problem: problems.forbidden() };
         }
         allowed = { subject, resource: loaded, decision };
+        // The "allow" row is written at the END of the transaction (see below), together with the
+        // work it allowed. Writing it first would hold the tenant's audit-chain lock for the whole
+        // request and make every other request of that tenant wait behind a slow one.
+        const recordAllow = (): Promise<void> => auth.recordDecision(tx, subject, action, loaded, decision, ctx);
 
         if (input.idemKey !== null) {
           const started = await deps.idempotency.begin(tx, {
             tenantId, actorCardId: subject.card_id, key: input.idemKey, operationId: op.operationId,
             requestHash: hashRequest(op.operationId, input.params, input.body), now: ctx.now,
           });
-          if (started.kind === 'replay') return { result: { status: started.status, body: started.body ?? undefined } };
+          if (started.kind === 'replay') {
+            await recordAllow();
+            return { result: { status: started.status, body: started.body ?? undefined } };
+          }
         }
 
         const result = await def.handler({
@@ -287,6 +302,7 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
             tenantId, actorCardId: subject.card_id, key: input.idemKey, status: result.status ?? 200, body: result.body,
           });
         }
+        await recordAllow();
         return { result };
       });
       if ('problem' in outcome) throw outcome.problem;
@@ -334,6 +350,8 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
         method: op.method,
         url: op.fastifyPath,
         config: { [ROUTE_MARK]: true } as Record<symbol, unknown>,
+        // Sign-in and enrollment bodies are small; anonymous callers get a tighter limit.
+        ...(kind === 'public' ? { bodyLimit: 16 * 1024 } : {}),
         handler: (req, reply) =>
           tracer.startActiveSpan(op.operationId, async (span) => {
             try {

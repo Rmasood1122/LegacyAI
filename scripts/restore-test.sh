@@ -38,7 +38,7 @@ expected_schema="$(json schema_version)"
 actual_sha="$(sha256sum "$BACKUP_FILE" | cut -d' ' -f1)"
 [ "$actual_sha" = "$expected_sha" ] || fail "checksum mismatch: the backup file is not the one in the manifest"
 head -c 21 "$BACKUP_FILE" | grep -q '^age-encryption.org/v1' || fail "the backup file is not age-encrypted"
-if grep -aq 'PGDMP' "$BACKUP_FILE"; then fail "the backup file contains an unencrypted PostgreSQL dump header"; fi
+[ "$(head -c 5 "$BACKUP_FILE")" != "PGDMP" ] || fail "the backup file is an unencrypted PostgreSQL dump"
 
 admin() { psql "$RESTORE_SUPERUSER_URL" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 "$@"; }
 restored_url="$(echo "$RESTORE_SUPERUSER_URL" | sed -E "s#/[^/?]+(\?.*)?\$#/$RESTORE_DB_NAME\1#")"

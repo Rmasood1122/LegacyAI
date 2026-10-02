@@ -42,7 +42,7 @@
     "lint": "eslint . && depcruise src --config .dependency-cruiser.cjs",
     "lint:openapi": "redocly lint openapi.yaml",
     "test": "vitest run",
-    "test:unit": "vitest run test/unit",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:coverage": "vitest run --coverage",
     "db:reset": "node --env-file-if-exists=.env ../../scripts/db-setup.mjs reset",
     "db:roles": "node --env-file-if-exists=.env ../../scripts/db-setup.mjs roles",
