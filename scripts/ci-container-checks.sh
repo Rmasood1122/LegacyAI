@@ -9,8 +9,10 @@ for image in legacyai-api legacyai-ai legacyai-backup-tools; do
   uid="$(docker run --rm --entrypoint id "$image" -u)"
   [ "$uid" != "0" ] || fail "$image runs with uid 0"
   # No environment variable in the image may look like a credential.
-  if docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$image" | grep -Eiq '^[^=]*(password|secret|token|pepper|keyring|database_url|_key)[^=]*='; then
-    fail "$image has a secret-looking environment variable baked in"
+  # GPG_KEY is set by the official Python base image: it is the PUBLIC id of the key that signed that Python release.
+  suspicious="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$image" | grep -Ei '^[^=]*(password|secret|token|pepper|keyring|database_url|_key)[^=]*=' | grep -v '^GPG_KEY=' | cut -d= -f1 || true)"
+  if [ -n "$suspicious" ]; then
+    fail "$image has a secret-looking environment variable baked in: $suspicious"
   fi
   echo "container-checks: $image user=$user uid=$uid size=$(docker image inspect -f '{{.Size}}' "$image" | awk '{printf "%.0f MB", $1/1000000}')"
 done

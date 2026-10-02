@@ -43,7 +43,7 @@ jobs:
       - name: Lint (includes the SQL-injection, CSPRNG and route-registration rules) and module boundaries
         run: npm run lint
       - name: Lint rules really fire (deliberate violations must be rejected)
-        run: node ../../scripts/ci-selftest-lint.mjs
+        run: bash ../../scripts/ci-run.sh "lint self-test" node ../../scripts/ci-selftest-lint.mjs
       - name: OpenAPI file is valid
         run: npm run lint:openapi
       - name: Start PostgreSQL 18
@@ -53,7 +53,7 @@ jobs:
       - name: Unit, integration and security tests against real PostgreSQL, with coverage
         run: npm run test:coverage
       - name: Backup -> encrypt -> restore -> verify, with negative controls
-        run: bash ../../scripts/backup-restore-selftest.sh legacyai_test
+        run: bash ../../scripts/ci-run.sh "backup/restore self-test" bash ../../scripts/backup-restore-selftest.sh legacyai_test
       - name: Build (compile to JavaScript)
         run: npm run build
 
@@ -76,7 +76,7 @@ jobs:
       - name: Apply, roll back everything, re-apply - with both engines - and compare the resulting schemas
         env:
           REQUIRE_DBMATE: "1"   # in CI dbmate MUST run; a missing binary fails the job instead of skipping the comparison
-        run: bash ../../scripts/ci-migrations-check.sh
+        run: bash ../../scripts/ci-run.sh "migrations check" bash ../../scripts/ci-migrations-check.sh
 
   ai:
     name: AI stub - tests and dependency audit
@@ -124,7 +124,7 @@ jobs:
       - name: gitleaks over the whole history
         run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --config /repo/.gitleaks.toml --redact --no-banner
       - name: The scanner really fires (a planted fake key must be found)
-        run: bash scripts/ci-selftest-gitleaks.sh
+        run: bash scripts/ci-run.sh "gitleaks self-test" bash scripts/ci-selftest-gitleaks.sh
 
   containers:
     name: Container images - build, non-root, fail closed
@@ -136,7 +136,7 @@ jobs:
       - run: docker build -t legacyai-ai services/ai
       - run: docker build -f scripts/backup-tools.Dockerfile -t legacyai-backup-tools scripts
       - name: Images run as a non-root user, and the API refuses to start without configuration
-        run: bash scripts/ci-container-checks.sh
+        run: bash scripts/ci-run.sh "container checks" bash scripts/ci-container-checks.sh
 
   terraform:
     name: Terraform - format and validate (never plan, never apply)
@@ -155,6 +155,6 @@ jobs:
         run: terraform init -backend=false -input=false
       - run: terraform validate
       - name: Cost guardrails are present in the code
-        run: bash ../../scripts/ci-terraform-guardrails.sh
+        run: bash ../../scripts/ci-run.sh "terraform guardrails" bash ../../scripts/ci-terraform-guardrails.sh
       - name: The guardrail check really fires (12 deliberate breaks must each be detected)
-        run: bash ../../scripts/ci-selftest-terraform-guardrails.sh
+        run: bash ../../scripts/ci-run.sh "guardrails self-test" bash ../../scripts/ci-selftest-terraform-guardrails.sh

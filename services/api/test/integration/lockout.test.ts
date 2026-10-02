@@ -234,7 +234,8 @@ describe('authenticator-app (TOTP) guessing is throttled - temporarily, never pe
     const unlocked = await tenant.owner.post(`/v1/cards/${card.id}/unlock`);
     expect(unlocked.status).toBe(200);
     card.sc = unlocked.body.sc;
-    t.clock.advance(61 * 60_000);
+    t.clock.advance(31_000);
+    // (TOTP may still be paused; the cardholder knows the new SC, so their code is examined and accepted.)
     expect((await tryLogin(t, card.number, card.sc, { totp: secret })).res.status).toBe(200);
     t.clock.advance(31_000);
   });

@@ -115,10 +115,11 @@ describe('the last Company Owner cannot be removed, even by two requests racing 
         second.client.post(`/v1/cards/${ten.ownerCard.id}/suspend`, { reason: 'race' }),
       ]);
       const statuses = [x.status, y.status].sort();
-      // one request wins (200); the other is refused - either because it would remove the last Owner (403)
-      // or because its own card was suspended a moment earlier (401).
+      // One request wins (200). The other is refused: because it would remove the last Owner (403), because
+      // its own card was suspended a moment earlier (401), or because the database aborted it as the loser
+      // of the race (409, "please retry" - nothing was changed by it).
       expect(statuses[0]).toBe(200);
-      expect([401, 403]).toContain(statuses[1]);
+      expect([401, 403, 409]).toContain(statuses[1]);
       const active = await su.query(
         `SELECT count(*)::int AS n FROM cards c JOIN card_roles r ON r.card_id = c.id WHERE c.tenant_id = $1 AND r.role_key = 'company_owner' AND c.state = 'active'`,
         [ten.tenantId]);

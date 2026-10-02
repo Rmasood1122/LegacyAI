@@ -169,6 +169,12 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
   app.setNotFoundHandler((req, reply) => sendProblem(req, reply, problems.notFound()));
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof ProblemError) return sendProblem(req, reply, err);
+    // Two requests that lock the same rows in opposite order: PostgreSQL aborts one of them.
+    // Nothing was changed by the aborted request, so the caller can simply retry.
+    const pgCode = (err as { code?: unknown }).code;
+    if (pgCode === '40P01' || pgCode === '40001') {
+      return sendProblem(req, reply, problems.conflict('concurrent-update', 'Another request changed the same data at the same time; please retry'));
+    }
     const status = (err as { statusCode?: number }).statusCode;
     if (typeof status === 'number' && status >= 400 && status < 500) {
       // Malformed JSON, body too large, unsupported media type: a client error with no detail.
@@ -312,7 +318,8 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
       // request was allowed but did not complete, so the trail has no silent gap.
       const granted = allowed as { subject: Subject; resource: ResourceRef; decision: Decision } | null;
       if (granted !== null) {
-        const status = err instanceof ProblemError ? err.status : 500;
+        const pgCode = (err as { code?: unknown }).code;
+        const status = err instanceof ProblemError ? err.status : pgCode === '40P01' || pgCode === '40001' ? 409 : 500;
         try {
           await db.withTenantTx(tenantId, (tx) => writeAudit(tx, {
             tenantId, actorCardId: granted.subject.card_id, actorKind: 'card', action,
