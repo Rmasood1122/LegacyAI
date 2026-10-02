@@ -1,5 +1,9 @@
 # 03 — Security model
 
+> **Updated after the build (2026-10-02).** This document was approved at Gate 1 and then corrected to match
+> what was actually built. Every difference from the approved version is listed, with the reason, in
+> `REPORT.md` under "Deviations". The schema as built is drawn in `schema.md`.
+
 ## In plain language
 
 - The card number is like a username: it identifies you, it is not secret.
@@ -164,7 +168,7 @@ How:
 | Idle timeout | 30 minutes (tenant setting) |
 | Absolute timeout | 12 hours (tenant setting) |
 | Rotation | New id (old one revoked) on any privilege change to the session's own card. A role change made *to another card* revokes that card's sessions. |
-| CSRF | Three layers: `SameSite=Strict`; an `Origin` header allow-list on every state-changing request; a per-session CSRF token (returned by `GET /v1/auth/session`, sent back in `X-CSRF-Token`, stored hashed, compared in constant time) |
+| CSRF | Three layers: `SameSite=Strict`; an `Origin` header allow-list on every state-changing request; a per-session CSRF token (returned by `GET /v1/auth/session`, sent back in `X-CSRF-Token`, derived from the session token with HMAC so it is never stored in usable form, compared in constant time). After a session rotation the client must re-read `/v1/auth/session` to get the new token. |
 | Instant revocation | Two mechanisms, so neither is a single point of failure: (1) suspend / revoke / replace / unlock / renew **explicitly revoke** the card's sessions in the same transaction; (2) **every request re-reads the card's state** — a session is honoured only if the card's *effective* state allows it. Expiry needs no background job: it is a comparison with the clock on every request. |
 
 No session data is cached in memory, so revocation takes effect on the very next request.
@@ -190,14 +194,14 @@ States: `issued`, `active`, `suspended`, `revoked`, `expired`, `replaced`. Termi
 | active → revoked | revoke | Owner, Admin | sessions revoked; terminal |
 | suspended → revoked | revoke | Owner, Admin | terminal |
 | active → expired | clock (`expires_at` passed) | system | |
-| suspended → expired | clock | system | |
 | expired → active | renew | Owner, Admin | new SC, new dates |
+| expired → revoked | revoke | Owner, Admin | e.g. offboarding someone whose card has already expired |
 | active → active | renew (not a state change) | Owner, Admin | new SC, new dates |
 | active / suspended / expired → replaced | replace | Owner, Admin | new card number + new SC issued; old card terminal; `replaced_by_card_id` set |
 
-**Everything not in this table is illegal** — for example `revoked → active`, `replaced → anything`, `issued → suspended`, `expired → suspended`. Illegal transitions are rejected by the state machine in code *and* by a database trigger.
+**Everything not in this table is illegal** — for example `revoked → active`, `replaced → anything`, `issued → suspended`, `expired → suspended`, `suspended → expired`. *(13 legal transitions. Changed from the approved table: `suspended → expired` was removed — a suspended card stays suspended, the stricter state, so expiry can never turn a suspension into read-only grace access — and `expired → revoked` was added.)* Illegal transitions are rejected by the state machine in code *and* by a database trigger.
 
-**Effective state.** `expired` is decided by the clock, not by whether a background job has run: `effectiveState(card, now)` returns `expired` as soon as `now ≥ expires_at`. A sweeper job later writes the state and the `expired` event for the record, but enforcement never waits for it.
+**Effective state.** `expired` is decided by the clock, not by whether a background job has run: `effectiveState(card, now)` returns `expired` as soon as `now ≥ expires_at` (for a card that is `issued` or `active`). A sweeper job later writes the state and the `expired` event for the record, but enforcement never waits for it.
 
 **Expiry and grace are enforced in exactly one place — the policy decision point** (`04`):
 - `now < expires_at` → normal.
@@ -208,7 +212,7 @@ States: `issued`, `active`, `suspended`, `revoked`, `expired`, `replaced`. Termi
 
 **Rules that protect the tenant from itself:** nobody can suspend, revoke or change roles on their own card; the last active Company Owner card cannot be suspended, revoked or have the owner role removed.
 
-**Tested by** (`test/unit/lifecycle.test.ts`): a table of **all 36 from/to pairs** — each asserted legal or illegal; (`test/integration/lifecycle.test.ts`): the database trigger rejects an illegal transition even when the code is bypassed; renewal kills the old SC and sessions; grace is read-only; last-owner protection.
+**Tested by** (`test/unit/lifecycle.test.ts`): a table of **all 36 from/to pairs** (13 legal, 23 illegal) — each asserted legal or illegal; (`test/integration/lifecycle.test.ts`): the database trigger rejects an illegal transition even when the code is bypassed; renewal kills the old SC and sessions; grace is read-only; last-owner protection.
 
 ---
 

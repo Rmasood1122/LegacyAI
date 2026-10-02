@@ -1,5 +1,9 @@
 # 05 — API contract outline
 
+> **Updated after the build (2026-10-02).** This document was approved at Gate 1 and then corrected to match
+> what was actually built. Every difference from the approved version is listed, with the reason, in
+> `REPORT.md` under "Deviations". The schema as built is drawn in `schema.md`.
+
 ## In plain language
 
 This is the list of things the API can be asked to do, who is allowed to ask, and what goes in and comes out — in words. The exact machine-readable version (`services/api/openapi.yaml`, OpenAPI 3.1) is written in Step 3 and becomes the source of truth: the server validates every request against it, and tests validate every response against it.
@@ -51,7 +55,7 @@ There is deliberately **no** endpoint that accepts only a card number and SC and
 
 | Method & path | Required role [permission] | Request | Response |
 |---|---|---|---|
-| `POST /v1/cards` **(idem)** | Owner, Admin [`card:issue`] | `kind` (`person` \| `company`), `person_id` (for person cards), optional `roles`, optional `department_id` for the role | 201: card + **`card_number`, `sc`, `enrollment_token` shown once** |
+| `POST /v1/cards` **(idem)** | Owner, Admin [`card:issue`] | `person_id`, `roles` (at least one; each may carry a `department_id`). Person cards only: the company card is issued with the tenant. | 201: card + **`card_number`, `sc`, `enrollment_token` shown once** |
 | `GET /v1/cards` | Owner, Admin: all · others: own [`card:list`] | filters: `state`, `kind`, `person_id`, `expiring_before` | Page of cards. Result set narrowed by `buildResourceFilter`. |
 | `GET /v1/cards/{card_id}` | Owner, Admin · own card [`card:read`] | — | Card: `id`, `kind`, `card_number`, `state` (effective), `person_id`, `issued_at`, `activated_at`, `expires_at`, `grace_until`, `renewal_due`, `renewal_count`, `locked`, `roles`. Never the SC or its hash. |
 | `POST /v1/cards/{card_id}/suspend` **(idem)** | Owner, Admin [`card:suspend`] | `reason` | 200: card. Sessions revoked. |

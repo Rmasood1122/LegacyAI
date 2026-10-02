@@ -1,0 +1,16 @@
+# Secret scanning configuration. Uses gitleaks' default rules.
+# The allow-list is deliberately tiny and specific: each entry is a value that is
+# documented, in the file where it appears, as a fake placeholder for the throwaway local
+# database or for tests. Anything else that looks like a secret fails the scan.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented fake values for the local/test database and example config"
+regexTarget = "match"
+regexes = [
+  '''local-(dev|test)-[a-z-]*(password|not-a-secret)''',
+  '''RkFLRS1[A-Za-z0-9+/=]+''',
+  '''fake-internal-token-do-not-use-0+''',
+  '''test-internal-service-token-0123456789''',
+]

@@ -65,13 +65,29 @@ cat > "$manifest" <<EOF
 }
 EOF
 
+# Uploads one file to Cloud Storage with plain curl, using the identity of the Cloud Run job
+# (no gcloud needed, which keeps the tools image small). ifGenerationMatch=0 means
+# "only if the object does not exist yet": an existing backup is never overwritten.
+# NOT PROVEN LOCALLY: this path needs a real Google Cloud job to run. See docs/phase1/REPORT.md.
+gcs_put() { # $1 = local file, $2 = gs://bucket/object
+  rest="${2#gs://}"; bucket="${rest%%/*}"; object="${rest#*/}"
+  token="$(curl --silent --fail --header 'Metadata-Flavor: Google' \
+    'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
+    | sed -n 's/.*"access_token" *: *"\([^"]*\)".*/\1/p')"
+  [ -n "$token" ] || { echo "backup: could not get an access token from the metadata server" >&2; exit 1; }
+  encoded="$(printf '%s' "$object" | sed 's#/#%2F#g')"
+  curl --silent --show-error --fail --request POST --data-binary @"$1" \
+    --header "Authorization: Bearer $token" --header 'Content-Type: application/octet-stream' \
+    "https://storage.googleapis.com/upload/storage/v1/b/$bucket/o?uploadType=media&ifGenerationMatch=0&name=$encoded" >/dev/null \
+    || { echo "backup: upload of $(basename "$1") failed" >&2; exit 1; }
+}
+
 case "$BACKUP_DEST" in
   gs://*)
-    command -v gcloud >/dev/null 2>&1 || { echo "backup: gcloud is required for a gs:// destination" >&2; exit 2; }
+    command -v curl >/dev/null 2>&1 || { echo "backup: curl is required for a gs:// destination" >&2; exit 2; }
     prefix="${BACKUP_DEST%/}/$(date -u +%Y/%m/%d)"
-    # --no-clobber: never overwrite an existing backup.
-    gcloud storage cp --no-clobber "$dump" "$prefix/"
-    gcloud storage cp --no-clobber "$manifest" "$prefix/"
+    gcs_put "$dump" "$prefix/$(basename "$dump")"
+    gcs_put "$manifest" "$prefix/$(basename "$manifest")"
     ;;
   *)
     mkdir -p "$BACKUP_DEST"

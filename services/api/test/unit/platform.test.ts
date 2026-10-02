@@ -51,6 +51,25 @@ describe('config loader fails closed', () => {
     expect(() => loadConfig(testEnv(override))).toThrow(ConfigError);
   });
 
+  it('the documented .env.example is a complete, valid configuration (so the quick-start works as written)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const text = readFileSync(new URL('../../.env.example', import.meta.url), 'utf8');
+    const env: Record<string, string> = {};
+    for (const line of text.split('\n')) {
+      const m = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
+      if (m) env[m[1] as string] = m[2] as string;
+    }
+    const c = loadConfig(env);
+    expect(c.env).toBe('development');
+    expect(c.scPepper.currentId).toBe('v1');
+    // and every value in it is visibly fake
+    expect(text).toMatch(/FAKE PLACEHOLDER/);
+    for (const key of ['SC_PEPPER_KEYRING', 'CREDENTIAL_ENC_KEYRING', 'HMAC_INDEX_KEY']) {
+      const b64 = /[A-Za-z0-9+/]{20,}=*/.exec(env[key] as string)?.[0] as string;
+      expect(Buffer.from(b64, 'base64').toString('utf8')).toMatch(/^FAKE-/);
+    }
+  });
+
   it('error messages name the variable and never contain its value', () => {
     const secretValue = 'postgres-url-with-password-S3CR3T';
     try {

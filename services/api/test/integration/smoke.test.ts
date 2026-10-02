@@ -63,6 +63,35 @@ describe('happy path', () => {
     expect(all.body.items).toHaveLength(3);
   });
 
+  it('tracing hooks: every request runs inside an OpenTelemetry span named after its operation', async () => {
+    const { trace } = await import('@opentelemetry/api');
+    const spans: Array<{ name: string; ended: boolean; attrs: Record<string, unknown> }> = [];
+    const noop = (): void => undefined;
+    // A minimal recording provider. No SDK is installed; this proves the hooks are wired, nothing more.
+    trace.setGlobalTracerProvider({
+      getTracer: () => ({
+        startSpan: () => { throw new Error('not used'); },
+        startActiveSpan: (name: string, fn: (span: unknown) => unknown) => {
+          const record = { name, ended: false, attrs: {} as Record<string, unknown> };
+          spans.push(record);
+          return fn({
+            setAttribute: (k: string, v: unknown) => { record.attrs[k] = v; },
+            setStatus: noop, end: () => { record.ended = true; }, recordException: noop, isRecording: () => true,
+          });
+        },
+      }),
+    } as never);
+    try {
+      await new Client(t).get('/v1/health');
+      await new Client(t).get('/v1/cards'); // 401
+    } finally {
+      trace.disable();
+    }
+    expect(spans.map((s) => s.name)).toEqual(['getHealth', 'listCards']);
+    expect(spans.every((s) => s.ended)).toBe(true);
+    expect(spans[0]!.attrs['http.response.status_code']).toBe(200);
+  });
+
   it('a second member with a passkey can log in', async () => {
     const tenant = await createTenant(t, 'smoke2');
     const admin = await addMember(t, tenant.owner, [{ role_key: 'admin' }]);

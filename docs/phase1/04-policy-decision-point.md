@@ -1,5 +1,9 @@
 # 04 — Policy decision point (PDP)
 
+> **Updated after the build (2026-10-02).** This document was approved at Gate 1 and then corrected to match
+> what was actually built. Every difference from the approved version is listed, with the reason, in
+> `REPORT.md` under "Deviations". The schema as built is drawn in `schema.md`.
+
 ## In plain language
 
 There is **one gatekeeper** in the whole system. Every request must ask it: "may this card do this action to this thing?" The gatekeeper answers **allow** or **deny**, gives a reason code, and may attach conditions ("allow, but read-only"). If the gatekeeper is unsure, confused, or crashes, the answer is **deny**.
@@ -67,7 +71,7 @@ Each step can only deny or narrow. Allow is reached only at the end.
 | Per-card restrictions | `card_restrictions` | Owner / Admin |
 | State, grace and guard rules | One declarative table in code: `policy/rules.ts` — an array of rule objects evaluated by a generic engine, with a unit-test row per rule | A code change (reviewed, tested) |
 
-The matrix is loaded from the database and cached in memory for 60 seconds; the seed's checksum is logged at start-up.
+The matrix is loaded from the database and cached in memory for 60 seconds.
 
 ## The pilot matrix (summary)
 
@@ -136,7 +140,7 @@ Four independent checks:
 1. **Route definition requires policy metadata.** Routes are registered only through `defineRoute({ operationId, policy })`, where `policy` is either `{ action, resource: loader }` or `{ public: true, reason: "…" }`. The type system rejects a route without it. A lint rule bans calling Fastify's `app.get/post/…` directly.
 2. **Runtime guard.** For every non-public route, the HTTP layer checks, just before sending the response, that an allow decision was recorded for this request. If not → 500 and an alarm-level log. Fail closed.
 3. **Coverage test** (`test/security/route-policy-coverage.test.ts`): lists every registered route, fails if any lacks policy metadata, and compares the public list against a fixed snapshot (health, readiness, login begin/verify, enrollment begin/complete). Adding a public route requires changing that snapshot deliberately.
-4. **Lint rule:** inside `handlers/`, reading `subject.roles` or comparing role names is forbidden. Only the policy module may.
+4. **Source test:** the route files must not read `subject.roles`, compare role names to decide access, or produce a 403 themselves (`test/security/route-policy-coverage.test.ts`).
 
 "Seen it fire": the test suite includes a deliberately unprotected test route and asserts that checks 2 and 3 catch it.
 

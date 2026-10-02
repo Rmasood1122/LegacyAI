@@ -1,0 +1,51 @@
+# Deployment: builds the images and pushes them to Artifact Registry.
+#
+# DISABLED until the founder switches it on. It can only be started by hand, and even then
+# it does nothing unless ALL of these exist in the repository settings:
+#   Variables: DEPLOY_ENABLED = true, GCP_PROJECT_ID, GCP_REGION,
+#              GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_DEPLOYER_SERVICE_ACCOUNT
+# There is no stored cloud key: login uses short-lived tokens (Workload Identity Federation,
+# created by Terraform only when enable_ci_deploy = true).
+#
+# This workflow never runs `terraform apply`. Infrastructure changes are applied by hand.
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  push-images:
+    name: Build and push images
+    if: ${{ vars.DEPLOY_ENABLED == 'true' && inputs.confirm == 'deploy' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      REGISTRY: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/legacyai
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        id: auth
+        with:
+          token_format: access_token
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+      - name: Log in to Artifact Registry with the short-lived token
+        run: echo "${{ steps.auth.outputs.access_token }}" | docker login -u oauth2accesstoken --password-stdin "https://${{ vars.GCP_REGION }}-docker.pkg.dev"
+      - name: Build and push
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_SHA::12}"
+          docker build -t "$REGISTRY/api:$tag" services/api
+          docker build -t "$REGISTRY/ai:$tag" services/ai
+          docker build -f scripts/backup-tools.Dockerfile -t "$REGISTRY/backup-tools:$tag" scripts
+          for image in api ai backup-tools; do docker push "$REGISTRY/$image:$tag"; done
+          echo "Pushed tag $tag. To release it, set api_image_tag / ai_image_tag / tools_image_tag to \"$tag\" and run terraform apply by hand." >> "$GITHUB_STEP_SUMMARY"

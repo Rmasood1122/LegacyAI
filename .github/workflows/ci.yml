@@ -1,0 +1,156 @@
+# Continuous integration. Runs on every push and pull request.
+# No job here deploys anything, creates any cloud resource, or needs any secret.
+# Actions are pinned to full commit hashes (verified 2026-10-02, see docs/DEPENDENCIES.md).
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "24"
+  # Throwaway values for the CI database container only. Not secrets.
+  DATABASE_URL_SUPERUSER: postgres://postgres:local-dev-only-not-a-secret@127.0.0.1:55432/legacyai_test
+  DATABASE_URL_ADMIN: postgres://legacyai_migrator:local-test-migrator-password@127.0.0.1:55432/legacyai_test
+  DATABASE_URL: postgres://legacyai_app:local-test-app-password@127.0.0.1:55432/legacyai_test
+  DATABASE_URL_BACKUP: postgres://legacyai_backup:local-test-backup-password@127.0.0.1:55432/legacyai_test
+
+jobs:
+  api:
+    name: API - lint, type-check, tests, backup/restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: services/api/package-lock.json
+      - run: npm ci
+      - name: Type-check (TypeScript strict)
+        run: npm run typecheck
+      - name: Lint (includes the SQL-injection, CSPRNG and route-registration rules) and module boundaries
+        run: npm run lint
+      - name: Lint rules really fire (deliberate violations must be rejected)
+        run: node ../../scripts/ci-selftest-lint.mjs
+      - name: OpenAPI file is valid
+        run: npm run lint:openapi
+      - name: Start PostgreSQL 18
+        run: docker compose -f ../../docker-compose.yml up -d --wait
+      - name: OpenAPI sync check (routes in the server == operations in openapi.yaml; responses conform)
+        run: npx vitest run test/contract test/security/route-policy-coverage.test.ts
+      - name: Unit, integration and security tests against real PostgreSQL, with coverage
+        run: npm run test:coverage
+      - name: Backup -> encrypt -> restore -> verify, with negative controls
+        run: bash ../../scripts/backup-restore-selftest.sh legacyai_test
+      - name: Build (compile to JavaScript)
+        run: npm run build
+
+  migrations:
+    name: Migrations - apply, roll back, re-apply (dbmate and built-in runner agree)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: services/api/package-lock.json
+      - run: npm ci
+      - run: docker compose -f ../../docker-compose.yml up -d --wait
+      - name: Apply, roll back everything, re-apply - with both engines - and compare the resulting schemas
+        run: bash ../../scripts/ci-migrations-check.sh
+
+  ai:
+    name: AI stub - tests and dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/ai
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+      - name: Dependency vulnerability audit (Python)
+        run: python -m pip_audit -r requirements.txt
+
+  dependency-audit:
+    name: Dependency vulnerability audit (npm) and dependency record
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: npm audit - runtime dependencies, fail on high or critical
+        working-directory: services/api
+        run: npm audit --omit=dev --audit-level=high
+      - name: npm audit - all dependencies (reported; does not fail the build)
+        working-directory: services/api
+        run: npm audit || true
+      - name: Every dependency is recorded in docs/DEPENDENCIES.md
+        run: node scripts/check-dependencies-doc.mjs
+
+  secret-scan:
+    name: Secret scanning (files and full git history)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: gitleaks over the whole history
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --config /repo/.gitleaks.toml --redact --no-banner
+      - name: The scanner really fires (a planted fake key must be found)
+        run: bash scripts/ci-selftest-gitleaks.sh
+
+  containers:
+    name: Container images - build, non-root, fail closed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: docker build -t legacyai-api services/api
+      - run: docker build -t legacyai-ai services/ai
+      - run: docker build -f scripts/backup-tools.Dockerfile -t legacyai-backup-tools scripts
+      - name: Images run as a non-root user, and the API refuses to start without configuration
+        run: bash scripts/ci-container-checks.sh
+
+  terraform:
+    name: Terraform - format and validate (never plan, never apply)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.4
+      - run: terraform fmt -check -recursive
+      - name: init without a backend and without credentials
+        run: terraform init -backend=false -input=false
+      - run: terraform validate
+      - name: Cost guardrails are present in the code
+        run: bash ../../scripts/ci-terraform-guardrails.sh

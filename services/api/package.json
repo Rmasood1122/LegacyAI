@@ -30,13 +30,12 @@
     "dbmate": "2.36.0",
     "dependency-cruiser": "18.5.0",
     "eslint": "10.11.0",
-    "tsx": "4.23.15",
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.0",
     "vitest": "4.1.11"
   },
   "scripts": {
-    "dev": "node --env-file=.env --watch src/main.ts",
+    "dev": "node --env-file-if-exists=.env --watch src/main.ts",
     "start": "node dist/main.js",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
@@ -45,14 +44,14 @@
     "test": "vitest run",
     "test:unit": "vitest run test/unit",
     "test:coverage": "vitest run --coverage",
-    "db:reset": "node ../../scripts/db-setup.mjs reset",
-    "db:roles": "node ../../scripts/db-setup.mjs roles",
-    "db:up": "node ../../scripts/db-setup.mjs up",
-    "db:down": "node ../../scripts/db-setup.mjs down",
-    "db:down-all": "node ../../scripts/db-setup.mjs down-all",
-    "audit:verify": "node src/cli/verify-audit-chain.ts",
-    "audit:anchor": "node src/cli/anchor-audit-head.ts",
-    "platform:bootstrap": "node src/cli/bootstrap-platform.ts",
-    "cards:sweep-expired": "node src/cli/sweep-expired-cards.ts"
+    "db:reset": "node --env-file-if-exists=.env ../../scripts/db-setup.mjs reset",
+    "db:roles": "node --env-file-if-exists=.env ../../scripts/db-setup.mjs roles",
+    "db:up": "node --env-file-if-exists=.env ../../scripts/db-setup.mjs up",
+    "db:down": "node --env-file-if-exists=.env ../../scripts/db-setup.mjs down",
+    "db:down-all": "node --env-file-if-exists=.env ../../scripts/db-setup.mjs down-all",
+    "audit:verify": "node --env-file-if-exists=.env src/cli/verify-audit-chain.ts",
+    "audit:anchor": "node --env-file-if-exists=.env src/cli/anchor-audit-head.ts",
+    "platform:bootstrap": "node --env-file-if-exists=.env src/cli/bootstrap-platform.ts",
+    "cards:sweep-expired": "node --env-file-if-exists=.env src/cli/sweep-expired-cards.ts"
   }
 }

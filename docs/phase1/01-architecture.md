@@ -1,5 +1,9 @@
 # 01 — Architecture
 
+> **Updated after the build (2026-10-02).** This document was approved at Gate 1 and then corrected to match
+> what was actually built. Every difference from the approved version is listed, with the reason, in
+> `REPORT.md` under "Deviations". The schema as built is drawn in `schema.md`.
+
 ## In plain language
 
 We are building **one small server program** (the API) and **one empty placeholder** (the AI service). The API is split inside into three clearly walled rooms — *identity-access*, *platform* and *billing* — so that any room can later be moved out into its own server without rewriting it. A robot (CI) checks on every change that nobody has knocked a hole in a wall.
@@ -156,8 +160,8 @@ Details, sources and dates are in `docs/DEPENDENCIES.md`.
 | Runtime | Node.js 24 LTS, TypeScript 6.0 strict | LTS today; linter supports it |
 | Framework | Fastify 5 | Two years stable, written LTS policy, schema validation built in; NestJS 12 is 5 weeks old |
 | Database access | `pg` driver, hand-written parameterised SQL, no ORM | RLS, grants and triggers must be explicit and readable |
-| Migrations | dbmate (plain SQL, up + down) | SQL-first, language-neutral |
-| Contract | `openapi.yaml` drives runtime validation and generated types | The contract cannot drift from the code |
+| Migrations | dbmate file format (plain SQL, up + down); dbmate or a built-in fallback runner applies them | SQL-first, language-neutral |
+| Contract | `openapi.yaml` drives routing metadata and runtime validation (no generated types: the generator does not support TypeScript 6) | The contract cannot drift from the code |
 | Tests | vitest; real PostgreSQL in Docker / CI service container | No mocks for the database — the database rules *are* the security |
 
 ## What is deliberately NOT here

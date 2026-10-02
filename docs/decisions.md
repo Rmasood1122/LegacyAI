@@ -1,10 +1,11 @@
 # Decision log
 
-Choices that would take more than about an hour to reverse. Three lines each. Evidence for versions is in `docs/DEPENDENCIES.md`. Status **PROPOSED** becomes **ACCEPTED** at Gate 1.
+Choices that would take more than about an hour to reverse. Three lines each. Evidence for versions is in `docs/DEPENDENCIES.md`. 
 
 | # | Date | Status |
 |---|---|---|
-| D1–D12 | 2026-10-02 | PROPOSED (awaiting Gate 1) |
+| D1–D12 | 2026-10-02 | **ACCEPTED** at Gate 1 (founder replied "approved"; all recommendations in `08-open-decisions.md` accepted) |
+| D13–D17 | 2026-10-02 | Made during the build; listed in `REPORT.md` under Deviations for the founder to confirm |
 
 **D1 — Fastify 5, not NestJS.**
 CONTEXT: NestJS 12 is 5 weeks old and no official LTS statement was found; rejected NestJS 11 (labelled `legacy` on npm) and NestJS 12.
@@ -53,3 +54,23 @@ CONSEQUENCES: one bootstrap CLI; operators use the normal login path.
 **D12 — Repository visibility: private, local only.**
 CONTEXT: no remote exists; nothing is pushed by Claude.
 CONSEQUENCES: before any future publication — secrets scan, full-history scan, and review of commit messages.
+
+**D13 — Built-in fallback migration runner.**
+CONTEXT: Windows on the founder's machine started refusing to execute the downloaded `dbmate.exe` (EPERM) mid-build. Rejected: disabling or working around the operating system's protection.
+CONSEQUENCES: `scripts/db-setup.mjs` applies the same dbmate-format files itself when dbmate cannot run; CI runs both and compares schemas.
+
+**D14 — Three database roles, not four; tenant list by a read-only policy, not a definer function.**
+CONTEXT: with row-level security FORCED on every table, a `SECURITY DEFINER` function owned by the table owner is filtered as well, so it could not list tenants.
+CONSEQUENCES: `legacyai_owner` merged into `legacyai_migrator`; one extra, SELECT-only policy on `tenants`.
+
+**D15 — `auth_transactions` is a global table.**
+CONTEXT: a tenant-scoped login-transaction table would put the tenant id into the token and reveal whether a card number exists.
+CONSEQUENCES: one more global table (9); it holds only hashes, challenges and expiry times.
+
+**D16 — CSRF token derived from the session token (HMAC), not stored.**
+CONTEXT: only a hash of the session token is stored, so a stored CSRF token could not be handed back on a later request.
+CONSEQUENCES: after a session rotation the client must re-read `/v1/auth/session`.
+
+**D17 — Unknown-card and unauthenticated requests are not written to the audit chain.**
+CONTEXT: they have no actor and no tenant, and anyone on the internet can generate them without limit; an append-only table on a 0.5 GB free database would be a denial-of-service target.
+CONSEQUENCES: failed logins for unknown cards go to `login_attempts` (purgeable) and the application log; every decision made for an authenticated card, and every failed login against a real card, is in the audit chain.

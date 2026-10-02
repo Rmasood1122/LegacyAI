@@ -1,5 +1,9 @@
 # 02 — Data model
 
+> **Updated after the build (2026-10-02).** This document was approved at Gate 1 and then corrected to match
+> what was actually built. Every difference from the approved version is listed, with the reason, in
+> `REPORT.md` under "Deviations". The schema as built is drawn in `schema.md`.
+
 ## In plain language
 
 Every piece of data belongs either to **one company** ("tenant-scoped") or to **the whole system** ("global"). For every tenant-scoped table, the database itself checks on every read and write that the row belongs to the company the current request is working for. If our code forgets to filter, the database still says no.
@@ -37,7 +41,7 @@ Legend for the **F#** column: the founder's feature number the table serves. *(d
 | encryption_key_ref | text | NULLABLE — **F21 BYOK hook, design only**. Would hold a KMS key resource name. Never a key. |
 | created_at, updated_at | timestamptz | |
 
-RLS: `id = app_current_tenant()`. Listing all tenants (platform operator only) goes through one audited `SECURITY DEFINER` function, `platform_list_tenants()`.
+RLS: `id = app_current_tenant()`. Listing all tenants (platform operator only) uses a second, **read-only** policy that applies only when the API switches on `app.platform_scope` for one transaction, after the policy decision point has allowed `tenant:list`. *(Built this way instead of a `SECURITY DEFINER` function: with row-level security forced on every table, a definer function owned by the table owner is filtered too.)*
 
 ### `tenant_settings` — T — F29, F3, F1
 One row per tenant (PK = `tenant_id`).
@@ -77,7 +81,7 @@ App role: SELECT only. No billing logic reads it in Phase 1 except through the `
 |---|---|---|
 | id, tenant_id | uuid | PK; UNIQUE (tenant_id, id) |
 | display_name | text | NOT NULL. PII — redacted in logs. |
-| email | citext | NULLABLE, UNIQUE per tenant. PII — redacted in logs. Used only for notifications. |
+| email | text | Stored lower-case (CHECK), NULLABLE, UNIQUE per tenant. *(Plain `text`, not `citext`, so the schema needs no extension.)* PII — redacted in logs. Used only for notifications. |
 | department_id | uuid | NULLABLE, composite FK |
 | status | text | `active` \| `departed`. Setting `departed` revokes the person's card in the same transaction (F3 offboarding). |
 | external_id | text | NULLABLE, UNIQUE per tenant — **F16 SCIM hook, design only** |
@@ -117,7 +121,7 @@ Maps a card number to its tenant so login can start before we know the tenant.
 | card_number | char(16) | PK → global uniqueness |
 | tenant_id, card_id | uuid | |
 
-**The app role has no direct privileges on this table.** It can only call two `SECURITY DEFINER` functions: `resolve_card(card_number)` (exact match, returns one tenant_id + card_id or nothing) and `register_card(...)` (insert at issue time). So even a bug in our code cannot list all card numbers.
+**The app role has no privileges on this table.** It can only call `resolve_card(card_number)` (`SECURITY DEFINER`, exact match, returns one tenant_id + card_id or nothing). Rows are added by a trigger on `cards`, so the directory cannot drift from the cards table. Even a bug in our code cannot list all card numbers.
 
 ### `card_secrets` — T — F1
 One *current* row per card; older rows kept only as "retired" markers without usable hashes.
@@ -181,7 +185,8 @@ CHECK constraints make the passkey columns and TOTP columns mutually exclusive b
 One-time, high-entropy tokens that let a new cardholder attach their first strong factor.
 `id`, `tenant_id`, `card_id`, `token_hash bytea` (SHA-256; UNIQUE), `purpose` (`initial` \| `reset`), `expires_at` (default 72 h), `used_at`, `created_by_card_id`, `created_at`.
 
-### `login_transactions` — T
+### `auth_transactions` — G *(was `login_transactions`, tenant-scoped, in the approved design)*
+**Why global:** a login for an unknown card number has no tenant, and the transaction token must look the same for known and unknown cards. A tenant-scoped table would have forced the tenant id into the token and leaked whether the card exists.
 Short-lived state for one login in progress (holds the WebAuthn challenge).
 `id`, `tenant_id` (the platform tenant for unknown cards), `card_id` NULLABLE, `txn_hash bytea` UNIQUE, `webauthn_challenge bytea`, `expires_at` (5 minutes), `consumed_at`, `ip_hash`, `created_at`.
 
@@ -190,7 +195,7 @@ Short-lived state for one login in progress (holds the WebAuthn challenge).
 |---|---|---|
 | id, tenant_id, card_id | uuid | |
 | token_hash | bytea | SHA-256 of the opaque session token. UNIQUE. **The token itself is never stored.** |
-| csrf_hash | bytea | SHA-256 of the CSRF token bound to this session |
+| csrf_hash | bytea | SHA-256 of the CSRF token. The token itself is derived from the session token (HMAC), so it never needs to be stored or looked up; this column is a record only. |
 | credential_id | uuid | which strong factor was used |
 | created_at | timestamptz | |
 | last_seen_at | timestamptz | idle timeout |
@@ -304,10 +309,10 @@ Managed by dbmate.
 
 ## Scope summary
 
-**Global (8):** `roles`, `permissions`, `role_permissions`, `plan_limits`, `card_directory`, `login_attempts`, `rate_limit_buckets`, `schema_migrations`.
+**Global (9):** `roles`, `permissions`, `role_permissions`, `plan_limits`, `card_directory`, `login_attempts`, `auth_transactions`, `rate_limit_buckets`, `schema_migrations`.
 
-**Tenant-scoped with row-level security (25):** `tenants`, `tenant_settings`, `departments`, `people`, `cards`, `card_secrets`, `card_auth_state`, `credentials`, `enrollment_tokens`, `login_transactions`, `sessions`, `card_events`, `card_restrictions`, `card_usage_counters`, `card_roles`, `audit_log`, `audit_chain_heads`, `audit_anchors`, `idempotency_keys`, `export_jobs`, `outbox_events`, `webhook_endpoints`, `analytics_events`, `card_tokens`, `sso_connections`.
-*(`tenants` is scoped by its own `id`; the other 24 by `tenant_id`.)*
+**Tenant-scoped with forced row-level security (24):** `tenants`, `tenant_settings`, `departments`, `people`, `cards`, `card_secrets`, `card_auth_state`, `credentials`, `enrollment_tokens`, `sessions`, `card_events`, `card_restrictions`, `card_usage_counters`, `card_roles`, `audit_log`, `audit_chain_heads`, `audit_anchors`, `idempotency_keys`, `export_jobs`, `outbox_events`, `webhook_endpoints`, `analytics_events`, `card_tokens`, `sso_connections`.
+*(`tenants` is scoped by its own `id`; the other 23 by `tenant_id`.)* The counts are asserted against the live database by `test/integration/rls.test.ts`.
 
 A test (Step 5) queries the PostgreSQL catalogue and **fails if any table has a `tenant_id` column but lacks forced row-level security**, so a future table cannot be added without it.
 
@@ -315,9 +320,10 @@ A test (Step 5) queries the PostgreSQL catalogue and **fails if any table has a 
 
 | Role | Can log in | Purpose | Key properties |
 |---|---|---|---|
-| `legacyai_owner` | no | Owns all objects | — |
-| `legacyai_migrator` | yes | Runs migrations (member of owner) | Never used by the running API |
-| `legacyai_app` | yes | The running API | `NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`; per-table grants only. **At start-up the API checks its own role and refuses to run if it is a superuser or can bypass RLS.** |
-| `legacyai_backup` | yes | Nightly `pg_dump` | Read-only, `BYPASSRLS` (a backup must see all tenants) |
+| `legacyai_migrator` | yes | Owns the tables and runs migrations | No superuser, no `BYPASSRLS`. Never used by the running API. |
+| `legacyai_app` | yes | The running API | `NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`; per-table grants only. **At start-up the API checks its own role and refuses to run if it is a superuser, can bypass RLS or can create roles.** |
+| `legacyai_backup` | yes | Nightly `pg_dump` | Read-only (`pg_read_all_data`), `BYPASSRLS` (a backup must see all tenants) |
 
-On Neon, the console-created role inherits `BYPASSRLS` (verified, see `DEPENDENCIES.md`), so it serves as migrator/backup; `legacyai_app` is created by SQL so it gets none of that.
+*(The approved design had a fourth, no-login `legacyai_owner` role. It was merged into `legacyai_migrator`: one fewer moving part, same separation between "runs migrations" and "runs the API".)*
+
+On Neon, the console-created role inherits `BYPASSRLS` (verified, see `DEPENDENCIES.md`), so it runs the roles script; `legacyai_app` is created by SQL so it gets none of that.
