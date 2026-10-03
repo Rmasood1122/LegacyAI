@@ -186,7 +186,10 @@ any script).
 
 ## Done, but NOT proven (3b)
 
-- Not deployed; the container image still does not include the screens.
+- **Not deployed.** The API's container image now includes the screens (CI run 37140328845, commit `9888950`, 10 of 10
+  jobs: the image builds, runs as a non-root user (253 MB), its own loader serves the page and a deep link, nothing
+  under /v1 is shadowed, and no web sources, source maps or tests are inside). What that does not show: the image
+  was never started with a database behind it, and never run on Google Cloud. Terraform stays plan-only.
 - One browser (Chromium), desktop size; passkeys in a real browser untested; no test with real people.
 - People and cards: only the read-only restriction can be edited; other restrictions are displayed.
 - The accessibility result is an automated scan of the screens the tests visit.
