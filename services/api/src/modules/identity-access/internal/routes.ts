@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { problems } from '../../../shared/errors.ts';
 import type { RequestContext, ResourceRef, RoleKey, Subject } from '../../../shared/policy-types.ts';
 import {
-  countAuditRows, createTenant, decodeCursor, encodeCursor, getPlan, getSettings, getTenant, listTenants, toApiTenant, updateSettings,
+  countAuditRows, createTenant, decodeIdCursor, encodeCursor, getPlan, getSettings, getTenant, listTenants, toApiTenant, updateSettings,
   writeAudit,
   type Database, type Notifier, type RouteDef, type Tx,
 } from '../../platform/index.ts';
@@ -63,14 +63,6 @@ const COMPANY_CARD_RANK = 100;
 /** Per-tenant, per-transaction lock used by every route that changes roles or could remove the last Owner. */
 async function lockTenantRoles(tx: Tx, tenantId: string): Promise<void> {
   await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 42))', [`roles:${tenantId}`]);
-}
-
-const UUID_CURSOR = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-/** Cursor for id-ordered lists. Anything that is not a UUID is a 400, never a database error. */
-function uuidCursor(raw: unknown): string | null {
-  const value = decodeCursor(raw);
-  if (value !== null && !UUID_CURSOR.test(value)) throw problems.badRequest([{ path: 'query/cursor', message: 'invalid cursor' }]);
-  return value;
 }
 
 async function roleRanks(tx: Tx): Promise<Map<string, number>> {
@@ -311,7 +303,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
       listFilter: 'applied',
       policy: { resource: collection('card') },
       handler: async ({ tx, subject, query, ctx }) => {
-        const after = uuidCursor(query.cursor);
+        const after = decodeIdCursor(query.cursor);
         // The retrieval-time filter narrows the result set to what this card may see.
         const filter = await authorizer.filter(tx, subject, 'card:list', CARD_DESCRIPTOR, ctx, 6);
         const { rows } = await tx.query<CardRow>(
@@ -408,7 +400,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
       kind: 'session',
       policy: { resource: cardLoader() },
       handler: async ({ tx, params, query }) => {
-        const before = uuidCursor(query.cursor);
+        const before = decodeIdCursor(query.cursor);
         const { rows } = await tx.query<{
           id: string; card_id: string; occurred_at: Date; event_type: string; actor_card_id: string | null;
           credential_id: string | null; device_hash: Buffer | null; request_id: string | null; metadata: Record<string, unknown>;
@@ -603,7 +595,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
       listFilter: 'applied',
       policy: { resource: collection('person') },
       handler: async ({ tx, subject, query, ctx }) => {
-        const after = uuidCursor(query.cursor);
+        const after = decodeIdCursor(query.cursor);
         const filter = await authorizer.filter(tx, subject, 'person:read', PERSON_DESCRIPTOR, ctx, 5);
         const { rows } = await tx.query<PersonRow>(
           // eslint-disable-next-line no-restricted-syntax -- filter.sql is built by the policy module from code constants; all values are bound
@@ -848,7 +840,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
       listFilter: { unfiltered: 'platform operator only; the list of companies has no narrower scope' },
       policy: { resource: collection('tenant') },
       handler: async ({ subject, query }) => {
-        const after = uuidCursor(query.cursor);
+        const after = decodeIdCursor(query.cursor);
         // Read-only cross-tenant listing: reached only after the policy point allowed tenant:list
         // (a platform-only permission).
         const rows = await db.withTenantTx(subject.tenant_id, (ptx) => listTenants(ptx, query.limit + 1, after), { platformScope: true });

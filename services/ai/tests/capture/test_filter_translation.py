@@ -107,3 +107,14 @@ def test_the_topic_filter_does_not_modify_its_input() -> None:
     before = copy.deepcopy(s)
     topic_condition(s, T)
     assert s == before
+
+
+def test_a_readiness_attempt_belongs_to_the_learners_person_and_card_as_in_the_api() -> None:
+    """The API filters the list of tests taken by learner person and learner card (routes-workflow.ts ATTEMPT_DESCRIPTOR);
+    this service names the same owner (owner_person_id equals learner_person_id by a CHECK on the table) and the same card."""
+    d = DESCRIPTORS["quiz_attempts"]
+    assert d.owner_person == ("qa.owner_person_id",) and d.owner_card == ("qa.learner_card_id",)
+    card = str(uuid.uuid4())
+    own = spec(action="quiz:read_results", any_of=[{"scope": "own", "owner_person_id": P, "owner_card_id": card, "max_sensitivity": 3}])
+    sql, params = condition(own, "quiz_attempts", T)
+    assert "qa.owner_person_id" in sql and "qa.learner_card_id" in sql and P in params and card in params

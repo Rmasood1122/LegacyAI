@@ -5,6 +5,7 @@ import { queryAudit, toApiAuditEvent, verifyChain, writeAudit } from './audit.ts
 import type { Config } from './config.ts';
 import { EXPECTED_SCHEMA_VERSION, type Database } from './db.ts';
 import type { RouteDef } from './http.ts';
+import { decodeCursor, encodeCursor } from './pagination.ts';
 import {
   getExportJob, getSettings, getTenant, runExport, toApiExportJob, toApiTenant, type ExportRegistry,
 } from './tenants.ts';
@@ -18,26 +19,6 @@ const collection = (type: string) => async ({ subject }: { subject: Subject }): 
 
 /** One API call checks at most this many rows, so a long chain cannot tie up a request. Continue with from_seq. */
 const VERIFY_ROWS_PER_REQUEST = 20_000;
-
-export function encodeCursor(value: string | number): string {
-  return Buffer.from(String(value), 'utf8').toString('base64url');
-}
-
-export function decodeCursor(cursor: unknown): string | null {
-  if (cursor === undefined || cursor === null) return null;
-  if (typeof cursor !== 'string') throw problems.badRequest([{ path: 'query/cursor', message: 'invalid cursor' }]);
-  const text = Buffer.from(cursor, 'base64url').toString('utf8');
-  if (!/^[0-9a-f-]{1,40}$/.test(text)) throw problems.badRequest([{ path: 'query/cursor', message: 'invalid cursor' }]);
-  return text;
-}
-
-const UUID_CURSOR = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-/** The cursor of a list ordered by record id. Anything that is not such an id is a 400 here, never an error from the database's uuid cast. */
-export function decodeIdCursor(cursor: unknown): string | null {
-  const value = decodeCursor(cursor);
-  if (value !== null && !UUID_CURSOR.test(value)) throw problems.badRequest([{ path: 'query/cursor', message: 'invalid cursor' }]);
-  return value;
-}
 
 export function platformRoutes(deps: { config: Config; db: Database; exports: ExportRegistry }): RouteDef[] {
   const { config, db } = deps;

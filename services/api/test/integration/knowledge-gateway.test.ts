@@ -556,4 +556,61 @@ describe('item topics, job roles and tests taken (the screens no longer need the
     expect((await expert.client.get('/v1/readiness/attempts')).status).toBe(403);
     expect((await other.owner.get('/v1/readiness/attempts')).body.items).toEqual([]);
   });
+
+  it('setting a job role\'s topics replaces only what the caller can see; what was read can be written back; a bad id is 422', async () => {
+    const o = tenant.owner;
+    const admin = await addMember(t, o, [{ role_key: 'admin' }]);                                    // may read topics up to level 1
+    const own = `Kept ${randomUUID().slice(0, 8)}`;
+    const url = `/v1/job-roles/${encodeURIComponent(own)}/topics`;
+    const old = await o.post('/v1/topics', { name: `Old ${randomUUID().slice(0, 8)}`, description: 'synthetic', sensitivity: 0 });
+    expect(old.status).toBe(201);
+    expect((await o.put(url, { topics: [{ topic_id: open, importance: 3 }, { topic_id: restricted, importance: 1 }, { topic_id: old.body.id }] })).status).toBe(200);
+    expect((await o.patch(`/v1/topics/${old.body.id}`, { status: 'retired' })).status).toBe(200);
+
+    // the list and the topics of the role use one rule: the retired topic is in neither
+    const count = async (who: typeof o): Promise<number | undefined> =>
+      (await who.get('/v1/job-roles?limit=50')).body.items.find((x: { job_role: string }) => x.job_role === own)?.topic_count;
+    expect(await count(o)).toBe(2);
+    expect((await o.get(url)).body.topics.map((x: { topic_id: string }) => x.topic_id)).toEqual([open, restricted]);
+    expect(await count(admin.client)).toBe(1);
+
+    // the admin sees one topic, sends back exactly what it read (job role included), and nothing it cannot see is lost
+    const read = await admin.client.get(url);
+    expect(read.body).toEqual({ job_role: own, topics: [{ topic_id: open, required: true, importance: 3 }] });
+    expect((await admin.client.put(url, read.body)).status).toBe(200);
+    expect((await admin.client.put(url, { topics: [] })).status).toBe(200);                           // "none" - among what the admin can see
+    expect((await o.get(url)).body.topics.map((x: { topic_id: string }) => x.topic_id)).toEqual([restricted]);
+    const kept = await su.query('SELECT topic_id FROM role_topic_maps WHERE tenant_id = $1 AND job_role = $2 ORDER BY topic_id', [tenant.tenantId, own]);
+    expect(kept.rows.map((r) => r.topic_id).sort()).toEqual([restricted, old.body.id].sort());        // the hidden and the retired link are still there
+
+    // a bad id in the body is 422, whoever asks and whatever is wrong with it - and nothing is changed by the refused request
+    expect((await admin.client.put(url, { topics: [{ topic_id: restricted }] })).status).toBe(422);  // exists, but the admin may not read it
+    expect((await o.put(url, { topics: [{ topic_id: randomUUID() }] })).status).toBe(422);           // no such topic
+    expect((await o.put(url, { topics: [{ topic_id: old.body.id }] })).status).toBe(422);            // retired
+    expect((await o.put(url, { job_role: 'Another role', topics: [] })).status).toBe(422);           // not the role in the address
+    expect((await o.put(`/v1/job-roles/${encodeURIComponent(own)}/people`, { people: [{ person_id: randomUUID(), relation: 'holder' }] })).status).toBe(422);
+    expect((await o.get(url)).body.topics.map((x: { topic_id: string }) => x.topic_id)).toEqual([restricted]);
+
+    // people: what was read can be written back
+    const people = `/v1/job-roles/${encodeURIComponent(own)}/people`;
+    expect((await o.put(people, { people: [{ person_id: learner.personId, relation: 'successor' }] })).status).toBe(200);
+    const readPeople = await o.get(people);
+    expect((await o.put(people, readPeople.body)).status).toBe(200);
+    expect((await o.get(people)).body).toEqual(readPeople.body);
+  });
+
+  it('a job role\'s name follows one rule in the address and in a body; a name cursor carries any allowed name', async () => {
+    const o = tenant.owner;
+    for (const bad of [' padded', 'padded ', 'tab\tinside', ' ']) {
+      expect((await o.get(`/v1/job-roles/${encodeURIComponent(bad)}/topics`)).status, JSON.stringify(bad)).toBe(400);
+      expect((await o.get(`/v1/gaps?job_role=${encodeURIComponent(bad)}`)).status, JSON.stringify(bad)).toBe(400);
+      expect((await learner.client.post('/v1/readiness/attempts', { job_role: bad })).status, JSON.stringify(bad)).toBe(400);
+    }
+    // the longest name there can be, in characters that take four bytes each: the cursor made from it is accepted
+    const long = '\u{1F527}'.repeat(120);                                                             // 120 characters, 480 bytes
+    expect((await o.put(`/v1/job-roles/${encodeURIComponent(long)}/topics`, { topics: [{ topic_id: open }] })).status).toBe(200);
+    const cursor = Buffer.from(long, 'utf8').toString('base64url');
+    expect((await o.get(`/v1/job-roles?limit=1&cursor=${cursor}`)).status).toBe(200);
+    expect((await o.put(`/v1/job-roles/${encodeURIComponent(long)}/topics`, { topics: [] })).status).toBe(200);
+  });
 });

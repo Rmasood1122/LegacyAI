@@ -238,21 +238,27 @@ export interface KTopic {
   created_at: string;
 }
 
+export type JobRoleName = string;
+
+export interface KRoleTopicEntry {
+  topic_id: string;
+  required?: boolean;
+  importance?: number;
+}
+
+export interface KRolePersonEntry {
+  person_id: string;
+  relation: "holder" | "successor";
+}
+
 export interface KRoleTopics {
   job_role: string;
-  topics: {
-    topic_id: string;
-    required: boolean;
-    importance: number;
-  }[];
+  topics: KRoleTopicEntry[];
 }
 
 export interface KRolePeople {
   job_role: string;
-  people: {
-    person_id: string;
-    relation: string;
-  }[];
+  people: KRolePersonEntry[];
 }
 
 export interface KProposed {
@@ -1498,7 +1504,7 @@ export interface OperationTypes {
     query: undefined;
     body: {
       expert_person_id: string;
-      job_role: string;
+      job_role: JobRoleName;
     };
     response: KStatus;
   };
@@ -1551,7 +1557,7 @@ export interface OperationTypes {
   };
   getGapReport: {
     path: undefined;
-    query: { job_role: string };
+    query: { job_role: JobRoleName };
     body: undefined;
     response: KGapReport;
   };
@@ -1598,37 +1604,32 @@ export interface OperationTypes {
     };
   };
   getRoleTopics: {
-    path: { job_role: string };
+    path: { job_role: JobRoleName };
     query: undefined;
     body: undefined;
     response: KRoleTopics;
   };
   setRoleTopics: {
-    path: { job_role: string };
+    path: { job_role: JobRoleName };
     query: undefined;
     body: {
-      topics: {
-        topic_id: string;
-        required?: boolean;
-        importance?: number;
-      }[];
+      job_role?: JobRoleName;
+      topics: KRoleTopicEntry[];
     };
     response: KRoleTopics;
   };
   getRolePeople: {
-    path: { job_role: string };
+    path: { job_role: JobRoleName };
     query: undefined;
     body: undefined;
     response: KRolePeople;
   };
   setRolePeople: {
-    path: { job_role: string };
+    path: { job_role: JobRoleName };
     query: undefined;
     body: {
-      people: Array<{
-        person_id: string;
-        relation: "holder" | "successor";
-      }>;
+      job_role?: JobRoleName;
+      people: KRolePersonEntry[];
     };
     response: KRolePeople;
   };
@@ -1731,7 +1732,7 @@ export interface OperationTypes {
     path: undefined;
     query: undefined;
     body: {
-      job_role: string;
+      job_role: JobRoleName;
     };
     response: KAttemptStarted;
   };

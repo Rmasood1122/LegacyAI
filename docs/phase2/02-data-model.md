@@ -63,6 +63,8 @@ T = tenant-scoped with forced row-level security; G = global. **F#** = feature n
 
 The API never reads content text from Python-owned tables: its grants there are label and status columns, which is what it needs to ask the policy decision point about a row. Content reaches a user only through the Python service after a decision.
 
+**Which service answers a list (added with the operations of decision D24).** A list made only of labels, states and times may be answered by the API itself, within those column grants and with the caller's access filter applied (decision D23) - for example the tests a person has taken (`quiz_attempts`: who, which job role, state, times; never questions, answers or scores) and the job-role lists over the API's own tables. Anything that carries content - a question, an answer, a score, an item's text, a topic's link to an item - is read and written through the Python service. Both services describe the owner of a readiness attempt by the same two columns (`owner_person_id`, which a CHECK keeps equal to `learner_person_id`, and `learner_card_id`), so their filters cannot disagree; a test on each side pins it.
+
 ## Database roles
 
 | Role | Used by | Change from Phase 1 |

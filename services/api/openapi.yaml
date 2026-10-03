@@ -2417,7 +2417,7 @@ paths:
   /v1/knowledge/items/{item_id}/topics:
     put:
       operationId: "setItemTopics"
-      summary: "Say which topics an item belongs to. The list replaces the item's links to the topics the caller may read; links to other topics and the item's status do not change."
+      summary: "Say which topics an item belongs to. The list is the wanted set among the links the caller can see (topics it may read that are not retired): a link that stays keeps how it was made (link_source), a new one becomes a reviewer link, one left out is removed. Links the caller cannot see, links to retired topics and the item's status do not change, so the topics read from the item can always be written back."
       tags:
         - "knowledge"
       x-permission: "knowledge:label"
@@ -2443,7 +2443,7 @@ paths:
                     type: "string"
                     format: "uuid"
                   maxItems: 20
-                  description: "Active topics of the company that the caller may read. An empty list removes every link."
+                  description: "Topics of the company that the caller may read. A topic that is not linked yet must be active; one that is already linked may simply be repeated. An empty list removes every link the caller can see. An unknown, unreadable or (for a new link) inactive topic answers 422."
       responses:
         "200":
           description: "Success"
@@ -2656,9 +2656,7 @@ paths:
                   type: "string"
                   format: "uuid"
                 job_role:
-                  type: "string"
-                  minLength: 1
-                  maxLength: 120
+                  $ref: "#/components/schemas/JobRoleName"
       responses:
         "201":
           description: "Success"
@@ -2989,9 +2987,7 @@ paths:
           in: "query"
           required: true
           schema:
-            type: "string"
-            minLength: 1
-            maxLength: 120
+            $ref: "#/components/schemas/JobRoleName"
       responses:
         "200":
           description: "Success"
@@ -3199,7 +3195,7 @@ paths:
   /v1/job-roles:
     get:
       operationId: "listJobRoles"
-      summary: "The job roles that have topics the caller may read, by name, with how many such topics each has."
+      summary: "The job roles that have topics the caller may read, by name, with how many such topics each has. Retired topics are not counted, here and in the topics of one job role, so the count equals the length of that list."
       tags:
         - "knowledge"
       x-permission: "topic:read"
@@ -3215,7 +3211,13 @@ paths:
             maximum: 50
             default: 25
           description: "Page size."
-        - $ref: "#/components/parameters/Cursor"
+        - name: "cursor"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            maxLength: 700
+          description: "Opaque cursor from a previous page. Longer than the cursor of other lists: it carries a job role's name."
       responses:
         "200":
           description: "Success"
@@ -3262,7 +3264,7 @@ paths:
   /v1/job-roles/{job_role}/topics:
     get:
       operationId: "getRoleTopics"
-      summary: "The topics a job role needs, limited to topics the caller may read."
+      summary: "The topics a job role needs, limited to topics the caller may read; retired topics are left out. A job role nobody has set up answers 200 with an empty list (a job role is a name, not a record)."
       tags:
         - "knowledge"
       x-permission: "topic:read"
@@ -3293,7 +3295,7 @@ paths:
           $ref: "#/components/responses/TooManyRequests"
     put:
       operationId: "setRoleTopics"
-      summary: "Set which topics a job role needs."
+      summary: "Set which topics a job role needs. The list replaces the job role's topics among those the caller may read and that are not retired; a topic the caller cannot see, or a retired one, keeps its place and is neither shown nor removed. A topic id that is unknown, unreadable or retired answers 422."
       tags:
         - "knowledge"
       x-permission: "topic:manage"
@@ -3313,23 +3315,13 @@ paths:
               required:
                 - "topics"
               properties:
+                job_role:
+                  description: "Optional, so that the answer of the read can be sent back as it is. If given it must equal the job role in the address."
+                  $ref: "#/components/schemas/JobRoleName"
                 topics:
                   type: "array"
                   items:
-                    type: "object"
-                    additionalProperties: false
-                    required:
-                      - "topic_id"
-                    properties:
-                      topic_id:
-                        type: "string"
-                        format: "uuid"
-                      required:
-                        type: "boolean"
-                      importance:
-                        type: "integer"
-                        minimum: 1
-                        maximum: 3
+                    $ref: "#/components/schemas/KRoleTopicEntry"
                   maxItems: 100
       responses:
         "200":
@@ -3355,7 +3347,7 @@ paths:
   /v1/job-roles/{job_role}/people:
     get:
       operationId: "getRolePeople"
-      summary: "Who holds a job role and who is to follow them, limited to people the caller's gap report covers."
+      summary: "Who holds a job role and who is to follow them, limited to people the caller's gap report covers. A job role nobody has set up answers 200 with an empty list."
       tags:
         - "knowledge"
       x-permission: "gap:read"
@@ -3386,7 +3378,7 @@ paths:
           $ref: "#/components/responses/TooManyRequests"
     put:
       operationId: "setRolePeople"
-      summary: "Set who holds a job role and who is taking it over."
+      summary: "Set who holds a job role and who is taking it over. The list replaces the people of the job role among those the caller's gap report covers; a person outside it keeps their place. A person id that is unknown or outside it answers 422."
       tags:
         - "knowledge"
       x-permission: "topic:manage"
@@ -3406,23 +3398,13 @@ paths:
               required:
                 - "people"
               properties:
+                job_role:
+                  description: "Optional, so that the answer of the read can be sent back as it is. If given it must equal the job role in the address."
+                  $ref: "#/components/schemas/JobRoleName"
                 people:
                   type: "array"
                   items:
-                    type: "object"
-                    additionalProperties: false
-                    required:
-                      - "person_id"
-                      - "relation"
-                    properties:
-                      person_id:
-                        type: "string"
-                        format: "uuid"
-                      relation:
-                        type: "string"
-                        enum:
-                          - "holder"
-                          - "successor"
+                    $ref: "#/components/schemas/KRolePersonEntry"
                   maxItems: 200
       responses:
         "200":
@@ -4074,9 +4056,7 @@ paths:
                 - "job_role"
               properties:
                 job_role:
-                  type: "string"
-                  minLength: 1
-                  maxLength: 120
+                  $ref: "#/components/schemas/JobRoleName"
       responses:
         "201":
           description: "Success"
@@ -5452,10 +5432,7 @@ components:
       in: path
       required: true
       schema:
-        type: string
-        minLength: 1
-        maxLength: 120
-        pattern: ^[^/]+$
+        $ref: "#/components/schemas/JobRoleName"
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -6213,7 +6190,7 @@ components:
                   - "integer"
                   - "null"
         topics:
-          description: "The topics this item is linked to, limited to topics the reader may see."
+          description: "The topics this item is linked to, limited to topics the reader may see. Links to retired topics are left out (they are kept, and are not changed by setting the topics)."
           type: "array"
           items:
             type: "object"
@@ -6526,6 +6503,44 @@ components:
         created_at:
           type: "string"
           format: "date-time"
+    JobRoleName:
+      description: "The name of a job role: 1-120 characters, no space at either end, no control characters, no slash. Two names that differ only in upper and lower case are two roles."
+      type: "string"
+      minLength: 1
+      maxLength: 120
+      pattern: '^[^\s\x00-\x1f\x7f-\x9f/](?:[^\x00-\x1f\x7f-\x9f/]*[^\s\x00-\x1f\x7f-\x9f/])?$'
+    KRoleTopicEntry:
+      description: "One topic a job role needs. Used in the answer of the read and in the body of the write: what was read can be written back. When writing, `required` defaults to true and `importance` to 2; an answer always carries both."
+      type: "object"
+      additionalProperties: false
+      required:
+        - "topic_id"
+      properties:
+        topic_id:
+          type: "string"
+          format: "uuid"
+        required:
+          type: "boolean"
+        importance:
+          type: "integer"
+          minimum: 1
+          maximum: 3
+    KRolePersonEntry:
+      description: "One person of a job role: who holds it, or who is to follow. Used in the answer of the read and in the body of the write."
+      type: "object"
+      additionalProperties: false
+      required:
+        - "person_id"
+        - "relation"
+      properties:
+        person_id:
+          type: "string"
+          format: "uuid"
+        relation:
+          type: "string"
+          enum:
+            - "holder"
+            - "successor"
     KRoleTopics:
       type: "object"
       additionalProperties: false
@@ -6538,20 +6553,7 @@ components:
         topics:
           type: "array"
           items:
-            type: "object"
-            additionalProperties: false
-            required:
-              - "topic_id"
-              - "required"
-              - "importance"
-            properties:
-              topic_id:
-                type: "string"
-                format: "uuid"
-              required:
-                type: "boolean"
-              importance:
-                type: "integer"
+            $ref: "#/components/schemas/KRoleTopicEntry"
     KRolePeople:
       type: "object"
       additionalProperties: false
@@ -6564,17 +6566,7 @@ components:
         people:
           type: "array"
           items:
-            type: "object"
-            additionalProperties: false
-            required:
-              - "person_id"
-              - "relation"
-            properties:
-              person_id:
-                type: "string"
-                format: "uuid"
-              relation:
-                type: "string"
+            $ref: "#/components/schemas/KRolePersonEntry"
     KProposed:
       type: "object"
       additionalProperties: false

@@ -4,7 +4,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { KAttemptSummary, KItemDetail, KTopic } from '../api/generated.ts';
-import { FakeApi, makeSession, permissionsFor, renderScreen, sessionValue } from '../test/harness.tsx';
+import { FakeApi, makeSession, permissionsFor, problem, renderScreen, sessionValue } from '../test/harness.tsx';
 import { QuestionsScreen } from './ask/QuestionsScreen.tsx';
 import { ConsentScreen } from './consent/ConsentScreen.tsx';
 import { KnowledgeItemScreen } from './knowledge/KnowledgeItemScreen.tsx';
@@ -47,6 +47,39 @@ describe('a knowledge item and its topics', () => {
     await user.click(screen.getByRole('button', { name: 'Save the topics' }));
     await waitFor(() => expect(api.callsTo('setItemTopics')[0]).toMatchObject({ path: { item_id: ID(30) }, body: { topic_ids: [ID(73)] } }));
     expect(api.callsTo('listTopics')[0]?.query).toMatchObject({ status: 'active' });
+  });
+
+  it('says what saving will add and remove, and keeps a link to a topic that is not in the list of topics in use', async () => {
+    const user = userEvent.setup();
+    const api = new FakeApi({
+      getKnowledgeItem: () => item([{ topic_id: ID(70), name: 'Relief valves', link_source: 'similarity' }, { topic_id: ID(75), name: 'Proposed topic', link_source: 'reviewer' }]),
+      listTopics: () => page([topic(70, 'Relief valves'), topic(73, 'Purging')]),
+      setItemTopics: () => ({ id: ID(30), topics: [] }),
+    });
+    renderScreen(<KnowledgeItemScreen />, { api, session: as('getKnowledgeItem', 'setItemTopics', 'listTopics'), ...at });
+    await user.click(await screen.findByRole('button', { name: 'Change the topics' }));
+    expect(((await screen.findByRole('checkbox', { name: 'Proposed topic' })) as HTMLInputElement).checked).toBe(true);   // linked, though not "in use": it has its row
+    expect(screen.getByText('Nothing is changed yet.')).toBeTruthy();
+    await user.click(screen.getByRole('checkbox', { name: 'Relief valves' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Purging' }));
+    expect(screen.getByText(/Saving will add “Purging” and remove “Relief valves”/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Save the topics' }));
+    await waitFor(() => expect(api.callsTo('setItemTopics')[0]?.body).toEqual({ topic_ids: [ID(73), ID(75)] }));
+  });
+
+  it('when the API refuses because the card contributed the item, it says plainly that a second person must do it', async () => {
+    const user = userEvent.setup();
+    const api = new FakeApi({
+      getKnowledgeItem: () => item([]),
+      listTopics: () => page([topic(70, 'Relief valves')]),
+      setItemTopics: () => { throw problem(403, 'Not allowed', 'forbidden'); },
+    });
+    renderScreen(<KnowledgeItemScreen />, { api, session: as('getKnowledgeItem', 'setItemTopics', 'listTopics'), ...at });
+    await user.click(await screen.findByRole('button', { name: 'Change the topics' }));
+    await user.click(await screen.findByRole('checkbox', { name: 'Relief valves' }));
+    await user.click(screen.getByRole('button', { name: 'Save the topics' }));
+    expect(await screen.findByText('A second person must do this')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save the topics' })).toBeTruthy();     // the form stays; nothing was saved
   });
 
   it('does not save while the list of topics is cut short', async () => {

@@ -1,11 +1,11 @@
 // Loaders that describe the thing being acted on, for the policy decision point. They read labels and
 // status only (the API's database login cannot read captured text). Row-level security limits every
 // query to the caller's company; a row of another company is simply "not found".
+import { isUuid } from '../../../shared/crypto.ts';
 import type { ResourceRef } from '../../../shared/policy-types.ts';
 import type { Tx } from '../../platform/index.ts';
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const isId = (v: unknown): v is string => typeof v === 'string' && UUID.test(v);
+const isId = isUuid;
 
 async function first<T>(tx: Tx, sql: string, params: unknown[]): Promise<T | null> {
   const { rows } = await tx.query<T & Record<string, unknown>>(sql, params);

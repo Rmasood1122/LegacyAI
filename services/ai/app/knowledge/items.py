@@ -321,10 +321,15 @@ MAX_TOPICS_PER_ITEM = 20
 
 def set_topics(db: Database, ctx: ServiceContext, item_id: str, topic_ids: list[str]) -> list[dict[str, Any]]:
     """A reviewer says which topics an item belongs to (docs/phase2/05: "a reviewer can add or remove a link, and
-    manual links win"). The given list REPLACES the item's links to the topics THIS reviewer may read (the topic filter
-    in the token); a link to a topic the reviewer cannot see is neither shown nor removed. The new links are reviewer
-    links, so a later similarity run (which never touches existing links) leaves them alone. Every topic must be an
-    active topic of the same company; the composite foreign keys make a link to another company's topic impossible."""
+    manual links win").
+
+    The given list is the wanted set among the links THIS reviewer can see: topics it may read (the topic filter in the
+    token) that are not retired - exactly what item_topics() returns for it. So:
+      - a link that stays is left as it is (its link_source and score are kept: writing back what was read changes nothing);
+      - a link that is in the list but does not exist yet is added as a reviewer link, and must be to an ACTIVE topic;
+      - a visible link that is not in the list is removed;
+      - a link the reviewer cannot see (another department, a higher level, a retired topic) is neither shown nor touched.
+    The composite foreign keys make a link to another company's topic impossible."""
     wanted = list(dict.fromkeys(topic_ids))
     if len(wanted) > MAX_TOPICS_PER_ITEM:
         raise ItemRefused("too_many_topics", 422)
@@ -334,40 +339,46 @@ def set_topics(db: Database, ctx: ServiceContext, item_id: str, topic_ids: list[
             raise ItemRefused("not_found", 404)
         where, params = topic_condition(ctx.topic_filter, ctx.tenant_id)
         before = {t["topic_id"] for t in item_topics(cur, ctx.tenant_id, item_id, where, params)}
-        if wanted:
+        to_add = [t for t in wanted if t not in before]
+        to_remove = sorted(before - set(wanted))
+        if to_add:
             # active topics of this company that this reviewer may read; anything else is "unknown" (the API checked the same)
             cur.execute(f"SELECT tp.id::text AS id FROM topics tp WHERE tp.tenant_id = %s AND tp.id = ANY(%s::uuid[]) AND tp.status = 'active' AND {where}",
-                        [ctx.tenant_id, wanted, *params])
-            if {r["id"] for r in cur.fetchall()} != set(wanted):
+                        [ctx.tenant_id, to_add, *params])
+            if {r["id"] for r in cur.fetchall()} != set(to_add):
                 raise ItemRefused("unknown_topic", 422)
-        cur.execute(
-            f"""DELETE FROM knowledge_item_topics kt USING topics tp
-                 WHERE tp.tenant_id = kt.tenant_id AND tp.id = kt.topic_id AND kt.tenant_id = %s AND kt.item_id = %s AND {where}""",
-            [ctx.tenant_id, item_id, *params])
-        for topic_id in wanted:
+        if to_remove:
+            cur.execute("DELETE FROM knowledge_item_topics WHERE tenant_id = %s AND item_id = %s AND topic_id = ANY(%s::uuid[])",
+                        (ctx.tenant_id, item_id, to_remove))
+        for topic_id in to_add:
+            # a hidden link to the same topic cannot exist (the topic is readable, so its link would be in `before`)
             cur.execute("""INSERT INTO knowledge_item_topics (tenant_id, item_id, topic_id, link_source) VALUES (%s, %s, %s, 'reviewer')
                            ON CONFLICT DO NOTHING""", (ctx.tenant_id, item_id, topic_id))
-        # One row for the request, and one per link that was really added or removed (ids only, never names): the log
-        # then shows WHICH topics an item was put into or taken out of, and by which card.
-        write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="knowledge:label", reason_code="ITEM_TOPICS_SET",
-                    resource_type="knowledge_item", resource_id=item_id, request_id=ctx.request_id,
-                    details={"item_id": item_id, "count": len(wanted)})
-        for changed, topic_ids_changed in (("removed", sorted(before - set(wanted))), ("added", sorted(set(wanted) - before))):
-            for topic_id in topic_ids_changed:
-                write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="knowledge:label",
-                            reason_code="ITEM_TOPIC_UNLINKED" if changed == "removed" else "ITEM_TOPIC_LINKED",
-                            resource_type="knowledge_item", resource_id=item_id, request_id=ctx.request_id,
-                            details={"item_id": item_id, "topic_id": topic_id, "changed": changed})
+        _audit_topic_changes(cur, ctx, item_id, wanted=len(wanted), removed=to_remove, added=sorted(to_add))
         return item_topics(cur, ctx.tenant_id, item_id, where, params)
+
+
+def _audit_topic_changes(cur: psycopg.Cursor[Any], ctx: ServiceContext, item_id: str, *, wanted: int, removed: list[str], added: list[str]) -> None:
+    """One row for the request, and one per link that was really added or removed (ids only, never names): the log then
+    shows WHICH topics an item was put into or taken out of, and by which card."""
+    write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="knowledge:label", reason_code="ITEM_TOPICS_SET",
+                resource_type="knowledge_item", resource_id=item_id, request_id=ctx.request_id,
+                details={"item_id": item_id, "count": wanted})
+    for changed, reason, ids in (("removed", "ITEM_TOPIC_UNLINKED", removed), ("added", "ITEM_TOPIC_LINKED", added)):
+        for topic_id in ids:
+            write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="knowledge:label", reason_code=reason,
+                        resource_type="knowledge_item", resource_id=item_id, request_id=ctx.request_id,
+                        details={"item_id": item_id, "topic_id": topic_id, "changed": changed})
 
 
 def item_topics(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str, topic_where: str = "TRUE",
                 topic_params: list[Any] | None = None) -> list[dict[str, Any]]:
-    """The topics an item is linked to. `topic_where` narrows them to what a reader may see (alias tp)."""
+    """The topics an item is linked to. `topic_where` narrows them to what a reader may see (alias tp).
+    A link to a RETIRED topic is left out: it is kept in the database but is neither shown nor changed by set_topics()."""
     cur.execute(
         f"""SELECT kt.topic_id::text AS topic_id, tp.name, kt.link_source
               FROM knowledge_item_topics kt JOIN topics tp ON tp.tenant_id = kt.tenant_id AND tp.id = kt.topic_id
-             WHERE kt.tenant_id = %s AND kt.item_id = %s AND {topic_where} ORDER BY tp.name, kt.topic_id""",
+             WHERE kt.tenant_id = %s AND kt.item_id = %s AND tp.status <> 'retired' AND {topic_where} ORDER BY tp.name, kt.topic_id""",
         [tenant_id, item_id, *(topic_params or [])])
     return [dict(r) for r in cur.fetchall()]
 

@@ -124,9 +124,11 @@ describe('topics and gaps', () => {
     const api = new FakeApi({
       getGapReport: () => ({ job_role: 'Boiler operator', topics: [{ topic_id: ID(70), name: 'Relief valves', required: true, importance: 3, label: 'single_source', verified_items: 1, contributors: 1 }] }),
       listTopics: () => page([topic(70, 'Relief valves'), topic(73, 'Purging')]),
+      // the form starts from what is stored for the role, not from the gap report
+      getRoleTopics: () => ({ job_role: 'Boiler operator', topics: [{ topic_id: ID(70), required: true, importance: 3 }] }),
       setRoleTopics: () => ({ job_role: 'Boiler operator', topics: [] }),
     });
-    renderScreen(<GapsScreen />, { api, session: as('getGapReport', 'setRoleTopics', 'listTopics') });
+    renderScreen(<GapsScreen />, { api, session: as('getGapReport', 'setRoleTopics', 'getRoleTopics', 'listTopics') });
     expect(api.callsTo('getGapReport')).toEqual([]);    // nothing is asked before a job role is named
     await user.type(screen.getByLabelText('Job role'), 'Boiler operator');
     await user.click(screen.getByRole('button', { name: 'Show' }));
@@ -137,6 +139,8 @@ describe('topics and gaps', () => {
       path: { job_role: 'Boiler operator' },
       body: { topics: [{ topic_id: ID(70), importance: 3, required: true }, { topic_id: ID(73), importance: 2, required: true }] },
     }));
+    // after the save the stored topics of the role are read again (so the form shows what is stored now)
+    await waitFor(() => expect(api.callsTo('getRoleTopics').length).toBeGreaterThanOrEqual(2));
     expect(screen.queryByText('People in this job role')).toBeNull();   // needs setRolePeople and the people list
   });
 

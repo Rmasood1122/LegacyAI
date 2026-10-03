@@ -27,4 +27,5 @@ export {
 } from './internal/http.ts';
 export { StaticSite, StaticSiteError, WEB_APP_CSP, type StaticAsset } from './internal/static-site.ts';
 export { loadContract, type Contract, type Operation } from './internal/openapi.ts';
-export { decodeCursor, decodeIdCursor, encodeCursor, platformRoutes } from './internal/routes.ts';
+export { decodeCursor, decodeIdCursor, decodeNameCursor, encodeCursor, encodeNameCursor, pageOf } from './internal/pagination.ts';
+export { platformRoutes } from './internal/routes.ts';

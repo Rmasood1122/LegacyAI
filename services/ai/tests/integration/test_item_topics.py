@@ -9,6 +9,7 @@ import psycopg
 import pytest
 
 from app.ai_gateway import FakeEmbedder, Gateway
+from app.capture.filters import topic_condition
 from app.capture.gaps import gap_report
 from app.knowledge import expert, items, readiness, reads
 from app.platform import Database
@@ -167,3 +168,35 @@ def test_a_generated_question_takes_the_topic_a_reviewer_chose_over_a_similarity
     assert len(made["created"]) == 1
     topic_id = str(admin.execute("SELECT topic_id FROM quiz_items WHERE id = %s", (made["created"][0],)).fetchone()["topic_id"])
     assert topic_id == min(chosen, also)            # a reviewer's link, and of two reviewer links always the same one
+
+
+def test_writing_back_what_was_read_changes_nothing_and_a_retired_link_is_never_in_the_way(
+        db: Database, world: World, embedder: FakeEmbedder, admin: psycopg.Connection[dict[str, Any]]) -> None:
+    """A link that stays keeps how it was made and its score; a link to a retired topic is not shown, not refused and not removed."""
+    item = verified_item(db, world, embedder, BODY)
+    valves, pumps = make_topic(admin, world.tenant_id, "Relief valves"), make_topic(admin, world.tenant_id, "Pumps")
+    old = make_topic(admin, world.tenant_id, "Old boilers")
+    for topic, score in ((valves, 0.9), (old, 0.8)):
+        admin.execute("INSERT INTO knowledge_item_topics (tenant_id, item_id, topic_id, link_source, score) VALUES (%s, %s, %s, 'similarity', %s)",
+                      (world.tenant_id, item, topic, score))
+    admin.execute("UPDATE topics SET status = 'retired' WHERE id = %s", (old,))
+
+    with db.tenant_tx(world.tenant_id) as cur:
+        where, params = topic_condition(may_read_topics(world), world.tenant_id)
+        read = items.item_topics(cur, world.tenant_id, item, where, params)
+    assert [(t["topic_id"], t["link_source"]) for t in read] == [(valves, "similarity")]          # the retired link is left out
+
+    # write back exactly what was read, plus one more
+    out = items.set_topics(db, reviewer_ctx(world, item), item, [t["topic_id"] for t in read] + [pumps])
+    assert sorted((t["topic_id"], t["link_source"]) for t in out) == sorted([(valves, "similarity"), (pumps, "reviewer")])
+    rows = admin.execute("SELECT topic_id::text AS t, link_source, score FROM knowledge_item_topics WHERE item_id = %s", (item,)).fetchall()
+    assert {(r["t"], r["link_source"]) for r in rows} == {(valves, "similarity"), (pumps, "reviewer"), (old, "similarity")}
+    scores = {r["t"]: r["score"] for r in rows}
+    assert scores[valves] == pytest.approx(0.9) and scores[old] == pytest.approx(0.8) and scores[pumps] is None
+    linked = admin.execute("SELECT details::jsonb ->> 'topic_id' AS t FROM audit_log WHERE tenant_id = %s AND reason_code = 'ITEM_TOPIC_LINKED'",
+                           (world.tenant_id,)).fetchall()
+    assert [r["t"] for r in linked] == [pumps]                                                    # only the new link is logged as added
+
+    # an empty list removes the visible links and still leaves the retired one alone
+    assert items.set_topics(db, reviewer_ctx(world, item), item, []) == []
+    assert links(admin, item) == [(old, "similarity")]

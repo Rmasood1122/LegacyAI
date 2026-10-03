@@ -1,4 +1,5 @@
 // Helpers shared by the knowledge-gateway routes.
+import { isUuid } from '../../../shared/crypto.ts';
 import { problems } from '../../../shared/errors.ts';
 import type { Decision, RequestContext, ResourceRef, Subject } from '../../../shared/policy-types.ts';
 import type { Authorizer } from '../../identity-access/index.ts';
@@ -100,6 +101,6 @@ export function pick<K extends string>(obj: any, keys: readonly K[]): Record<K, 
 
 export function uuidOrNull(v: unknown): string | null {
   if (v === undefined || v === null) return null;
-  if (typeof v !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v)) throw problems.badRequest([{ path: 'body', message: 'invalid id' }]);
+  if (!isUuid(v)) throw problems.badRequest([{ path: 'body', message: 'invalid id' }]);
   return v;
 }

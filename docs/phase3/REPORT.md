@@ -146,8 +146,16 @@ answer key was hidden by a rule that would have failed open on an unknown test s
 ## What the API lacked for these screens
 
 State at the end of Phase 3b, and what was closed afterwards (decision D24; five operations added, 124 in total;
-no permission or grant changed, no migration). **Until a CI run is named here, the closing is written and passes
-the local checks only: the database tests and browser tests for it have not run.**
+no permission or grant changed, no migration).
+
+**Evidence:** CI run 37135886623 on commit `b4d238c`: 10 of 10 jobs green; 673 API tests passed (1 skipped), 17 of 17
+browser tests, 99 web unit tests; the both-services walk covers the five new operations.
+
+**Not covered by that run:** the changes made after it in answer to the design reviews (the three list-replacing
+writes follow one "among what the caller can see" rule and answer 422 for a bad id; retired topics are left out
+everywhere; one rule for job-role names; the label guard that cannot be forgotten; the topics routes moved to their own
+file). They pass the local checks (API unit tests, web unit tests, type-check, lint); their database and browser
+tests have not run.
 
 - **CLOSED — link a knowledge item to topics.** A reviewer does it on the item's screen (on a verified item: a second person,
   not its contributor or the author of its current version - enforced by the API, decision D24)

@@ -3,7 +3,7 @@
 import { inspect } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import {
-  canonicalDetails, ConfigError, createLogger, decodeCursor, decodeIdCursor, encodeCursor, loadConfig, scrub, scrubString, Secret, stripOneTimeSecrets,
+  canonicalDetails, ConfigError, createLogger, decodeCursor, decodeIdCursor, decodeNameCursor, encodeCursor, encodeNameCursor, loadConfig, scrub, scrubString, Secret, stripOneTimeSecrets, pageOf,
 } from '../../src/modules/platform/index.ts';
 import { testEnv } from '../helpers/env.ts';
 
@@ -233,6 +233,25 @@ describe('list cursors', () => {
       expect(() => decodeIdCursor(encodeCursor(bad)), bad).toThrowError();
     }
     expect(() => decodeIdCursor(42)).toThrowError();
+  });
+
+  it('a name cursor round-trips every name a job role can have, also ones stored before today\'s rules', () => {
+    for (const name of ['Boiler operator', 'x', '\u{1F527}'.repeat(120), 'Opérateur de chaudière', 'old name\twith a tab', ' padded ']) {
+      expect(decodeNameCursor(encodeNameCursor(name)), name).toBe(name);
+    }
+    expect(encodeNameCursor('\u{1F527}'.repeat(120)).length).toBeLessThanOrEqual(700);                 // the contract's limit for this cursor
+    expect(decodeNameCursor(undefined)).toBeNull();
+    for (const bad of ['', 'x'.repeat(121), 'nul\u0000inside']) {
+      expect(() => decodeNameCursor(encodeNameCursor(bad)), JSON.stringify(bad)).toThrowError();
+    }
+    expect(() => decodeNameCursor(Buffer.from([0xff, 0xfe]).toString('base64url'))).toThrowError();   // not valid UTF-8
+    expect(() => decodeNameCursor(7)).toThrowError();
+  });
+
+  it('pageOf cuts one page out of limit + 1 rows and gives the next cursor only when there is more', () => {
+    expect(pageOf([1, 2, 3], 2, String)).toEqual({ items: [1, 2], next_cursor: '2' });
+    expect(pageOf([1, 2], 2, String)).toEqual({ items: [1, 2], next_cursor: null });
+    expect(pageOf([], 2, String)).toEqual({ items: [], next_cursor: null });
   });
 
   it('a numbered cursor (the audit log is ordered by sequence number) is still accepted by the general decoder', () => {

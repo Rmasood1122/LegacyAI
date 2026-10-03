@@ -358,6 +358,10 @@ function decideUnsafe(subject: Subject, action: string, resource: ResourceRef, c
     // Judged on ALL applicable grants, exactly as buildResourceFilterSpec() does, so the two locks agree.
     if (!VERIFIED.has(resource.verification_status) && onlyVerified(grants, ctx)) return deny('DENY_UNVERIFIED');
   }
+  // A label change of a knowledge item must SAY whether it releases the item to learners or changes released knowledge.
+  // A route that forgets to say so is refused, instead of slipping past the second-person rule below.
+  if (action === 'knowledge:label' && resource.type === 'knowledge_item'
+      && typeof resource.releases_to_learners !== 'boolean' && typeof resource.changes_released_knowledge !== 'boolean') return deny('DENY_PDP_ERROR');
   if (FOUR_EYES.has(action) && (action === 'knowledge:verify' || resource.releases_to_learners === true || resource.changes_released_knowledge === true)) {
     if (resource.owner_person_id === undefined || resource.author_person_id === undefined) return deny('DENY_SELF_REVIEW');
     const me = subject.person_id;

@@ -223,3 +223,13 @@ What the API does not offer, and what the screens do about it (no contract chang
 Unit tests: `features/gaps-closed.test.tsx` (9). Browser test: a reviewer links the seeded item to its topic through
 the screen; the test seed no longer writes that link to the database.
 
+## After the design reviews of the gap-closing work
+
+- **Item topics:** every link shown has its row (also a link to a topic that is only proposed); the form says what
+  saving will add and remove before it is pressed, and is rebuilt when the item's links change. When the API refuses
+  because the card contributed the item, the screen says "A second person must do this".
+- **Job roles:** the topics form starts from what is stored for the role as this card may see it (`getRoleTopics`),
+  not from the gap report, and sends only the rows it shows; the API keeps what the card cannot see. The same holds
+  for the people form.
+- **Refresh:** renaming or retiring a topic re-reads the job-role list, a role's topics and the item screen; setting
+  a role's topics re-reads the readiness report.

@@ -38,7 +38,9 @@ DESCRIPTORS: dict[str, Descriptor] = {
     "review_tasks": Descriptor("r.tenant_id", "r.department_id", "r.sensitivity", ("r.owner_person_id",)),
     "expert_questions": Descriptor("eq.tenant_id", "eq.department_id", "eq.sensitivity", ("eq.owner_person_id",),
                                    owner_card=("eq.asked_by_card_id",)),
-    "quiz_attempts": Descriptor("qa.tenant_id", None, None, ("qa.owner_person_id",)),
+    # The same owner columns as the API's ATTEMPT_DESCRIPTOR (routes-workflow.ts). owner_person_id always equals
+    # learner_person_id (a CHECK on the table), so the two services cannot disagree about whose attempt it is.
+    "quiz_attempts": Descriptor("qa.tenant_id", None, None, ("qa.owner_person_id",), owner_card=("qa.learner_card_id",)),
 }
 
 _SCOPE_KEYS = {
