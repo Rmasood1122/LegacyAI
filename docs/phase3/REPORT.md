@@ -148,14 +148,29 @@ answer key was hidden by a rule that would have failed open on an unknown test s
 State at the end of Phase 3b, and what was closed afterwards (decision D24; five operations added, 124 in total;
 no permission or grant changed, no migration).
 
-**Evidence:** CI run 37135886623 on commit `b4d238c`: 10 of 10 jobs green; 673 API tests passed (1 skipped), 17 of 17
-browser tests, 99 web unit tests; the both-services walk covers the five new operations.
+**Evidence:** CI run 37138193998 on commit `a32227c`: 10 of 10 jobs green; 679 API tests passed (1 skipped;
+statements 87.64 %, branches 82.91 %), 17 of 17 browser tests, 101 web unit tests; the both-services walk covers the
+five new operations; permission leakage in the AI service: 16 attack groups, 64 queries, 0 leaks.
 
-**Not covered by that run:** the changes made after it in answer to the design reviews (the three list-replacing
-writes follow one "among what the caller can see" rule and answer 422 for a bad id; retired topics are left out
-everywhere; one rule for job-role names; the label guard that cannot be forgotten; the topics routes moved to their own
-file). They pass the local checks (API unit tests, web unit tests, type-check, lint); their database and browser
-tests have not run.
+**How it was checked before each push:** two independent security reads of the uncommitted change. The first found
+three medium problems (topic names shown one level too far; an author could set the topics of their own verified
+item; a control character that made git treat a policy-bearing file as binary) - all fixed before pushing. The second
+found nothing critical, high or medium. Three design reviews then raised ten warnings (no critical); all were fixed,
+and that last round was covered by the second security read and by CI, **not by another design review**.
+
+**What CI found on the way:** the list of tests taken was stale right after a hand-in (fixed); a job-role name of
+more than about 100 percent-encoded characters could not be addressed at all - the server answered 414 - which would
+have hit names of roughly 16 or more characters in a non-Latin script (fixed: the limit now fits 120 characters in
+any script).
+
+**Open low-severity notes from the last security read:**
+- Two reviewers saving the same item's topics at the same moment could leave a link one of them removed (both
+  changes are in the audit log).
+- A contributor can still change the department of their own released item, or lower its sensitivity from 3 to 1,
+  without a second person; only lowering to 0 needs one. Unchanged behaviour from Phase 2, now written down.
+- Job-role names may contain invisible or direction-changing characters, so two roles can look the same on screen.
+- No test names a person outside the caller's scope when setting a job role's people (with the standard roles nobody
+  holds that permission below company scope).
 
 - **CLOSED — link a knowledge item to topics.** A reviewer does it on the item's screen (on a verified item: a second person,
   not its contributor or the author of its current version - enforced by the API, decision D24)
