@@ -5,6 +5,8 @@
 -- Nothing of it is searched, cited, shown or sent to a model afterwards. Erasure (step 2) follows in the
 -- same request, done by the Python service; a legal hold suspends only the erasure, never the hiding.
 -- SECURITY DEFINER: the API login, which records withdrawals, may not change capture or knowledge tables.
+-- A withdrawal covers everything the person gave in that scope, also under earlier consents that a renewed
+-- consent superseded (material keeps the id of the consent it was captured under).
 
 CREATE FUNCTION consents_hide_on_withdrawal() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER
@@ -26,14 +28,16 @@ BEGIN
   PERFORM set_config('app.tenant_id', NEW.tenant_id::text, true);
   IF NEW.scope IN ('documents', 'own_words') THEN
     SELECT array_agg(id) INTO source_ids FROM sources
-     WHERE tenant_id = NEW.tenant_id AND consent_id = NEW.id AND status NOT IN ('withdrawn', 'failed');
+     WHERE tenant_id = NEW.tenant_id AND consent_id IN (SELECT f.id FROM consents f WHERE f.tenant_id = NEW.tenant_id AND f.person_id = NEW.person_id AND f.scope = NEW.scope)
+       AND status NOT IN ('withdrawn', 'failed');
     IF source_ids IS NOT NULL THEN
       UPDATE sources SET status = 'withdrawn' WHERE tenant_id = NEW.tenant_id AND id = ANY (source_ids);
       UPDATE chunks SET status = 'withdrawn' WHERE tenant_id = NEW.tenant_id AND source_id = ANY (source_ids) AND status <> 'withdrawn';
     END IF;
     -- items given under this consent (interview answers, items they wrote, their replies) ...
     SELECT array_agg(id) INTO item_ids FROM knowledge_items
-     WHERE tenant_id = NEW.tenant_id AND consent_id = NEW.id AND status <> 'withdrawn';
+     WHERE tenant_id = NEW.tenant_id AND consent_id IN (SELECT f.id FROM consents f WHERE f.tenant_id = NEW.tenant_id AND f.person_id = NEW.person_id AND f.scope = NEW.scope)
+       AND status <> 'withdrawn';
     -- ... and items derived ONLY from the withdrawn sources (mixed provenance is handled by the erasure step)
     IF source_ids IS NOT NULL THEN
       SELECT array_agg(DISTINCT v.item_id) || COALESCE(item_ids, '{}') INTO item_ids

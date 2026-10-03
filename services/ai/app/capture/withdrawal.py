@@ -1,5 +1,8 @@
 """Consent withdrawal, step 2: erasure of capture data (docs/phase2/05 §1).
 
+A withdrawal covers the whole "family" of the consent: every consent of the same person and scope,
+including earlier ones a renewal superseded (material keeps the id it was captured under).
+
 Step 1 (hiding) already happened in the database, in the transaction that recorded the
 withdrawal (migration 15). This step deletes chunks and redaction findings and blanks titles and
 interview text. Items are erased by the knowledge module (knowledge.items.erase_withdrawn_items).
@@ -15,6 +18,14 @@ import psycopg
 from app.platform import Database, write_audit
 
 
+def consent_family(cur: psycopg.Cursor[Any], tenant_id: str, consent_id: str) -> list[str]:
+    """Every consent of the same person and scope as this one (including superseded ones)."""
+    cur.execute("""SELECT f.id::text AS id FROM consents f JOIN consents w ON w.tenant_id = f.tenant_id AND w.person_id = f.person_id
+                                                             AND w.scope = f.scope
+                    WHERE w.tenant_id = %s AND w.id = %s""", (tenant_id, consent_id))
+    return [r["id"] for r in cur.fetchall()]
+
+
 def items_citing_withdrawn(cur: psycopg.Cursor[Any], tenant_id: str, consent_id: str) -> list[str]:
     """Items that are NOT withdrawn but cite passages of withdrawn sources (mixed provenance)."""
     cur.execute(
@@ -24,13 +35,14 @@ def items_citing_withdrawn(cur: psycopg.Cursor[Any], tenant_id: str, consent_id:
              JOIN citations ci ON ci.tenant_id = c.tenant_id AND ci.chunk_id = c.id AND ci.subject_type = 'knowledge_version'
              JOIN knowledge_versions v ON v.tenant_id = ci.tenant_id AND v.id = ci.subject_id
              JOIN knowledge_items i ON i.tenant_id = v.tenant_id AND i.id = v.item_id
-            WHERE s.tenant_id = %s AND s.consent_id = %s AND s.status = 'withdrawn' AND i.status <> 'withdrawn'""",
-        (tenant_id, consent_id))
+            WHERE s.tenant_id = %s AND s.consent_id = ANY(%s::uuid[]) AND s.status = 'withdrawn' AND i.status <> 'withdrawn'""",
+        (tenant_id, consent_family(cur, tenant_id, consent_id)))
     return [r["id"] for r in cur.fetchall()]
 
 
 def erase_sources(cur: psycopg.Cursor[Any], tenant_id: str, consent_id: str) -> int:
-    cur.execute("SELECT id::text AS id FROM sources WHERE tenant_id = %s AND consent_id = %s AND status = 'withdrawn'", (tenant_id, consent_id))
+    cur.execute("SELECT id::text AS id FROM sources WHERE tenant_id = %s AND consent_id = ANY(%s::uuid[]) AND status = 'withdrawn'",
+                (tenant_id, consent_family(cur, tenant_id, consent_id)))
     source_ids = [r["id"] for r in cur.fetchall()]
     if not source_ids:
         return 0

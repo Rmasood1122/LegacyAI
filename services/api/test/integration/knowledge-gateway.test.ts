@@ -55,7 +55,10 @@ async function item(tn: TestTenant, opts: { owner?: TestMember; author?: TestMem
   await seed(tn.tenantId, async (q) => {
     let consent: string | null = null;
     if (opts.owner) {
-      const rows = await q(`INSERT INTO consents (tenant_id, person_id, scope, purpose, policy_version, granted_by_card_id)
+      // one live consent per person and scope (the database enforces it): reuse it if there is one
+      const live = await q(`SELECT id FROM consents WHERE tenant_id = $1 AND person_id = $2 AND scope = 'own_words'
+                              AND withdrawn_at IS NULL AND superseded_at IS NULL`, [tn.tenantId, opts.owner.personId]);
+      const rows = live.length > 0 ? live : await q(`INSERT INTO consents (tenant_id, person_id, scope, purpose, policy_version, granted_by_card_id)
                             VALUES ($1, $2, 'own_words', 'Synthetic', 't1', $3) RETURNING id`, [tn.tenantId, opts.owner.personId, opts.owner.card.id]);
       consent = rows[0].id;
     }
@@ -114,8 +117,8 @@ describe('gateway route kind (commit, call, finish)', () => {
     const res = await tenant.owner.post('/v1/sources', { title: 'Fails', company_document: true }, key);
     expect(res.status).toBe(502);
     const failed = await su.query(`SELECT details FROM audit_log WHERE tenant_id = $1 AND action = 'capture:upload' AND decision = 'allow'
-                                    AND details->>'outcome' = 'failed' ORDER BY seq DESC LIMIT 1`, [tenant.tenantId]);
-    expect(failed.rows[0]?.details).toMatchObject({ outcome: 'failed', status: 502 });
+                                    AND details::jsonb->>'outcome' = 'failed' ORDER BY seq DESC LIMIT 1`, [tenant.tenantId]);
+    expect(JSON.parse(failed.rows[0]?.details ?? '{}')).toMatchObject({ outcome: 'failed', status: 502 });
     stub.answers.delete('source.create');
     const retry = await tenant.owner.post('/v1/sources', { title: 'Fails', company_document: true }, key);
     expect(retry.status).toBe(201);

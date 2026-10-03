@@ -122,7 +122,17 @@ describe('idempotency keys', () => {
   it('every state-changing admin operation in the contract requires a key', () => {
     const required = ['issueCard', 'suspendCard', 'reinstateCard', 'revokeCard', 'replaceCard', 'renewCard', 'unlockCard',
       'issueEnrollmentToken', 'putCardRestrictions', 'assignCardRole', 'replaceCardRoles', 'removeCardRole', 'createPerson',
-      'updatePerson', 'createDepartment', 'createTenant', 'updateTenantSettings', 'createExport', 'renewCompanyCard', 'recoverOwnerCard'];
+      'updatePerson', 'createDepartment', 'createTenant', 'updateTenantSettings', 'createExport', 'renewCompanyCard', 'recoverOwnerCard',
+      // Phase 2: every state-changing operation except asking a question (a read that may cost AI money, never stored)
+      // and sending a file (its body is the file; the source it belongs to can only receive one).
+      'acceptInterview', 'addRedactionAllowlistTerm', 'answerInterviewTurn', 'approveQuizQuestion', 'assignReviewTask', 'bulkReviewTasks',
+      'completeInterview', 'confirmSource', 'createExpertQuestion', 'createInterview', 'createKnowledgeItem', 'createSource', 'createTopic',
+      'declineExpertQuestion', 'deleteRedactionAllowlistTerm', 'dismissReviewTask', 'editQuizQuestion', 'generateQuizQuestions', 'giveConsent',
+      'holdConsent', 'overrideQuizAnswer', 'pauseInterview', 'proposeItemVersion', 'recordWithdrawalForPerson', 'rejectKnowledgeItem',
+      'releaseConsentHold', 'reopenKnowledgeItem', 'replyExpertQuestion', 'restrictContribution', 'resumeInterview', 'retireKnowledgeItem',
+      'retireQuizQuestion', 'revertVerifications', 'saveAttemptAnswer', 'setAiKillSwitch', 'setItemLabels', 'setRolePeople', 'setRoleTopics',
+      'setSourceLabels', 'setTenantAiBudget', 'startReadinessAttempt', 'submitKnowledgeItem', 'submitReadinessAttempt', 'suggestTopics',
+      'unassignReviewTask', 'updateKnowledgeSettings', 'updateTopic', 'verifyKnowledgeItem', 'withdrawConsent', 'withdrawSource'];
     for (const id of required) expect(t.app.http.contract.operations.get(id)?.idempotent, id).toBe(true);
     const actual = [...t.app.http.contract.operations.values()].filter((o) => o.idempotent).map((o) => o.operationId).sort();
     expect(actual).toEqual([...required].sort());

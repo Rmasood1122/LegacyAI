@@ -18,7 +18,7 @@ import psycopg
 from pgvector import HalfVector
 
 from app.ai_gateway import Caller, DataBlock, Embedder, Gateway, ItemExtractOutput
-from app.capture import redact
+from app.capture import consent_family, redact
 from app.platform import Database, ServiceContext, one, write_audit
 
 BODY_MAX = 2000
@@ -368,16 +368,17 @@ def erase_withdrawn_items(cur: psycopg.Cursor[Any], tenant_id: str, consent_id: 
     """Withdrawal, step 2 for knowledge. Items hidden by the withdrawal lose their text (every version)
     and title. Items that ALSO rest on other material (mixed provenance) are not erased: they go back
     to review, because a passage they cited is about to disappear. Returns the number of items erased."""
+    family = consent_family(cur, tenant_id, consent_id)   # the consent and any it superseded
     cur.execute(
         """SELECT DISTINCT i.id::text AS id FROM knowledge_items i
             WHERE i.tenant_id = %s AND i.status = 'withdrawn'
-              AND (i.consent_id = %s OR EXISTS (
+              AND (i.consent_id = ANY(%s::uuid[]) OR EXISTS (
                      SELECT 1 FROM knowledge_versions v JOIN citations ci ON ci.tenant_id = v.tenant_id AND ci.subject_type = 'knowledge_version'
                                                                         AND ci.subject_id = v.id
                        JOIN chunks c ON c.tenant_id = ci.tenant_id AND c.id = ci.chunk_id
                        JOIN sources s ON s.tenant_id = c.tenant_id AND s.id = c.source_id
-                      WHERE v.tenant_id = i.tenant_id AND v.item_id = i.id AND s.consent_id = %s))""",
-        (tenant_id, consent_id, consent_id))
+                      WHERE v.tenant_id = i.tenant_id AND v.item_id = i.id AND s.consent_id = ANY(%s::uuid[])))""",
+        (tenant_id, family, family))
     erased = [r["id"] for r in cur.fetchall()]
     for item_id in erased:
         cur.execute("SELECT id FROM knowledge_versions WHERE tenant_id = %s AND item_id = %s AND erased_at IS NULL", (tenant_id, item_id))

@@ -176,7 +176,8 @@ export function adminRoutes(deps: GatewayDeps): RouteDef[] {
         // For someone who has left and cannot sign in: an Owner records the withdrawal, with a reference to their request.
         const { rows } = await tx.query<{ id: string }>(
           `UPDATE consents SET withdrawn_at = now(), withdrawn_by_card_id = $3, withdrawal_recorded_for_person = true, withdrawal_reference = $4
-            WHERE tenant_id = $1 AND person_id = $2 AND withdrawn_at IS NULL AND ($5::text IS NULL OR scope = $5) RETURNING id`,
+            WHERE tenant_id = $1 AND person_id = $2 AND withdrawn_at IS NULL AND superseded_at IS NULL AND ($5::text IS NULL OR scope = $5)
+            RETURNING id`,
           [subject.tenant_id, params.person_id, subject.card_id, body.reference, body.scope ?? null]);
         if (rows.length === 0) throw problems.conflict('nothing-to-withdraw', 'This person has no live consent of that scope');
         await writeAudit(tx, {

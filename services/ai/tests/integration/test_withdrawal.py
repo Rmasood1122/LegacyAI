@@ -89,3 +89,15 @@ def test_a_legal_hold_keeps_the_material_hidden_but_not_erased(db: Database, wor
     with db.tenant_tx(world.tenant_id) as cur:
         assert retrieve(cur, tenant_id=world.tenant_id, spec=tenant_filter(world.tenant_id), question="boiler relief valve",
                         embedder=embedder) == []
+
+
+def test_withdrawing_a_renewed_consent_also_covers_material_given_under_the_earlier_one(
+        db: Database, world: World, embedder: FakeEmbedder, admin: psycopg.Connection[dict[str, Any]]) -> None:
+    old_consent, source, marker = plant(db, world, embedder, admin)
+    # the person renews their consent: the old one is superseded, the material keeps the old id
+    admin.execute("UPDATE consents SET superseded_at = now() WHERE id = %s", (old_consent,))
+    new_consent = give_consent(admin, world, "expert", "documents")
+    withdraw(admin, world, new_consent)
+    assert admin.execute("SELECT status FROM sources WHERE id = %s", (source,)).fetchone()["status"] == "withdrawn"
+    assert erase(db, world, new_consent)["sources_erased"] == 1
+    assert marker_hits(admin, world.tenant_id, marker) == []
