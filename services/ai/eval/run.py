@@ -122,7 +122,9 @@ def load_docs(db: Database, admin: psycopg.Connection[dict[str, Any]], c: Compan
         if contributor is not None:
             ingest.confirm_source(db, c.ctx(d["contributor"], "source.confirm"), src["id"])
         if d.get("pdf"):
-            data, mime = make_pdf(text.split("---PAGE---")), "application/pdf"
+            # the simple PDF builder writes Latin-1 text: the long dash of the label becomes a hyphen
+            pages = [pg.strip().replace("—", "-") for pg in text.split("---PAGE---")]
+            data, mime = make_pdf(pages), "application/pdf"
         else:
             data, mime = text.encode(), "text/markdown" if d["file"].endswith(".md") else "text/plain"
         res = ingest.process_upload(db, owner_ctx, embedder, src["id"], data, mime, 10**12, time.monotonic() + 300)
