@@ -5,7 +5,6 @@ searched for in every text column of the company afterwards."""
 from __future__ import annotations
 
 import time
-import uuid
 from typing import Any
 
 import psycopg
@@ -24,12 +23,15 @@ pytestmark = [pytest.mark.db, needs_db]
 def plant(db: Database, world: World, embedder: FakeEmbedder, admin: psycopg.Connection[dict[str, Any]]) -> tuple[str, str, str]:
     """The expert gives consent and uploads their own notes, which carry a unique marker."""
     consent = give_consent(admin, world, "expert", "documents")
-    marker = f"WITHDRAWMARK{uuid.uuid4().hex[:8]}"
+    # A fixed, lower-case word: a random marker was once redacted away at upload (CI run 37118690201), which made the
+    # legal-hold test fail as if the material had been erased. Each test has its own company, so a fixed marker is safe.
+    marker = "zzwithdrawmarkerzz"
     me = world.ctx("expert", "source.create")
     src = ingest.create_source(db, me, title=f"Notes {marker}", department_id=None, sensitivity=1,
                                contributor_person_id=world.people["expert"].id, company_document=False, storage_budget_bytes=10**12)
     text = f"Synthetic boiler notes {marker}. The relief valve lifts at 6 bar and is tested monthly."
     assert ingest.process_upload(db, me, embedder, src["id"], text.encode(), "text/plain", 10**12, time.monotonic() + 60)["status"] == "ready"
+    assert marker_hits(admin, world.tenant_id, marker) != [], "the marker did not survive redaction at upload"
     return consent, str(src["id"]), marker
 
 

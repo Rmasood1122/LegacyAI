@@ -13,10 +13,10 @@ allowed to see what.
 - **It is backend only.** There are no screens. Everything is used through API calls.
 - **It is built and tested with a fake AI**, on GitHub's test machines, on every change. Last fully green run with
   results captured: commit `a93493f` (CI run 37114267852, all 8 jobs).
-- **A real AI model has been tried once, in a limited way:** Claude Haiku 4.5 on an invented question set, for
-  **$0.403** of the owner's $2 limit. The results are encouraging on this small set, found one real bug (fixed) and
-  one weak prompt (improved), and include **one wrong confident answer** out of 8 conflict questions. That run did
-  not go through the full service — see "Not proven".
+- **A real AI model has been run twice on an invented question set** (Claude Haiku 4.5): once directly, once through
+  the full service on GitHub. Total **$0.642** (owner's limits: $2, then "$1 more"). The results are encouraging on this small set, found one real bug (fixed) and
+  one weak prompt (improved), and include **wrong confident answers on conflicting documents: 2 of 8** through the
+  full service (1 of 8 in the direct run).
 - **Nothing is deployed.** No cloud resource was created; Terraform was never applied.
 
 ## What was built
@@ -64,6 +64,11 @@ questions refused with the right reason; **1 answered from one side only**. 0 of
 Interview extraction 15 of 15 after a bug fix. Readiness grading of a strong answer 0.43 with prompt v1, 0.92 with v2.
 Cost $0.0019 per question on these short documents.
 
+**Through the full service (GitHub run 37118690255, $0.238, 212 calls):** 37 of 40 answerable answered (31 correct,
+6 partly, 0 wrong by the model check); 20 of 20 unanswerable and 12 of 12 restricted refused; **conflicts refused 6 of
+8**; citations 47 of 47 valid; 0 cross-company citations; 0 of 20 planted instructions followed; interview covered 8 of
+8 topics; ledger total equals the period total. Details: `docs/phase2/EVALUATION.md`.
+
 ## Bugs and weaknesses found by testing in this phase
 
 1. **Consent withdrawal did not hide material** when recorded from a session with no company set (the database
@@ -73,13 +78,17 @@ Cost $0.0019 per question on these short documents.
 4. **A field named `title` was dropped from the request to the AI provider**, so every interview extraction was
    rejected. Found by the first real call; fixed with a test.
 5. **Question-generation prompt v1 invented content** not in the verified item. Prompt v2 restricts it.
-6. **One wrong confident answer on conflicting documents** (1 of 8). Not fixed: it depends on the model.
+6. **Wrong confident answers on conflicting documents** (2 of 8 through the full service). Not fixed: it depends on
+   the model.
+7. **A test of the legal hold failed once in CI** (run 37118690201). The code path for a hold deletes nothing;
+   ASSUMPTION: the test's random marker word was itself redacted at upload. The test now uses a fixed marker and
+   checks that it survived upload, so a repeat would say so.
 
 ## Deviations from the approved design
 
 | Design said | What was done | Why |
 |---|---|---|
-| Evaluate two models through the pipeline at Gate 2 | One model, without the database, on the owner's computer | The owner supplied one key as a local file and a $2 limit; the database cannot run on that computer. The pipeline run is prepared (`evaluation.yml`) and needs the key as a GitHub secret |
+| Evaluate two models through the pipeline at Gate 2 | One model (Claude Haiku 4.5), first without the database, then through the pipeline | The owner supplied one provider's key |
 | Provider SDKs | none; plain HTTPS | both SDKs fail the 60-day rule |
 | `presidio-anonymizer` | not installed | replacing findings with placeholders is a few lines of our own code |
 | `jose` 6.2.12 | 6.2.8 | newest release older than 60 days |
@@ -91,11 +100,11 @@ Cost $0.0019 per question on these short documents.
 
 ## Done, but NOT proven
 
-- The **full pipeline with a real model**: real search quality, redaction in the loop, the budget ledger and caps
-  under real calls. Only the model's behaviour was measured.
+- The full pipeline with a real model was run **once**, on 80 invented questions. One run is not a rate; the caps
+  were never reached, so stopping at a cap under real calls is unmeasured.
 - **GPT-5.6 Luna**: not run. No comparison was made; no model has been chosen.
-- **Embedding model** (`bge-small-en-v1.5`): never run in an evaluation; its relevance threshold (0.6) is an
-  ASSUMPTION. The image builds with it in CI, nothing more.
+- **Embedding model** (`bge-small-en-v1.5`): used in one evaluation run; its relevance threshold (0.6) is untuned
+  (ASSUMPTION).
 - **Memory of the AI service** in the cloud (1 GiB) — ASSUMPTION, never measured there.
 - **Neon** (the cloud database): never used. pgvector there is read from documentation only.
 - **Cloud Run identity tokens** between the two services: implemented from documentation, never executed.
@@ -117,7 +126,7 @@ Cost $0.0019 per question on these short documents.
 
 ## What I would do next
 
-1. Run the prepared pipeline evaluation (key as a GitHub secret; about $0.55) and, if wanted, the second model.
+1. Run the second model if a comparison is wanted (needs an OpenAI key; not done).
 2. Decide the model and the caps (proposal: $5 per company per month on the pilot plan, $1 free plan, $20 global).
 3. Look for a second line of defence against the "one-sided answer on conflicting documents" case, for example a
    code check that refuses when retrieved passages give different numbers for the same quantity.

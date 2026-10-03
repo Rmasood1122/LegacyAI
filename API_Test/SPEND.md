@@ -12,3 +12,4 @@ Computed from the token counts the provider returned and the price table in `ser
 | 20261003T132951Z | model behaviour, no database: readiness | 70 | 0.086057 | 0.334446 |
 | 20261003T133249Z | model behaviour, no database: readiness | 70 | 0.068596 | 0.403042 |
 | 20261003 (GitHub run 37117933999) | full pipeline evaluation requested, cap $0.55: NOT RUN - no key stored as a GitHub secret | 0 | 0.000000 | 0.403042 |
+| 20261003T111436Z (GitHub run 37118690255) | FULL PIPELINE evaluation on GitHub (cap $0.90), cost from the service's own ledger | 212 | 0.238481 | 0.641523 |
