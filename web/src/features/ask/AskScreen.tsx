@@ -1,6 +1,6 @@
 // Ask: a question box, and an answer that shows where it comes from - or a plain "I don't know".
 import { useState, type FormEvent } from 'react';
-import { useApiList, useApiMutation } from '../../api/context.tsx';
+import { useActivePeople, useApiMutation } from '../../api/context.tsx';
 import type { KAnswer, KCitation } from '../../api/generated.ts';
 import { ScreenLink } from '../../navigation/ScreenLink.tsx';
 import { useSession } from '../../session/session.tsx';
@@ -90,7 +90,7 @@ function Citation({ citation }: { citation: KCitation }) {
 function AskExpert({ question }: { question: string }) {
   const { can } = useSession();
   const allowed = can('createExpertQuestion') && can('listPeople');
-  const people = useApiList('listPeople', { query: { status: 'active', limit: 100 } }, { enabled: allowed });
+  const people = useActivePeople({ enabled: allowed });
   const send = useApiMutation('createExpertQuestion');
   const [expert, setExpert] = useState('');
   if (!allowed) return null;

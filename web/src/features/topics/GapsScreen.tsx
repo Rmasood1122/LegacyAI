@@ -2,7 +2,7 @@
 // where the captured knowledge is missing, unverified or thin.
 import { useState, type FormEvent } from 'react';
 import { useSession } from '../../session/session.tsx';
-import { Badge, Banner, Button, Card, CheckboxField, DataTable, Empty, ErrorNote, Loading, Page, PartialListNote, SelectField, TextField } from '../../ui/index.tsx';
+import { Badge, Banner, Button, Card, CheckboxField, ConfirmButton, DataTable, Empty, ErrorNote, Loading, Page, PartialListNote, SelectField, TextField } from '../../ui/index.tsx';
 import { GAP_TEXT, gapTone, useGapReport, useRolePeopleChoices, useSetRolePeople, useSetRoleTopics, useTopicList } from './hooks.ts';
 
 const IMPORTANCE = ['', 'Nice to know', 'Important', 'Critical'] as const;
@@ -113,10 +113,14 @@ function RolePeople({ jobRole }: { jobRole: string }) {
       ))}
       {people.hasMore && <PartialListNote shown={items.length} noun="people" busy={people.isLoadingMore} onLoadMore={people.loadMore} />}
       {save.isSuccess && <Banner tone="success" title="The people for this job role were saved" />}
-      <Button variant="primary" busy={save.isPending} disabled={people.hasMore}
-        onClick={() => save.mutate({ path: { job_role: jobRole }, body: { people: chosen.map(([person_id, relation]) => ({ person_id, relation })) } })}>
-        Save the people
-      </Button>
+      <p role="status">
+        {chosen.length === 0
+          ? 'Nobody is chosen: saving would leave this job role with no people.'
+          : `${chosen.length} ${chosen.length === 1 ? 'person is' : 'people are'} chosen; saving sets exactly ${chosen.length === 1 ? 'this one' : 'these'} and removes everyone else.`}
+      </p>
+      <ConfirmButton variant="primary" label="Save the people" busy={save.isPending} disabled={people.hasMore} resetKey={chosen.map(([id, relation]) => `${id}:${relation}`).join(',')}
+        confirmLabel={chosen.length === 0 ? 'Yes, leave this job role with no people' : `Yes, replace the list with ${chosen.length === 1 ? 'this 1 person' : `these ${chosen.length} people`}`}
+        onConfirm={() => save.mutate({ path: { job_role: jobRole }, body: { people: chosen.map(([person_id, relation]) => ({ person_id, relation })) } })} />
     </Card>
   );
 }

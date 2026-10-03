@@ -52,6 +52,10 @@ export function useRefresh(): (operations: readonly OperationId[]) => Promise<vo
   }, [cache]);
 }
 
+/** Active people to choose from (a contributor, an invitee, a card holder...), a page at a time. One definition for every feature. */
+export const useActivePeople = ({ enabled }: { enabled: boolean }): ApiList<ItemOf<'listPeople'>> =>
+  useApiList('listPeople', { query: { status: 'active', limit: 100 } }, { enabled });
+
 /** Changes something, then re-reads the listed operations so the screen shows the new state. */
 export function useApiMutation<K extends OperationId>(
   operation: K, refresh: readonly OperationId[] = [],

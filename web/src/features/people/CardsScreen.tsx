@@ -69,7 +69,7 @@ function IssueCard() {
   if (issued !== null) {
     return (
       <OneTimeSecrets title="The new card" cardNumber={issued.card.card_number} sc={issued.sc} enrollmentToken={issued.enrollment_token}
-        tokenExpiresAt={issued.enrollment_token_expires_at} onDone={() => setIssued(null)} />
+        tokenExpiresAt={issued.enrollment_token_expires_at} alreadyShown={issued.secret_already_shown} onDone={() => setIssued(null)} />
     );
   }
   const available = (roles.data?.items ?? []).filter((r) => r.enabled_for_tenant);

@@ -1,5 +1,5 @@
 // People, departments and cards: reading and changing them, without any markup.
-import { useApiList, useApiMutation, useApiQuery } from '../../api/context.tsx';
+import { useActivePeople, useApiList, useApiMutation, useApiQuery } from '../../api/context.tsx';
 import type { Card, OperationTypes, Restriction } from '../../api/generated.ts';
 import type { BadgeTone } from '../../ui/index.tsx';
 
@@ -32,7 +32,7 @@ export const useCardRestrictions = (cardId: string, { enabled }: { enabled: bool
 export const useSaveRestrictions = () => useApiMutation('putCardRestrictions', CARD_CHANGED);
 export const useCardEvents = (cardId: string, { enabled }: { enabled: boolean }) => useApiList('listCardEvents', { path: { card_id: cardId }, query: { limit: 25 } }, { enabled });
 /** People a card can be issued to. */
-export const useCardHolders = ({ enabled }: { enabled: boolean }) => useApiList('listPeople', { query: { status: 'active', limit: 100 } }, { enabled });
+export const useCardHolders = useActivePeople;
 
 export const CARD_STATE_TEXT: Readonly<Record<Card['state'], string>> = {
   issued: 'Issued — not set up yet',

@@ -499,7 +499,7 @@ export interface LoginBeginResponse {
   expires_in: number;
 }
 
-export interface LoginVerifyRequest {
+export type LoginVerifyRequest = {
   login_txn: string;
   sc: string;
   factor: {
@@ -511,7 +511,7 @@ export interface LoginVerifyRequest {
     type: "totp";
     code: string;
   };
-}
+};
 
 export interface Session {
   card_id: string;
@@ -633,7 +633,15 @@ export interface RenewCardRequest {
   validity_days?: number;
 }
 
-export type OwnerRecoveryRequest = Record<string, unknown> | Record<string, unknown>;
+export type OwnerRecoveryRequest = {
+  card_id: string;
+  card_number?: string;
+  verification_reference: string;
+} | {
+  card_id?: string;
+  card_number: string;
+  verification_reference: string;
+};
 
 export interface OwnerRecoveryResult {
   card: Card;

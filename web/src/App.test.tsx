@@ -41,6 +41,13 @@ describe('the frame', () => {
     expect(menu()).toEqual(['Home', 'Ask', 'My consent']);
   });
 
+  it('the right to read consents alone (experts and successors have it for their own records) does not offer the company consent screen', () => {
+    show(sessionValue(makeSession(permissionsFor('listConsents', 'listMyConsents'))), '/consents');
+    expect(menu()).toEqual(['Home', 'My consent']);
+    expect(screen.queryByRole('navigation', { name: 'Manage' })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'This screen is not available' })).toBeTruthy();
+  });
+
   it('a screen the card may not use is not reachable by typing its address', () => {
     const api = show(sessionValue(makeSession(permissionsFor('askKnowledge'))), '/review');
     expect(screen.getByRole('heading', { name: 'This screen is not available' })).toBeTruthy();
@@ -55,8 +62,10 @@ describe('the frame', () => {
 
   it('every screen names an operation that exists and needs a permission', () => {
     for (const s of SCREENS) {
-      if (s.requiredOperation === undefined) continue;
-      expect(operations[s.requiredOperation as OperationId].permission, s.path).not.toBeNull();
+      for (const needed of [s.requiredOperation, ...(s.alsoRequires ?? [])]) {
+        if (needed === undefined) continue;
+        expect(operations[needed as OperationId].permission, s.path).not.toBeNull();
+      }
     }
   });
 

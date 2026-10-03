@@ -134,7 +134,7 @@ left to the platform in front of the service.
 | Topics | `/topics` | manage topics | `features/topics` |
 | Job roles and gaps | `/gaps` | read the gap report | `features/topics` |
 | People, Cards, one card | `/people`, `/cards`, `/cards/:id` | create people / issue cards / read a card | `features/people` |
-| Consents (of the company's people) | `/consents` | read consents | `features/admin` |
+| Consents (of the company's people) | `/consents` | read consents **and** read the people list | `features/admin` |
 | Settings (company, cards and sign-in, knowledge rules, AI budget, redaction allow-list) | `/settings` | read company settings | `features/admin` |
 | Audit log (list, chain check, export) | `/audit` | read the audit log | `features/admin` |
 | Operator console | `/operator` | list companies (the platform operator only) | `features/operator` |
@@ -174,3 +174,20 @@ What the API does not offer, and what the screens do about it (no contract chang
   who may manage the list but not read settings cannot reach it here.
 - The operator console has unit tests only: the browser tests have no platform-operator sign-in with an
   authenticator app.
+
+## Changes after the first reviews of step 3b
+
+- **A screen can require more than one operation** (`alsoRequires` in `navigation/routes.ts`). The session lists
+  permissions without their scope, and Experts and Successors hold "read consents" for their own records only, so the
+  company consent screen also requires the right to read the people list. The API itself now filters the consent list
+  to the caller's own records for such cards (it did not before; found by the browser tests).
+- **`ConfirmButton`** withdraws its question when the action becomes disabled or busy or its inputs change
+  (`resetKey`), and puts Cancel first. Replacing the people of a job role and changing a test score now go through it.
+- **Readiness test:** answers or scores are drawn only in the states `submitted`, `graded`, `expired`; any other state
+  is treated as still running. A typed answer is saved when its field is left; handing in is blocked while a typed
+  answer is unsaved.
+- **One-time secrets:** when the API reports a repeated request (`secret_already_shown`), the screen says the secrets
+  were shown earlier and cannot be shown again.
+- **Lint:** dynamic `import()` and `sendBeacon` are refused. **API:** a dependency rule states that `src` never imports `test`.
+- **Type generator:** "one of these properties is required" becomes a union of object types; a settings PATCH body is
+  typed against the request type.

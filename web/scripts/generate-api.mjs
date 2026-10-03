@@ -39,6 +39,12 @@ function typeOf(schema, indent = '') {
   if (schema.const !== undefined) return lit(schema.const);
   if (schema.enum) return schema.enum.map(lit).join(' | ');
   for (const combiner of ['oneOf', 'anyOf']) {
+    // "one of these properties must be present": an object with properties whose branches hold only `required`.
+    // Each branch becomes the same object with those properties made mandatory.
+    if (schema[combiner] && schema.properties && schema[combiner].every((b) => Object.keys(b).length === 1 && Array.isArray(b.required))) {
+      const { [combiner]: branches, ...base } = schema;
+      return branches.map((b) => typeOf({ ...base, required: [...(base.required ?? []), ...b.required] }, indent)).join(' | ');
+    }
     if (schema[combiner]) return schema[combiner].map((s) => typeOf(s, indent)).map((t) => (t.includes(' | ') || t.includes(' & ') ? `(${t})` : t)).join(' | ');
   }
   if (schema.allOf) return schema.allOf.map((s) => typeOf(s, indent)).join(' & ');
@@ -76,7 +82,8 @@ const out = [
 ];
 for (const [name, schema] of Object.entries(doc.components.schemas)) {
   const t = typeOf(schema);
-  out.push(t.startsWith('{') ? `export interface ${name} ${t}` : `export type ${name} = ${t};`, '');
+  // an interface only for ONE object; a union of objects ("} | {") is a type alias
+  out.push(t.startsWith('{') && !t.includes('} | {') ? `export interface ${name} ${t}` : `export type ${name} = ${t};`, '');
 }
 
 const resolveParam = (p) => {

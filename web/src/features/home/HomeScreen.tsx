@@ -1,7 +1,7 @@
 // Home: what this card may do, and what is waiting for it. The cards come from the screen registry,
 // so a screen added there appears here too.
 import { useApiQuery } from '../../api/context.tsx';
-import { ROUTES, type PlainScreenKey, type RouteDef } from '../../navigation/routes.ts';
+import { mayOpen, ROUTES, type PlainScreenKey, type RouteDef } from '../../navigation/routes.ts';
 import { ScreenLink } from '../../navigation/ScreenLink.tsx';
 import { useSession } from '../../session/session.tsx';
 import { Banner, Card, formatDate, humanize, Page } from '../../ui/index.tsx';
@@ -16,7 +16,7 @@ export function HomeScreen() {
   const { session } = state;
   const openTasks = tasks.data?.items.length ?? 0;
   const waitingQuestions = questions.data?.items.filter((q) => q.status === 'open').length ?? 0;
-  const cards = HOME_CARDS.filter(([, route]) => route.requiredOperation === undefined || can(route.requiredOperation));
+  const cards = HOME_CARDS.filter(([, route]) => mayOpen(route, can));
   const reviewCount = tasks.isPending ? 'Counting…' : openTasks === 0 ? 'Nothing is waiting.' : `${openTasks}${tasks.data?.next_cursor ? '+' : ''} open ${openTasks === 1 ? 'task' : 'tasks'}.`;
 
   return (

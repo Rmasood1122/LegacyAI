@@ -33,7 +33,7 @@ export function ReadinessScreen() {
           {noQuestions
             ? <Banner tone="warning" title="There is no test for this job role yet">No approved questions exist for it that you are allowed to see. Check the spelling, or ask the person who runs the programme.</Banner>
             : <ErrorNote error={start.error} />}
-          <p className="muted">The test has a time limit, which starts when you press the button. Your answers are saved as you go.</p>
+          <p className="muted">The test has a time limit, which starts when you press the button. A chosen option is saved at once; a typed answer is saved when you leave its field or press “Save this answer”.</p>
           <Button type="submit" variant="primary" busy={start.isPending} disabled={jobRole.trim() === ''}>Start the test</Button>
         </form>
       </Card>

@@ -27,6 +27,10 @@ export const ATTEMPT_STATUS_TEXT: Readonly<Record<string, string>> = {
   graded: 'Graded',
   expired: 'Ran out of time before it was handed in',
 };
+/** The states in which a test is over. ONLY in these may anything about right answers or scores be drawn; any other
+ *  state - including one this screen does not know - is treated as "still running". */
+const FINISHED_ATTEMPT_STATES: ReadonlySet<string> = new Set(['submitted', 'graded', 'expired']);
+export const isFinishedAttempt = (status: string): boolean => FINISHED_ATTEMPT_STATES.has(status);
 export const attemptTone = (status: string): BadgeTone => (status === 'graded' ? 'success' : status === 'expired' ? 'danger' : status === 'submitted' ? 'warning' : 'info');
 
 export const GENERATE_REFUSALS: Readonly<Record<string, string>> = {

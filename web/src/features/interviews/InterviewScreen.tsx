@@ -27,7 +27,9 @@ export function InterviewScreen() {
   const mine = data !== undefined && myPerson !== null && data.expert_person_id === myPerson && can('acceptInterview');
   const busy = accept.isPending || answer.isPending || pause.isPending || resume.isPending || complete.isPending;
   const problem = accept.error ?? answer.error ?? pause.error ?? resume.error ?? complete.error;
-  const consentMissing = problem instanceof ApiError && (problem.code === 'consent-required' || /consent/i.test(problem.message));
+  // The API has no code of its own for this: it answers 422 with exactly the title "consent missing" (the AI
+  // service's reason, see knowledge-gateway/internal/client.ts). The exact title is matched, not any mention of consent.
+  const consentMissing = problem instanceof ApiError && problem.status === 422 && problem.message.trim().toLowerCase() === 'consent missing';
   const question = data !== undefined ? openQuestion(data) : null;
   const path = { interview_id: interviewId };
 

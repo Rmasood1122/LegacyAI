@@ -10,6 +10,7 @@ export const useKnowledgeSettings = ({ enabled }: { enabled: boolean }) => useAp
 export const useUpdateKnowledgeSettings = () => useApiMutation('updateKnowledgeSettings', ['getKnowledgeSettings']);
 export const useAiBudget = ({ enabled }: { enabled: boolean }) => useApiQuery('getAiBudget', undefined, { enabled });
 
+/** The allow-list. The API gives one page and no way to ask for the next, so the screen says when it is cut short. */
 export const useAllowlist = ({ enabled }: { enabled: boolean }) => useApiQuery('listRedactionAllowlist', undefined, { enabled });
 export const useAddAllowTerm = () => useApiMutation('addRedactionAllowlistTerm', ['listRedactionAllowlist']);
 export const useDeleteAllowTerm = () => useApiMutation('deleteRedactionAllowlistTerm', ['listRedactionAllowlist']);
@@ -30,11 +31,17 @@ export const useConsentPeople = ({ enabled }: { enabled: boolean }) => useApiLis
 /** Millionths of a US dollar as dollars and cents. */
 export const usd = (micro: number): string => `$${(micro / 1_000_000).toFixed(2)}`;
 
-/** Only the entries of `next` that differ from `before` (what a PATCH should send). */
-export function changedOnly<T extends object>(before: T, next: T): Partial<T> {
-  const out: Partial<T> = {};
-  for (const key of Object.keys(next) as Array<keyof T>) {
+/** The settings as read, when every one of their fields is also accepted by the request `R`; otherwise a compile error. */
+type OnlyFieldsOf<S, R> = { [K in keyof S]: K extends keyof R ? S[K] : never };
+
+/**
+ * Only the entries of `next` that differ from `before`: the body of a PATCH, typed as the request `R`.
+ * Name the request type: `changedOnly<UpdateTenantSettingsRequest, TenantSettings>(before, next)`.
+ */
+export function changedOnly<R extends object, S extends OnlyFieldsOf<S, R>>(before: S, next: S): Partial<R> {
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(next) as Array<keyof S & string>) {
     if (JSON.stringify(before[key]) !== JSON.stringify(next[key])) out[key] = next[key];
   }
-  return out;
+  return out as Partial<R>;
 }

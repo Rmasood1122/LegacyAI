@@ -10,6 +10,11 @@ export interface RouteDef {
   label?: string;
   /** The card needs the permission of this operation; undefined = every signed-in card. */
   requiredOperation?: OperationId;
+  /**
+   * Further operations the card must ALSO be allowed to use (all of them). The session lists permissions without
+   * their scope, so a management screen names a managing operation too: reading alone may be an "own records" right.
+   */
+  alsoRequires?: readonly OperationId[];
   /** The card shown on the home page for this screen. */
   home?: { title: string; text: string; linkText: string };
   /** 'manage' = listed in the second menu (running the company), not among the everyday screens. */
@@ -56,12 +61,15 @@ export const ROUTES = {
   attempt: { path: '/readiness/attempts/:attemptId', requiredOperation: 'getReadinessAttempt' },
   report: { path: '/readiness/reports/:attemptId', requiredOperation: 'getReadinessReport' },
   questionBank: { path: '/readiness/questions', label: 'Test questions', requiredOperation: 'listQuizQuestions', menu: 'manage' },
-  topics: { path: '/topics', label: 'Topics', requiredOperation: 'createTopic', menu: 'manage' },
+  topics: { path: '/topics', label: 'Topics', requiredOperation: 'listTopics', alsoRequires: ['createTopic'], menu: 'manage' },
   gaps: { path: '/gaps', label: 'Job roles and gaps', requiredOperation: 'getGapReport', menu: 'manage' },
-  people: { path: '/people', label: 'People', requiredOperation: 'createPerson', menu: 'manage' },
-  cards: { path: '/cards', label: 'Cards', requiredOperation: 'issueCard', menu: 'manage' },
+  people: { path: '/people', label: 'People', requiredOperation: 'listPeople', alsoRequires: ['createPerson'], menu: 'manage' },
+  cards: { path: '/cards', label: 'Cards', requiredOperation: 'listCards', alsoRequires: ['issueCard'], menu: 'manage' },
   card: { path: '/cards/:cardId', requiredOperation: 'getCard' },
-  consentAdmin: { path: '/consents', label: 'Consents', requiredOperation: 'listConsents', menu: 'manage' },
+  // Experts and Successors hold the consent-reading right for their OWN records, so listConsents alone would offer
+  // this company-wide screen to them (the API then shows them only their own). The screen picks a person from the
+  // people list, so it is offered only to cards that may also read that list.
+  consentAdmin: { path: '/consents', label: 'Consents', requiredOperation: 'listConsents', alsoRequires: ['listPeople'], menu: 'manage' },
   settings: { path: '/settings', label: 'Settings', requiredOperation: 'getTenantSettings', menu: 'manage' },
   audit: { path: '/audit', label: 'Audit log', requiredOperation: 'listAuditEvents', menu: 'manage' },
   operator: { path: '/operator', label: 'Operator console', requiredOperation: 'listTenants', menu: 'manage' },
@@ -75,6 +83,11 @@ export type PlainScreenKey = Exclude<ScreenKey, DetailScreenKey>;
 export type ScreenTarget = { screen: PlainScreenKey } | { screen: DetailScreenKey; id: string };
 
 export const routeOf = (screen: ScreenKey): RouteDef => ROUTES[screen];
+
+/** Whether a card may open a screen: it needs every operation the screen names. The API stays the authority. */
+export function mayOpen(route: RouteDef, can: (operation: OperationId) => boolean): boolean {
+  return (route.requiredOperation === undefined || can(route.requiredOperation)) && (route.alsoRequires ?? []).every(can);
+}
 
 /** The address of a screen. */
 export function screenPath(target: ScreenTarget): string {

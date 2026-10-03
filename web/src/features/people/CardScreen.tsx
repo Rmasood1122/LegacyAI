@@ -8,17 +8,19 @@ import { useSession } from '../../session/session.tsx';
 import {
   Badge, Banner, Button, Card, CheckboxField, ConfirmButton, DataTable, ErrorNote, Facts, formatDate, humanize, Loading, OneTimeSecrets, Page, PartialListNote, SelectField, TextField,
 } from '../../ui/index.tsx';
+import type { ShownSecrets } from '../../ui/index.tsx';
 import {
   CARD_STATE_TEXT, cardTone, describeRestriction, useAssignRole, useCard, useCardEvents, useCardRestrictions, useNewEnrollmentToken, useReinstateCard, useRemoveRole, useRenewCard,
   useReplaceCard, useRevokeCard, useRoles, useSaveRestrictions, useSuspendCard, useUnlockCard, withReadOnly,
 } from './hooks.ts';
 
 type RoleKey = RoleAssignmentInput['role_key'];
-interface Shown { title: string; cardNumber?: string; sc?: string; enrollmentToken?: string; tokenExpiresAt?: string }
+type Shown = ShownSecrets;
 
 const fromCard = (title: string, r: CardWithSecrets): Shown =>
-  ({ title, cardNumber: r.card.card_number, sc: r.sc, enrollmentToken: r.enrollment_token, tokenExpiresAt: r.enrollment_token_expires_at });
-const fromToken = (title: string, r: EnrollmentTokenResponse): Shown => ({ title, enrollmentToken: r.enrollment_token, tokenExpiresAt: r.enrollment_token_expires_at });
+  ({ title, cardNumber: r.card.card_number, sc: r.sc, enrollmentToken: r.enrollment_token, tokenExpiresAt: r.enrollment_token_expires_at, alreadyShown: r.secret_already_shown });
+const fromToken = (title: string, r: EnrollmentTokenResponse): Shown =>
+  ({ title, enrollmentToken: r.enrollment_token, tokenExpiresAt: r.enrollment_token_expires_at, alreadyShown: r.secret_already_shown });
 
 export function CardScreen() {
   const { cardId = '' } = useParams();

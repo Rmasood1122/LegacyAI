@@ -17,11 +17,14 @@ const everywhere = [
   { selector: "JSXAttribute[name.name='style']", message: 'No inline styles: the content-security policy blocks them. Use a class.' },
   { selector: "MemberExpression[property.name=/^(innerHTML|outerHTML)$/]", message: 'Never inject HTML; render text.' },
   { selector: "CallExpression[callee.name='eval']", message: 'No eval.' },
+  // The layer rules read static imports; a dynamic import() would slip past them, and nothing here needs one.
+  { selector: 'ImportExpression', message: 'No dynamic import(): the layer rules only see static imports.' },
 ];
 const noNetwork = [
   { selector: "CallExpression[callee.name='fetch']", message: 'Only src/api/client.ts talks to the network. Use the API client.' },
   { selector: "MemberExpression[property.name='fetch']", message: 'Only src/api/client.ts talks to the network. Use the API client.' },
   { selector: "NewExpression[callee.name=/^(XMLHttpRequest|WebSocket|EventSource)$/]", message: 'Only src/api/client.ts talks to the network.' },
+  { selector: "MemberExpression[property.name='sendBeacon']", message: 'Only src/api/client.ts talks to the network.' },
 ];
 
 // Import paths are matched as written, so these work for any folder name - also ones added later.

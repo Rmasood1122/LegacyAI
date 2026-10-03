@@ -1,5 +1,5 @@
 // Interviews: reading and changing them, without any markup.
-import { useApiList, useApiMutation, useApiQuery } from '../../api/context.tsx';
+import { useActivePeople, useApiList, useApiMutation, useApiQuery } from '../../api/context.tsx';
 import type { KInterviewDetail } from '../../api/generated.ts';
 import type { BadgeTone } from '../../ui/index.tsx';
 
@@ -16,7 +16,7 @@ export const usePauseInterview = () => useApiMutation('pauseInterview', CHANGED)
 export const useResumeInterview = () => useApiMutation('resumeInterview', CHANGED);
 export const useCompleteInterview = () => useApiMutation('completeInterview', CHANGED);
 /** Active people who can be invited, a page at a time. */
-export const useInvitablePeople = ({ enabled }: { enabled: boolean }) => useApiList('listPeople', { query: { status: 'active', limit: 100 } }, { enabled });
+export const useInvitablePeople = useActivePeople;
 
 export const INTERVIEW_STATUS_TEXT: Readonly<Record<string, string>> = {
   invited: 'Invited — not started',

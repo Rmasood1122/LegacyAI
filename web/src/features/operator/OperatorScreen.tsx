@@ -5,10 +5,11 @@ import { useApiList, useApiMutation, useApiQuery } from '../../api/context.tsx';
 import type { CardWithSecrets, OwnerRecoveryResult, Tenant, TenantCreated } from '../../api/generated.ts';
 import { useSession } from '../../session/session.tsx';
 import { Badge, Banner, Card, ConfirmButton, DataTable, Empty, ErrorNote, Facts, formatDate, humanize, Loading, OneTimeSecrets, Page, PartialListNote, SelectField, TextField } from '../../ui/index.tsx';
+import type { ShownSecrets } from '../../ui/index.tsx';
 
-interface Shown { title: string; cardNumber?: string; sc?: string; enrollmentToken?: string; tokenExpiresAt?: string }
+type Shown = ShownSecrets;
 const secretsOf = (title: string, r: CardWithSecrets | OwnerRecoveryResult): Shown =>
-  ({ title, cardNumber: r.card.card_number, sc: r.sc, enrollmentToken: r.enrollment_token, tokenExpiresAt: r.enrollment_token_expires_at });
+  ({ title, cardNumber: r.card.card_number, sc: r.sc, enrollmentToken: r.enrollment_token, tokenExpiresAt: r.enrollment_token_expires_at, alreadyShown: r.secret_already_shown });
 
 const SLUG = /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/;
 const REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._-]{5,63}$/;

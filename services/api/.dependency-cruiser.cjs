@@ -7,6 +7,13 @@
 module.exports = {
   forbidden: [
     {
+      name: 'src-does-not-import-test',
+      comment: 'Production code must never import test code (helpers, fixtures, the browser-test server).',
+      severity: 'error',
+      from: { path: '^src/' },
+      to: { path: '^test/' },
+    },
+    {
       name: 'no-cross-module-internals',
       comment: "A module's internal/ folder is private. Import the module's index.ts instead.",
       severity: 'error',

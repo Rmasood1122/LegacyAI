@@ -54,7 +54,7 @@ describe('interviews', () => {
 
   it('the invited expert starts the interview; a missing consent is explained with the way to give it', async () => {
     const user = userEvent.setup();
-    const api = new FakeApi({ getInterview: () => interview(), acceptInterview: () => { throw problem(422, 'Consent for own words is required', 'invalid'); } });
+    const api = new FakeApi({ getInterview: () => interview(), acceptInterview: () => { throw problem(422, 'consent missing', 'invalid'); } });
     renderScreen(<InterviewScreen />, { api, session: as('getInterview', 'acceptInterview', 'listMyConsents'), ...at });
     await user.click(await screen.findByRole('button', { name: 'Start' }));
     expect(await screen.findByText('Your consent is needed first')).toBeTruthy();
@@ -214,14 +214,46 @@ describe('readiness test', () => {
     expect(await screen.findByText('Monthly')).toBeTruthy();                       // the key, shown after grading
     expect(screen.getByText('Waiting to be graded by a person')).toBeTruthy();
     expect(screen.queryByRole('radio')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Set the score' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Set the score/ })).toBeNull();
     first.unmount();
 
     renderScreen(<AttemptScreen />, { api, session: as('getReadinessAttempt', 'overrideQuizAnswer'), ...at });
     const card = (await screen.findByText('What do you do if it sticks?')).closest('.card') as HTMLElement;
+    // nothing is preselected, and one click changes nothing
+    const ask = within(card).getByRole('button', { name: /Set the score/ }) as HTMLButtonElement;
+    expect(ask.disabled).toBe(true);
     await user.selectOptions(within(card).getByLabelText('New score'), '0.5');
-    await user.click(within(card).getByRole('button', { name: 'Set the score' }));
+    await user.click(within(card).getByRole('button', { name: /Set the score/ }));
+    expect(api.callsTo('overrideQuizAnswer')).toEqual([]);
+    await user.click(within(card).getByRole('button', { name: 'Yes, change the score' }));
     await waitFor(() => expect(api.callsTo('overrideQuizAnswer')[0]).toMatchObject({ path: { answer_id: ID(82) }, body: { score: 0.5 } }));
+  });
+
+  it('a state this screen does not know is treated as still running: no answer key, no scores', async () => {
+    const odd = attempt({ status: 'under_review' as never, questions: [{ ...MCQ, chosen_option: 1, final_score: 0, decided_by: 'code', correct_option: 0 }] });
+    const api = new FakeApi({ getReadinessAttempt: () => odd });
+    renderScreen(<AttemptScreen />, { api, session: as('getReadinessAttempt', 'overrideQuizAnswer', 'getReadinessReport'), ...at });
+    expect(await screen.findByText('This test is still running')).toBeTruthy();
+    expect(screen.queryByText('Right answer')).toBeNull();
+    expect(screen.queryByText('Score')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Set the score/ })).toBeNull();
+  });
+
+  it('a typed answer that is not saved blocks handing in; leaving the field saves it', async () => {
+    const user = userEvent.setup();
+    const running = attempt({ questions: [{ ...OPEN }] });
+    const api = new FakeApi({ getReadinessAttempt: () => running, saveAttemptAnswer: () => ({ position: OPEN.position, saved: true }) as never });
+    renderScreen(<AttemptScreen />, { api, session: as('getReadinessAttempt', 'saveAttemptAnswer', 'submitReadinessAttempt'), ...at });
+    const box = await screen.findByLabelText(OPEN.stem);
+    await user.type(box, 'Stop the boiler.');
+    expect(screen.getByText('A typed answer is not saved yet')).toBeTruthy();
+    expect((screen.getByRole('button', { name: /Hand in the test/ }) as HTMLButtonElement).disabled).toBe(true);
+    await user.tab();                                                                // leaving the field saves
+    await waitFor(() => expect(api.callsTo('saveAttemptAnswer')[0]?.body).toEqual({ position: OPEN.position, answer_text: 'Stop the boiler.' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: /Hand in the test/ }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.getByText('Saved.')).toBeTruthy();
+    await user.type(box, ' Then call maintenance.');
+    expect(screen.queryByText('Saved.')).toBeNull();                                 // "Saved." only while the text is the saved text
   });
 
   it('the report repeats the service’s statement word for word and names the gaps in the material', async () => {

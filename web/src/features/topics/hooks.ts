@@ -1,5 +1,5 @@
 // Topics, job roles and gaps: reading and changing them, without any markup.
-import { useApiList, useApiMutation, useApiQuery } from '../../api/context.tsx';
+import { useActivePeople, useApiList, useApiMutation, useApiQuery } from '../../api/context.tsx';
 import type { KGapReport } from '../../api/generated.ts';
 import type { BadgeTone } from '../../ui/index.tsx';
 
@@ -17,7 +17,7 @@ export const useReadyDocuments = ({ enabled }: { enabled: boolean }) => useApiLi
 export const useGapReport = (jobRole: string) => useApiQuery('getGapReport', { query: { job_role: jobRole } }, { enabled: jobRole !== '' });
 export const useSetRoleTopics = () => useApiMutation('setRoleTopics', ['getGapReport']);
 export const useSetRolePeople = () => useApiMutation('setRolePeople', ['getGapReport']);
-export const useRolePeopleChoices = ({ enabled }: { enabled: boolean }) => useApiList('listPeople', { query: { status: 'active', limit: 100 } }, { enabled });
+export const useRolePeopleChoices = useActivePeople;
 
 type GapLabel = KGapReport['topics'][number]['label'];
 export const GAP_TEXT: Readonly<Record<GapLabel, string>> = {

@@ -281,6 +281,26 @@ describe('uploads', () => {
   });
 });
 
+describe('the company-wide consent list', () => {
+  it('shows a card with an "own" grant only its own consents; the owner sees everyone\'s', async () => {
+    const mine = await learner.client.post('/v1/consents', { scope: 'own_words', purpose: 'Synthetic test', policy_version: 't1' });
+    const theirs = await reviewer.client.post('/v1/consents', { scope: 'named_expert', purpose: 'Synthetic test', policy_version: 't1' });
+    expect([mine.status, theirs.status]).toEqual([201, 201]);
+    const ids = async (who: TestMember['client'], query = ''): Promise<string[]> => {
+      const res = await who.get(`/v1/consents?limit=50${query}`);
+      expect(res.status).toBe(200);
+      return (res.body.items as Array<{ id: string }>).map((c) => c.id);
+    };
+    const seenByLearner = await ids(learner.client);
+    expect(seenByLearner).toContain(mine.body.id);
+    expect(seenByLearner).not.toContain(theirs.body.id);
+    // asking for another person by id gives nothing either
+    expect(await ids(learner.client, `&person_id=${reviewer.personId}`)).toEqual([]);
+    const seenByOwner = await ids(tenant.owner);
+    expect(seenByOwner).toEqual(expect.arrayContaining([mine.body.id, theirs.body.id]));
+  });
+});
+
 describe('consent withdrawal', () => {
   it('hides the material in the request\'s own transaction and erases it in the same request', async () => {
     const given = await expert.client.post('/v1/consents', { scope: 'documents', purpose: 'Synthetic test', policy_version: 't1' });

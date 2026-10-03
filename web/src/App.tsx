@@ -3,6 +3,7 @@
 import { NavLink, Route, Routes } from 'react-router';
 import { EnrollScreen } from './features/auth/EnrollScreen.tsx';
 import { SignInScreen } from './features/auth/SignInScreen.tsx';
+import { mayOpen } from './navigation/routes.ts';
 import { SCREENS } from './screens.tsx';
 import { useSession } from './session/session.tsx';
 import { Banner, Button, Loading, Page } from './ui/index.tsx';
@@ -29,7 +30,7 @@ export function App() {
 function SignedIn() {
   const { state, can, signOut } = useSession();
   if (state.status !== 'signed_in') return null;
-  const allowed = SCREENS.filter((s) => s.requiredOperation === undefined || can(s.requiredOperation));
+  const allowed = SCREENS.filter((s) => mayOpen(s, can));
   const manage = allowed.filter((s) => s.label !== undefined && s.menu === 'manage');
   return (
     <div className="shell">

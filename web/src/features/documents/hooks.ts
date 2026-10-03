@@ -1,7 +1,7 @@
 // Documents: reading and changing them, without any markup.
 import { useState } from 'react';
 import { ApiError } from '../../api/client.ts';
-import { useApiList, useApiMutation, useApiQuery, useRefresh } from '../../api/context.tsx';
+import { useActivePeople, useApiList, useApiMutation, useApiQuery, useRefresh } from '../../api/context.tsx';
 import type { KUploadResult } from '../../api/generated.ts';
 import type { BadgeTone } from '../../ui/index.tsx';
 
@@ -21,7 +21,7 @@ export const useDocument = (sourceId: string) => useApiQuery('getSource', { path
 export const useWithdrawDocument = () => useApiMutation('withdrawSource', CHANGED);
 export const useConfirmDocument = () => useApiMutation('confirmSource', CHANGED);
 /** Active people who can be named as the contributor, a page at a time. */
-export const useContributorChoices = ({ enabled }: { enabled: boolean }) => useApiList('listPeople', { query: { status: 'active', limit: 100 } }, { enabled });
+export const useContributorChoices = useActivePeople;
 
 export const documentStatusTone = (status: string): BadgeTone =>
   status === 'ready' ? 'success' : status === 'failed' ? 'danger' : status === 'withdrawn' ? 'neutral' : 'warning';

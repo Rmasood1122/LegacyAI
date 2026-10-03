@@ -3,14 +3,13 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useSession } from '../session/session.tsx';
-import { routeOf, screenPath, type ScreenTarget } from './routes.ts';
+import { mayOpen, routeOf, screenPath, type ScreenTarget } from './routes.ts';
 
 /** Says whether the signed-in card may open a screen, and gives its address if so (null = it may not). */
 export function useScreenPath(): (target: ScreenTarget) => string | null {
   const { can } = useSession();
   return (target) => {
-    const needed = routeOf(target.screen).requiredOperation;
-    return needed === undefined || can(needed) ? screenPath(target) : null;
+    return mayOpen(routeOf(target.screen), can) ? screenPath(target) : null;
   };
 }
 

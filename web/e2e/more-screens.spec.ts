@@ -163,7 +163,6 @@ test('a learner is shown none of the management screens, and the API refuses eac
   const guarded = [
     { path: '/audit', api: '/v1/audit/events' },
     { path: '/settings', api: '/v1/tenants/current/settings' },
-    { path: '/consents', api: '/v1/consents' },
     { path: '/readiness/questions', api: '/v1/readiness/questions' },
     { path: '/gaps', api: `/v1/gaps?job_role=${encodeURIComponent(jobRole)}` },
     { path: '/operator', api: '/v1/tenants' },
@@ -173,6 +172,16 @@ test('a learner is shown none of the management screens, and the API refuses eac
     await expect(page.getByRole('heading', { name: 'This screen is not available' })).toBeVisible();
     expect((await page.request.get(g.api)).status(), `GET ${g.api}`).toBe(403);
   }
+  // Consents are different: a learner may read its OWN consent records, so the address answers 200 - but the
+  // company screen is not offered, and the API hands over nobody else's records.
+  await page.goto('/consents');
+  await expect(page.getByRole('heading', { name: 'This screen is not available' })).toBeVisible();
+  const session = await page.request.get('/v1/auth/session');
+  const me = ((await session.json()) as { person_id: string | null }).person_id;
+  const consents = await page.request.get('/v1/consents?limit=50');
+  expect(consents.status(), 'GET /v1/consents').toBe(200);
+  const owners = ((await consents.json()) as { items: Array<{ person_id: string }> }).items.map((c) => c.person_id);
+  expect(owners.filter((p) => p !== me), 'consent records of other people').toEqual([]);
   // The operator console is for the platform operator only: even the company's owner has no way to it.
   await page.getByRole('button', { name: 'Sign out' }).click();
   await signIn(page, 'owner');

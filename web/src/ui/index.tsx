@@ -1,6 +1,6 @@
 // The small design system: presentational pieces only. No data access here (enforced by lint).
 // Every control has a visible label and a visible keyboard focus (styles/base.css).
-import { Fragment, useId, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
+import { Fragment, useEffect, useId, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 
 export function Page({ title, intro, actions, children }: { title: string; intro?: ReactNode; actions?: ReactNode; children: ReactNode }) {
   return (
@@ -186,23 +186,39 @@ export function Facts({ items }: { items: ReadonlyArray<readonly [label: string,
 
 /**
  * A button for something that cannot be undone or that costs money: the first click only asks,
- * the second (on a differently worded button) does it.
+ * the second (on a differently worded button, in a different place) does it.
+ * The question is withdrawn whenever the button becomes disabled or busy, or `resetKey` changes -
+ * pass the inputs the action depends on as `resetKey`, so that changing them after the first click
+ * means asking again.
  */
-export function ConfirmButton({ label, confirmLabel, onConfirm, busy = false, disabled = false, variant = 'danger' }: {
-  label: string; confirmLabel: string; onConfirm: () => void; busy?: boolean; disabled?: boolean; variant?: 'danger' | 'primary';
+export function ConfirmButton({ label, confirmLabel, onConfirm, busy = false, disabled = false, variant = 'danger', resetKey }: {
+  label: string; confirmLabel: string; onConfirm: () => void; busy?: boolean; disabled?: boolean; variant?: 'danger' | 'primary'; resetKey?: string | number | boolean | null;
 }) {
   const [asking, setAsking] = useState(false);
-  if (!asking) return <Button variant={variant === 'danger' ? 'danger' : 'secondary'} busy={busy} disabled={disabled} onClick={() => setAsking(true)}>{label}…</Button>;
+  useEffect(() => setAsking(false), [resetKey, disabled, busy]);
+  const armed = asking && !disabled && !busy;
+  if (!armed) return <Button variant={variant === 'danger' ? 'danger' : 'secondary'} busy={busy} disabled={disabled} onClick={() => setAsking(true)}>{label}…</Button>;
   const confirm = (): void => {
     setAsking(false);
     onConfirm();
   };
+  // Cancel comes first, so a double click on the first button lands on Cancel, not on the action.
   return (
     <span className="row">
-      <Button variant={variant} onClick={confirm}>{confirmLabel}</Button>
       <Button onClick={() => setAsking(false)}>Cancel</Button>
+      <Button variant={variant} onClick={confirm}>{confirmLabel}</Button>
     </span>
   );
+}
+
+/** What `OneTimeSecrets` shows. `alreadyShown` = the API said the secrets were handed out before and are not repeated. */
+export interface ShownSecrets {
+  title: string;
+  cardNumber?: string;
+  sc?: string;
+  enrollmentToken?: string;
+  tokenExpiresAt?: string;
+  alreadyShown?: boolean;
 }
 
 /**
@@ -210,21 +226,24 @@ export function ConfirmButton({ label, confirmLabel, onConfirm, busy = false, di
  * the person says they wrote them down; the caller then forgets them (they live in screen state only,
  * so leaving the screen removes them too).
  */
-export function OneTimeSecrets({ title, cardNumber, sc, enrollmentToken, tokenExpiresAt, onDone }: {
-  title: string; cardNumber?: string; sc?: string; enrollmentToken?: string; tokenExpiresAt?: string; onDone: () => void;
-}) {
+export function OneTimeSecrets({ title, cardNumber, sc, enrollmentToken, tokenExpiresAt, alreadyShown = false, onDone }: ShownSecrets & { onDone: () => void }) {
+  const none = sc === undefined && enrollmentToken === undefined;
   return (
     <div className="secrets" role="alert">
       <h3>{title}</h3>
-      <p><strong>These are shown only once.</strong> Write them down or hand them over now; they cannot be shown again. Leaving this screen removes them.</p>
+      {!none && <p><strong>These are shown only once.</strong> Write them down or hand them over now; they cannot be shown again. Leaving this screen removes them.</p>}
       <dl className="facts">
         {cardNumber !== undefined && <><dt>Card number</dt><dd data-testid="secret-card-number">{cardNumber}</dd></>}
         {sc !== undefined && <><dt>3-digit code</dt><dd data-testid="secret-sc">{sc}</dd></>}
         {enrollmentToken !== undefined && <><dt>Set-up token</dt><dd data-testid="secret-token">{enrollmentToken}</dd></>}
         {tokenExpiresAt !== undefined && <><dt>Token valid until</dt><dd>{formatDate(tokenExpiresAt)}</dd></>}
       </dl>
-      {sc === undefined && enrollmentToken === undefined && <p>No new secret was issued; the existing ones stay valid.</p>}
-      <Button variant="primary" onClick={onDone}>I have written these down</Button>
+      {alreadyShown && (
+        <p><strong>This request was already carried out, and its secrets were shown then.</strong> They cannot be shown a second time.
+          If nobody wrote them down, issue a new set-up token or replace the card.</p>
+      )}
+      {none && !alreadyShown && <p>No new secret was issued; the existing ones stay valid.</p>}
+      <Button variant="primary" onClick={onDone}>{none ? 'Close' : 'I have written these down'}</Button>
     </div>
   );
 }

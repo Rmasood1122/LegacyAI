@@ -1,9 +1,9 @@
 // Company settings: the company and its use, the card and sign-in rules, the knowledge rules, the
 // AI budget, and the words redaction must leave alone.
 import { useState, type FormEvent } from 'react';
-import type { KSettings, TenantSettings } from '../../api/generated.ts';
+import type { KSettings, OperationTypes, TenantSettings, UpdateTenantSettingsRequest } from '../../api/generated.ts';
 import { useSession } from '../../session/session.tsx';
-import { Badge, Banner, Button, Card, CheckboxField, ConfirmButton, ErrorNote, Facts, formatDate, humanize, Loading, Page, SelectField, TextField } from '../../ui/index.tsx';
+import { Badge, Banner, Button, Card, CheckboxField, ConfirmButton, ErrorNote, Facts, formatDate, humanize, Loading, Page, PartialListNote, SelectField, TextField } from '../../ui/index.tsx';
 import {
   changedOnly, useAddAllowTerm, useAiBudget, useAllowlist, useDeleteAllowTerm, useKnowledgeSettings, useTenant, useTenantSettings, useTenantUsage, useUpdateKnowledgeSettings,
   useUpdateTenantSettings, usd,
@@ -68,14 +68,27 @@ export function SettingsScreen() {
   );
 }
 
+/** One number. What is typed is kept as text: a cleared or non-numeric field shows an error and changes nothing (it never becomes 0). */
+function NumberInput({ label, hint, value, onChange, disabled }: { label: string; hint?: string; value: number; onChange: (value: number) => void; disabled: boolean }) {
+  const [text, setText] = useState(String(value));
+  const valid = text.trim() !== '' && Number.isFinite(Number(text));
+  return (
+    <TextField label={label} hint={hint} type="number" min={0} disabled={disabled} value={text}
+      error={valid ? null : `Enter a number. The saved value (${value}) is kept until you do.`}
+      onChange={(e) => {
+        setText(e.target.value);
+        if (e.target.value.trim() !== '' && Number.isFinite(Number(e.target.value))) onChange(Number(e.target.value));
+      }} />
+  );
+}
+
 function NumberInputs<T extends object>({ fields, values, onChange, disabled }: {
   fields: ReadonlyArray<NumberField<T>>; values: T; onChange: (key: NumberKeys<T>, value: number) => void; disabled: boolean;
 }) {
   return (
     <>
       {fields.map((f) => (
-        <TextField key={String(f.key)} label={f.label} hint={f.hint} type="number" min={0} disabled={disabled}
-          value={String(values[f.key])} onChange={(e) => onChange(f.key, Number(e.target.value))} />
+        <NumberInput key={String(f.key)} label={f.label} hint={f.hint} disabled={disabled} value={Number(values[f.key])} onChange={(n) => onChange(f.key, n)} />
       ))}
     </>
   );
@@ -84,7 +97,7 @@ function NumberInputs<T extends object>({ fields, values, onChange, disabled }: 
 function CardRules({ settings, mayChange }: { settings: TenantSettings; mayChange: boolean }) {
   const update = useUpdateTenantSettings();
   const [draft, setDraft] = useState(settings);
-  const changes = changedOnly(settings, draft);
+  const changes = changedOnly<UpdateTenantSettingsRequest, TenantSettings>(settings, draft);
   const dirty = Object.keys(changes).length > 0;
   const onSubmit = (e: FormEvent): void => {
     e.preventDefault();
@@ -127,7 +140,7 @@ function KnowledgeRules() {
 function KnowledgeRulesForm({ settings, mayChange }: { settings: KSettings; mayChange: boolean }) {
   const update = useUpdateKnowledgeSettings();
   const [draft, setDraft] = useState(settings);
-  const changes = changedOnly(settings, draft);
+  const changes = changedOnly<OperationTypes['updateKnowledgeSettings']['body'], KSettings>(settings, draft);
   const dirty = Object.keys(changes).length > 0;
   const onSubmit = (e: FormEvent): void => {
     e.preventDefault();
@@ -210,6 +223,7 @@ function Allowlist() {
           ))}
         </ul>
       ))}
+      {list.data !== undefined && list.data.next_cursor !== null && <PartialListNote shown={items.length} noun="words" />}
       {mayChange && (
         <form onSubmit={onSubmit} noValidate>
           <TextField label="Word or name to keep" maxLength={100} value={term} onChange={(e) => setTerm(e.target.value)} />

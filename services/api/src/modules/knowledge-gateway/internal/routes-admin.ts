@@ -22,6 +22,9 @@ const SETTINGS_DEFAULTS: Record<(typeof SETTINGS_FIELDS)[number], unknown> = {
 const REVIEW_DESCRIPTOR = {
   type: 'review_task', tenantExpr: 'r.tenant_id', departmentExpr: 'r.department_id', sensitivityExpr: 'r.sensitivity', ownerPersonExpr: 'r.owner_person_id',
 };
+// A consent belongs to the person who gave it. Roles that hold consent:read only for their OWN records
+// (Expert, Successor) must see only those in the company-wide list.
+const CONSENT_DESCRIPTOR = { type: 'consent', tenantExpr: 'consents.tenant_id', ownerPersonExpr: 'consents.person_id' };
 const NOT_DISMISSABLE = new Set(['verify_item', 'expert_question', 'quiz_item_approval']);
 
 interface ConsentRow {
@@ -98,12 +101,16 @@ export function adminRoutes(deps: GatewayDeps): RouteDef[] {
       operationId: 'listConsents',
       kind: 'session',
       policy: { resource: async ({ subject }) => collectionRef('consent', subject.tenant_id) },
-      handler: async ({ tx, subject, query }) => {
+      handler: async ({ tx, subject, query, ctx }) => {
         const after = decodeCursor(query.cursor);
+        // The policy allows listing to any holder of consent:read and OBLIGES the caller to filter: without this
+        // filter a card with an "own" grant could read every person's consent records (found by the Phase 3b browser tests).
+        const filter = await authorizer.filter(tx, subject, 'consent:read', CONSENT_DESCRIPTOR, ctx, 5);
         const { rows } = await tx.query<ConsentRow>(
+          // eslint-disable-next-line no-restricted-syntax -- filter.sql is built by the policy module from code constants; all values are bound
           `SELECT ${CONSENT_COLUMNS} FROM consents WHERE tenant_id = $1 AND ($2::uuid IS NULL OR person_id = $2::uuid)
-              AND ($3::uuid IS NULL OR id > $3::uuid) ORDER BY id LIMIT $4`,
-          [subject.tenant_id, query.person_id ?? null, after, query.limit + 1]);
+              AND ($3::uuid IS NULL OR id > $3::uuid) AND ${filter.sql} ORDER BY id LIMIT $4`,
+          [subject.tenant_id, query.person_id ?? null, after, query.limit + 1, ...filter.params]);
         const page = rows.slice(0, query.limit);
         const last = page[page.length - 1];
         return { body: { items: page.map(toApiConsent), next_cursor: rows.length > query.limit && last ? encodeCursor(last.id) : null } };
