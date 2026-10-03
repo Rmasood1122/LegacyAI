@@ -97,9 +97,15 @@ describe('audit_write()', () => {
   it('the Python service login exists, cannot bypass row-level security and has no access to sign-in data', async () => {
     const role = (await su.query(`SELECT rolsuper, rolbypassrls, rolcreaterole, rolcreatedb FROM pg_roles WHERE rolname = 'legacyai_ai'`)).rows[0];
     expect(role).toEqual({ rolsuper: false, rolbypassrls: false, rolcreaterole: false, rolcreatedb: false });
-    for (const table of ['cards', 'card_secrets', 'credentials', 'sessions', 'enrollment_tokens', 'card_directory', 'tenants', 'people']) {
+    for (const table of ['cards', 'card_secrets', 'credentials', 'sessions', 'enrollment_tokens', 'card_directory', 'tenants', 'card_roles', 'idempotency_keys']) {
       await expect(as(DB_URLS.ai, tenant.tenantId, (c) => c.query(`SELECT 1 FROM ${table} LIMIT 1`)), table).rejects.toMatchObject({ code: '42501' });
     }
+  });
+
+  it('from people the Python login may read ids, departments and status - never names or emails', async () => {
+    await expect(as(DB_URLS.ai, tenant.tenantId, (c) => c.query('SELECT id, department_id, status FROM people'))).resolves.toBeTruthy();
+    await expect(as(DB_URLS.ai, tenant.tenantId, (c) => c.query('SELECT display_name FROM people'))).rejects.toMatchObject({ code: '42501' });
+    await expect(as(DB_URLS.ai, tenant.tenantId, (c) => c.query('SELECT email FROM people'))).rejects.toMatchObject({ code: '42501' });
   });
 
   it('the app login still cannot change or delete audit rows', async () => {

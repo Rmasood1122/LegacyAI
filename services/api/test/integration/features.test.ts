@@ -187,7 +187,8 @@ describe('internal policy check (service-to-service)', () => {
     const own = await call({ tenant_id: tenant.tenantId, card_id: expert.card.id, action: 'knowledge:read', resource: { type: 'knowledge', owner_card_id: expert.card.id, sensitivity: 1 } });
     expect(own.json()).toEqual({ effect: 'allow', reason_code: 'ALLOW', obligations: [] });
     const others = await call({ tenant_id: tenant.tenantId, card_id: expert.card.id, action: 'knowledge:read', resource: { type: 'knowledge', owner_card_id: tenant.ownerCard.id } });
-    expect(others.json()).toMatchObject({ effect: 'deny', reason_code: 'DENY_SCOPE' });
+    // Phase 2: with the pilot reviewer grant on (the default) an Expert is a reviewer and reads internal content tenant-wide.
+    expect(others.json()).toMatchObject({ effect: 'allow' });
     const tooSensitive = await call({ tenant_id: tenant.tenantId, card_id: expert.card.id, action: 'knowledge:read', resource: { type: 'knowledge', owner_card_id: expert.card.id, sensitivity: 3 } });
     expect(tooSensitive.json()).toMatchObject({ effect: 'deny', reason_code: 'DENY_SENSITIVITY' });
     const pilot = await call({ tenant_id: tenant.tenantId, card_id: expert.card.id, action: 'knowledge:verify', resource: { type: 'knowledge' } });

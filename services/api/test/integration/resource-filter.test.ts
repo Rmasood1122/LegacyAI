@@ -166,12 +166,18 @@ describe('buildResourceFilter agrees with decide() on every row', () => {
     expect(mine((i) => i.sensitivity === 0)).toBe(20);
     // Department manager of dept 0: that department only, sensitivity <= 1 -> 5 owners x 2 levels = 10.
     expect((await viaFilter(subject([role('department_manager', depts[0])]), ctx())).size).toBe(10);
-    // Expert: own items only, sensitivity <= 1 -> 4 depts x 2 levels = 8.
-    expect((await viaFilter(subject([role('expert')]), ctx())).size).toBe(8);
+    // Phase 2: while the pilot reviewer grant is on, Admins and Experts are the reviewers and read all
+    // internal content: tenant-wide, sensitivity <= 1 -> 4 depts x 5 owners x 2 levels = 40.
+    expect((await viaFilter(subject([role('expert')]), ctx())).size).toBe(40);
+    expect((await viaFilter(subject([role('admin')]), ctx())).size).toBe(40);
+    // With the grant off: an Expert reads own items only, sensitivity <= 1 -> 4 depts x 2 levels = 8 ...
+    const pilotOff = (): ReturnType<typeof ctx> => { const c = ctx(); return { ...c, settings: { ...c.settings, pilot_reviewer_grant: false } }; };
+    expect((await viaFilter(subject([role('expert')]), pilotOff())).size).toBe(8);
+    // ... and an Admin reads no knowledge at all.
+    expect((await viaFilter(subject([role('admin')]), pilotOff())).size).toBe(0);
     // Contractor: own, sensitivity 0 -> 4.
     expect((await viaFilter(subject([role('contractor')]), ctx())).size).toBe(4);
-    // Admin and Auditor have no knowledge access at all.
-    expect((await viaFilter(subject([role('admin')]), ctx())).size).toBe(0);
+    // Auditor has no knowledge access at all.
     expect((await viaFilter(subject([role('auditor')]), ctx())).size).toBe(0);
   });
 });
