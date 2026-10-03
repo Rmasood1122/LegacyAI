@@ -91,7 +91,7 @@ export function EnrollScreen({ passkeys = browserPasskeys }: { passkeys?: Passke
           <p>Type this key into the app (choose “time-based”). It is shown only now.</p>
           <p className="code" data-testid="totp-secret">{started.totp.secret}</p>
           <form onSubmit={onCode} noValidate>
-            <TextField label="Code shown by the app" hint="6 keepDigits." inputMode="numeric" autoComplete="one-time-code" autoFocus
+            <TextField label="Code shown by the app" hint="6 digits." inputMode="numeric" autoComplete="one-time-code" autoFocus
               value={code} onChange={(e) => setCode(keepDigits(e.target.value, 6))} />
             <ErrorNote error={complete.error} />
             <Button type="submit" variant="primary" busy={complete.isPending} disabled={code.length !== 6}>Finish set-up</Button>

@@ -246,7 +246,9 @@ jobs:
         run: |
           nohup node test/e2e/server.ts > ../../e2e-server.log 2>&1 &
           for i in $(seq 1 120); do curl -fsS http://127.0.0.1:8788/health && exit 0; sleep 1; done
-          cat ../../e2e-server.log; exit 1
+          cat ../../e2e-server.log
+          echo "::error title=browser-test server did not start::$(tail -n 40 ../../e2e-server.log | cut -c1-400 | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+          exit 1
       - name: Browser tests - sign-in, set-up, documents, ask, write and verify, review queue, consent, permissions, accessibility scan
         working-directory: web
         run: EVIDENCE='passed|failed|flaky|skipped' bash ../scripts/ci-run.sh "web - browser tests" npx playwright test

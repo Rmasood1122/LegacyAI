@@ -82,7 +82,7 @@ export function SignInScreen({ passkeys = browserPasskeys }: { passkeys?: Passke
             <p><Button variant="primary" onClick={() => void withPasskey()} busy={verify.isPending} disabled={!scReady}>Use a passkey</Button></p>
           )}
           <form onSubmit={withCode} noValidate>
-            <TextField label="Code from your authenticator app" hint="6 keepDigits. Each code works once." inputMode="numeric" autoComplete="one-time-code"
+            <TextField label="Code from your authenticator app" hint="6 digits. Each code works once." inputMode="numeric" autoComplete="one-time-code"
               value={code} onChange={(e) => setCode(keepDigits(e.target.value, 6))} />
             <div className="row">
               <Button type="submit" variant={canUsePasskey ? 'secondary' : 'primary'} busy={verify.isPending} disabled={!scReady || code.length !== 6}>Sign in with the app code</Button>
