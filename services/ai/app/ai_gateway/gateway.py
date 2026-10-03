@@ -24,9 +24,16 @@ from app.ai_gateway.outputs import OUTPUT_MODELS
 from app.ai_gateway.prompts import Prompt, latest
 from app.ai_gateway.providers import ChatProvider
 from app.ai_gateway.types import (
-    Caller, DataBlock, Feature, GenerateOutcome, GenerateRequest, ProviderError, ProviderTimeout,
+    Caller,
+    DataBlock,
+    Feature,
+    GenerateOutcome,
+    GenerateRequest,
+    ProviderError,
+    ProviderTimeout,
+    RefusalReason,
 )
-from app.platform import Database, Logger
+from app.platform import Database, Logger, one
 
 PRICES_FILE = Path(__file__).resolve().parent / "prices.yaml"
 
@@ -101,7 +108,8 @@ class Gateway:
                 if ledger_id:
                     outcome.ledger_ids.append(ledger_id)
                 return outcome
-            assert ledger_id is not None and reserved_at is not None
+            if ledger_id is None or reserved_at is None:   # cannot happen: a reservation that was not refused has both
+                raise RuntimeError("reservation returned no ledger row")
             outcome.ledger_ids.append(ledger_id)
             parsed, charged, status, retry, used = self._call(req, output_model, worst)
             self._settle(caller, ledger_id, worst, charged, status, used, reserved_at)
@@ -127,7 +135,7 @@ class Gateway:
         return str(row["id"])
 
     def _reserve(self, caller: Caller, req: GenerateRequest, attempt: int, worst: int, max_in: int
-                 ) -> tuple[str | None, str | None, datetime | None]:
+                 ) -> tuple[RefusalReason | None, str | None, datetime | None]:
         now = self.clock()
         with self.db.tenant_tx(caller.tenant_id) as cur:
             if self.env_kill_switch or budget.kill_switch_on(cur):
@@ -144,7 +152,7 @@ class Gateway:
                 return "global", self._ledger_row(cur, caller, req, attempt, "refused_global", 0), None
             ledger_id = self._ledger_row(cur, caller, req, attempt, "reserved", worst)
             cur.execute("SELECT created_at FROM ai_usage_ledger WHERE id = %s", (ledger_id,))
-            created = cur.fetchone()["created_at"]
+            created = one(cur)["created_at"]
         return None, ledger_id, created
 
     def _call(self, req: GenerateRequest, output_model: type[BaseModel], worst: int

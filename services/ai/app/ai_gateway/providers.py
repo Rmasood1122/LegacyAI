@@ -88,13 +88,19 @@ class FakeProvider:
         if req.feature == "quiz_generate":
             item = next((b.text for b in blocks if b.label == "ITEM"), "")
             fact = _first_sentence(item, 200)
+            if next((b.text for b in blocks if b.label == "KIND"), "mcq") == "open":
+                return {"kind": "open", "stem": "A new colleague asks you how this is done. What do you tell them?", "options": [],
+                        "correct_option": None, "rubric": [fact, "Says when to ask for a second check."]}
             return {"kind": "mcq", "stem": "Which statement matches the verified procedure?",
                     "options": [fact, "Skip the check and continue.", "Wait for the next shift.", "Call the supplier first."],
                     "correct_option": 0, "rubric": []}
         if req.feature == "quiz_grade":
             answer = next((b.text for b in blocks if b.label == "LEARNER_ANSWER"), "").lower()
             points = [b.text for b in blocks if b.label.startswith("POINT")]
-            met = [{"point": i, "met": any(w in answer for w in p.lower().split()[:3]), "evidence": ""} for i, p in enumerate(points)]
+            met = []
+            for i, p in enumerate(points):
+                hit = next((w for w in p.lower().split()[:3] if len(w) > 3 and w in answer), "")
+                met.append({"point": i, "met": bool(hit), "evidence": hit})
             return {"points": met, "confidence": 0.9}
         if req.feature == "eval_judge":
             return {"points": [], "contradiction": False}

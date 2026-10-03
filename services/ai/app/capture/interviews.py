@@ -19,7 +19,7 @@ from pgvector import HalfVector
 from app.ai_gateway import Caller, DataBlock, Embedder, Gateway, InterviewQuestionOutput
 from app.capture.gaps import gap_report
 from app.capture.redaction import redact
-from app.platform import Database, ServiceContext, write_audit
+from app.platform import Database, ServiceContext, one, write_audit
 
 FOLLOW_UPS_PER_TOPIC = 2
 THIN_ANSWER_WORDS = 12
@@ -70,7 +70,7 @@ def invite(db: Database, ctx: ServiceContext, expert_person_id: str, job_role: s
             """INSERT INTO interviews (tenant_id, expert_person_id, job_role, max_turns, invited_by_card_id)
                VALUES (%s, %s, %s, %s, %s) RETURNING id::text AS id""",
             (ctx.tenant_id, expert_person_id, job_role, max_turns, ctx.card_id))
-        interview_id = cur.fetchone()["id"]
+        interview_id = str(one(cur)["id"])
         write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="capture:interview_invited", reason_code="INTERVIEW_INVITED",
                     resource_type="interview", resource_id=interview_id, request_id=ctx.request_id, details={"interview_id": interview_id})
     return interview_id
@@ -107,7 +107,7 @@ def accept(db: Database, ctx: ServiceContext, interview_id: str, gateway: Gatewa
             """INSERT INTO sources (tenant_id, kind, title, department_id, sensitivity, owner_person_id, consent_id, uploaded_by_card_id, status)
                VALUES (%s, 'interview', %s, %s, 1, %s, %s, %s, 'ready') RETURNING id::text AS id""",
             (ctx.tenant_id, f"Interview: {iv['job_role']}"[:200], dept, ctx.person_id, consent["id"], ctx.card_id))
-        source_id = cur.fetchone()["id"]
+        source_id = one(cur)["id"]
         cur.execute("UPDATE interviews SET status = 'active', source_id = %s, consent_id = %s WHERE tenant_id = %s AND id = %s",
                     (source_id, consent["id"], ctx.tenant_id, interview_id))
         question, kind, topic_id = _next_question(cur, ctx, iv, gateway, caller, item_spec, topic_spec, follow_up=False, last_topic=None)
@@ -128,6 +128,7 @@ def _own_answers(cur: psycopg.Cursor[Any], tenant_id: str, interview_id: str) ->
 def _next_question(cur: psycopg.Cursor[Any], ctx: ServiceContext, iv: dict[str, Any], gateway: Gateway | None, caller: Caller | None,
                    item_spec: Any, topic_spec: Any, follow_up: bool, last_topic: str | None) -> tuple[str, str, str | None]:
     """Returns (question, kind, topic_id). Ranking is code; wording is the model's (or a template)."""
+    topic_id: str | None
     if follow_up and last_topic is not None:
         topic_id = last_topic
     else:
@@ -145,7 +146,7 @@ def _next_question(cur: psycopg.Cursor[Any], ctx: ServiceContext, iv: dict[str, 
             topic_name, topic_desc = t["name"], t["description"]
     cur.execute("SELECT count(*)::int AS n FROM interview_turns WHERE tenant_id = %s AND interview_id = %s AND topic_id IS NOT DISTINCT FROM %s",
                 (ctx.tenant_id, iv["id"], topic_id))
-    asked_on_topic = int(cur.fetchone()["n"])
+    asked_on_topic = int(one(cur)["n"])
     template = TEMPLATES[asked_on_topic % len(TEMPLATES)].format(topic=topic_name)
     within_ceiling = caller is not None and iv["cost_micro_usd"] < caller.monthly_cap_micro_usd and iv["cost_micro_usd"] < _session_ceiling(cur, ctx.tenant_id)
     if gateway is None or caller is None or not within_ceiling:
@@ -177,7 +178,7 @@ def answer_turn(db: Database, ctx: ServiceContext, interview_id: str, answer_tex
             raise InterviewRefused("not_active")
         # consent is re-checked at every turn (the trigger covers the start)
         cur.execute("SELECT consent_is_valid(%s, %s, 'own_words', now()) AS ok", (ctx.tenant_id, ctx.person_id))
-        if not cur.fetchone()["ok"]:
+        if not one(cur)["ok"]:
             raise InterviewRefused("consent_missing", 422)
         cur.execute("""SELECT id::text AS id, ordinal, topic_id::text AS topic_id, question_kind FROM interview_turns
                         WHERE tenant_id = %s AND interview_id = %s AND answer_text IS NULL ORDER BY ordinal DESC LIMIT 1 FOR UPDATE""",
@@ -190,7 +191,7 @@ def answer_turn(db: Database, ctx: ServiceContext, interview_id: str, answer_tex
         cur.execute("UPDATE interview_turns SET answer_text = %s, answered_at = now() WHERE tenant_id = %s AND id = %s",
                     (text, ctx.tenant_id, turn["id"]))
         cur.execute("SELECT department_id::text AS d, sensitivity FROM sources WHERE tenant_id = %s AND id = %s", (ctx.tenant_id, iv["source_id"]))
-        src = cur.fetchone()
+        src = one(cur)
         vector = embedder.embed([text], "document")[0]
         cur.execute(
             """INSERT INTO chunks (tenant_id, kind, source_id, ordinal, text, token_estimate, embedding, embedding_model, department_id,
@@ -198,7 +199,7 @@ def answer_turn(db: Database, ctx: ServiceContext, interview_id: str, answer_tex
                VALUES (%s, 'source', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'active', %s) RETURNING id::text AS id""",
             (ctx.tenant_id, iv["source_id"], int(turn["ordinal"]), text[:2000], max(1, len(text) // 4), HalfVector(vector), embedder.model_id,
              src["d"], src["sensitivity"], ctx.person_id, len(redacted.findings), redacted.low_confidence_count > 0, turn["id"]))
-        chunk_id = cur.fetchone()["id"]
+        chunk_id = one(cur)["id"]
 
         item_id, cost = on_answer(cur, SavedAnswer(interview_id, iv["consent_id"], chunk_id, text))
         if cost:
@@ -207,15 +208,15 @@ def answer_turn(db: Database, ctx: ServiceContext, interview_id: str, answer_tex
                         (cost, ctx.tenant_id, interview_id))
         cur.execute("UPDATE interviews SET turn_count = turn_count + 1, last_turn_at = now() WHERE tenant_id = %s AND id = %s RETURNING turn_count",
                     (ctx.tenant_id, interview_id))
-        turn_count = int(cur.fetchone()["turn_count"])
+        turn_count = int(one(cur)["turn_count"])
         if turn_count >= iv["max_turns"]:
             cur.execute("UPDATE interviews SET status = 'completed', completed_at = now() WHERE tenant_id = %s AND id = %s",
                         (ctx.tenant_id, interview_id))
             return TurnResult(interview_id, "completed", None, turn_count, item_id)
         cur.execute("SELECT count(*)::int AS n FROM interview_turns WHERE tenant_id = %s AND interview_id = %s AND topic_id IS NOT DISTINCT FROM %s "
                     "AND question_kind = 'follow_up'", (ctx.tenant_id, interview_id, turn["topic_id"]))
-        follow_ups = int(cur.fetchone()["n"])
-        thin = len(text.split()) < THIN_ANSWER_WORDS or not any(ch.isdigit() for ch in text) and len(text.split()) < 2 * THIN_ANSWER_WORDS
+        follow_ups = int(one(cur)["n"])
+        thin = len(text.split()) < THIN_ANSWER_WORDS or (not any(ch.isdigit() for ch in text) and len(text.split()) < 2 * THIN_ANSWER_WORDS)
         follow_up = thin and follow_ups < FOLLOW_UPS_PER_TOPIC and turn["topic_id"] is not None
         question, kind, topic_id = _next_question(cur, ctx, iv, gateway, caller, item_spec, topic_spec, follow_up, turn["topic_id"])
         if follow_up and kind == "template":

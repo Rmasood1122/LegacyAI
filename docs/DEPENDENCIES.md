@@ -145,7 +145,7 @@ Actions are pinned to full commit hashes, not tags, so a moved tag cannot change
 6. Node 24 / Python 3.12 end-of-life dates are from third-party trackers.
 7. Docker base images are pinned by tag, not by digest.
 
-## 9. Phase 2 candidates (design stage — nothing below is installed yet)
+## 9. Phase 2 (9.1 pins are installed in `services/ai`; the rest was read for the design)
 
 Checked on **2026-10-03**. First check: a research pass that fetched each page listed. Second check (the "re-check once"): versions, dates and licences of every Python and npm package re-read directly from the PyPI / npm JSON APIs, and the pgvector tags from GitHub — all matched. **Prices, model facts and cloud facts were read once only**, from the providers' own pages; they are re-read at Gate 2 before any key is created. OpenAI and Gemini developer pages were read through a page summariser rather than as raw text. Anything marked **UNVERIFIED** was not confirmed.
 
@@ -158,10 +158,13 @@ Maturity rule (D2): a new major version must be at least 60 days old. 60 days be
 | PDF text extraction | pypdf 6.19.0 | 2026-09-16 (6.x since 2025-08-11) | BSD-3-Clause | https://pypi.org/pypi/pypdf/json · limits: https://raw.githubusercontent.com/py-pdf/pypdf/main/pypdf/_configuration.py · advisories: https://api.osv.dev (PyPI/pypdf) | ~50 denial-of-service advisories in 12 months, all fixed by 6.19.0. Runs in a child process with a timeout. |
 | File type sniffing | puremagic 2.2.0 | 2026-04-08 (2.x since 2026-02-20) | MIT | https://pypi.org/pypi/puremagic/json | no system library; needs Python ≥ 3.12 |
 | PII detection | presidio-analyzer 2.2.364 | 2026-07-22 | MIT | https://pypi.org/pypi/presidio-analyzer/json · entities: https://raw.githubusercontent.com/microsoft/presidio/main/docs/supported_entities.md | no street-address recognizer; memory footprint **UNVERIFIED** |
-| PII replacement | presidio-anonymizer 2.2.364 | 2026-07-22 | MIT | https://pypi.org/pypi/presidio-anonymizer/json | requires cryptography >=48.0.1,<49 |
+| PII replacement | presidio-anonymizer 2.2.364 — **NOT installed** | 2026-07-22 | MIT | https://pypi.org/pypi/presidio-anonymizer/json | deviation from the design: replacement with numbered placeholders is a few lines of our own code over the analyzer's findings, so this package (and its cryptography pin) is not needed |
 | Language engine | spacy 3.8.16 | 2026-08-24 | MIT | https://pypi.org/pypi/spacy/json | |
 | Language model | en_core_web_sm 3.8.0 (12.8 MB) | — | MIT | https://github.com/explosion/spacy-models/releases (compatibility.json) | the default large model is 400.7 MB — not used |
 | PostgreSQL driver | psycopg 3.3.6 | 2026-09-18 | **LGPL-3.0-only** | https://pypi.org/pypi/psycopg/json | used unmodified |
+| Driver binary build | psycopg-binary 3.3.6 | 2026-09-18 | LGPL-3.0-only | https://pypi.org/pypi/psycopg-binary/3.3.6/json (read 2026-10-03) | same release as psycopg; pinned on its own line so the check can see it |
+| YAML reader (price table, prompt headers) | PyYAML 6.0.3 | 2025-09-25 | MIT | https://pypi.org/pypi/PyYAML/6.0.3/json (read 2026-10-03) | only `yaml.safe_load` is used |
+| Type hints for PyYAML (dev only) | types-PyYAML 6.0.12.20260724 | 2026-07-24 | Apache-2.0 | https://pypi.org/pypi/types-PyYAML/json (read 2026-10-03) | the newest release (2026-09-06) is younger than 60 days, so the older one is pinned |
 | Connection pool | psycopg-pool 3.3.3 | 2026-09-22 | LGPL-3.0-only | https://pypi.org/pypi/psycopg-pool/json | |
 | Vector type support | pgvector (Python) 0.5.0 | 2026-07-06 | MIT | https://pypi.org/pypi/pgvector/json | |
 | Service tokens | PyJWT 2.15.1 | 2026-09-28 | MIT | https://pypi.org/pypi/PyJWT/json · https://api.osv.dev/v1/vulns/GHSA-gvp8-978c-rx2q | advisory batch 2026-09-29/30 fixed in 2.14.0–2.15.0; none listed against 2.15.1 |

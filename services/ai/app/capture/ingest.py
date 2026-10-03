@@ -23,10 +23,10 @@ from pgvector import HalfVector
 
 from app.ai_gateway import Embedder
 from app.capture.chunking import chunk_pages
-from app.capture.filters import condition
 from app.capture.files import UploadRejected, extract, sniff
-from app.capture.redaction import redact
-from app.platform import Database, ServiceContext, write_audit
+from app.capture.filters import condition
+from app.capture.redaction import Finding, redact
+from app.platform import Database, ServiceContext, one, write_audit
 
 DEFAULT_CHUNK_QUOTA = 5000
 SYSTEM_CHUNK_CEILING = 50_000
@@ -66,13 +66,13 @@ def allowlist(cur: psycopg.Cursor[Any]) -> frozenset[str]:
 def check_room(cur: psycopg.Cursor[Any], tenant_id: str, adding: int, storage_budget_bytes: int, limits: Limits) -> None:
     cur.execute("SELECT COALESCE(sum(chunk_count), 0)::int AS total, "
                 "COALESCE(sum(chunk_count) FILTER (WHERE tenant_id = %s), 0)::int AS mine FROM tenant_usage_counters", (tenant_id,))
-    row = cur.fetchone()
+    row = one(cur)
     if row["mine"] + adding > limits.chunk_quota:
         raise CaptureRefused("quota_exceeded")
     if row["total"] + adding > SYSTEM_CHUNK_CEILING:
         raise CaptureRefused("quota_exceeded")
     cur.execute("SELECT pg_database_size(current_database())::bigint AS bytes")
-    if int(cur.fetchone()["bytes"]) > STORAGE_GATE * storage_budget_bytes:
+    if int(one(cur)["bytes"]) > STORAGE_GATE * storage_budget_bytes:
         raise CaptureRefused("storage_full", status=507)
 
 
@@ -109,10 +109,10 @@ def create_source(db: Database, ctx: ServiceContext, *, title: str, department_i
                RETURNING id::text AS id, status, title""",
             (ctx.tenant_id, safe_title, department_id, sensitivity, contributor_person_id, consent_id,
              ctx.card_id if company_document else None, ctx.card_id, status))
-        row = cur.fetchone()
+        row = one(cur)
         write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="capture:source_created", reason_code="SOURCE_CREATED",
                     resource_type="source", resource_id=row["id"], request_id=ctx.request_id, details={"source_id": row["id"]})
-    return dict(row)
+    return row
 
 
 def confirm_source(db: Database, ctx: ServiceContext, source_id: str) -> dict[str, Any]:
@@ -169,8 +169,8 @@ def process_upload(db: Database, ctx: ServiceContext, embedder: Embedder, source
         mime = sniff(data, declared_mime)
         doc = extract(data, mime, limits.max_pdf_pages)
         numbering: dict[str, dict[str, int]] = {}
-        redacted_pages = []
-        findings = []
+        redacted_pages: list[tuple[int, str]] = []
+        findings: list[Finding] = []
         for page, text in doc.pages:
             r = redact(text, terms, numbering)
             redacted_pages.append((page, r.text))
@@ -196,7 +196,7 @@ def process_upload(db: Database, ctx: ServiceContext, embedder: Embedder, source
                     WHERE tenant_id = %s AND id = %s
                     RETURNING department_id::text AS department_id, sensitivity, owner_person_id::text AS owner_person_id""",
                 (mime, len(data), doc.page_count, len(doc.text), digest, ctx.tenant_id, source_id))
-            labels = cur.fetchone()
+            labels = one(cur)
             low = sum(1 for f in findings if f.low_confidence)
             for c in chunks:
                 count = sum(1 for f in findings if f.placeholder and f.placeholder in c.text)
@@ -246,25 +246,25 @@ def continue_embedding(db: Database, tenant_id: str, card_id: str | None, source
     with db.tenant_tx(tenant_id) as cur:
         cur.execute("SELECT count(*) FILTER (WHERE embedding IS NULL)::int AS missing, count(*)::int AS total FROM chunks "
                     "WHERE tenant_id = %s AND source_id = %s AND status = 'pending'", (tenant_id, source_id))
-        counts = cur.fetchone()
+        counts = one(cur)
         if counts["missing"] > 0:
             cur.execute(
                 """INSERT INTO jobs (tenant_id, kind, subject_id, locked_until) VALUES (%s, 'embed', %s, NULL)
                    ON CONFLICT DO NOTHING""", (tenant_id, source_id))
             return {"status": "processing", "pending_chunks": counts["missing"]}
         cur.execute("SELECT status FROM sources WHERE tenant_id = %s AND id = %s FOR UPDATE", (tenant_id, source_id))
-        if cur.fetchone()["status"] != "processing":
+        if one(cur)["status"] != "processing":
             return {"status": "failed", "failure_code": "not_processing"}
         cur.execute("UPDATE chunks SET status = 'active' WHERE tenant_id = %s AND source_id = %s AND status = 'pending'", (tenant_id, source_id))
         cur.execute(
             """UPDATE sources SET status = 'ready', ready_at = now(),
                       chunk_count = (SELECT count(*) FROM chunks WHERE tenant_id = %s AND source_id = %s AND status = 'active')
                 WHERE tenant_id = %s AND id = %s RETURNING chunk_count""", (tenant_id, source_id, tenant_id, source_id))
-        total = int(cur.fetchone()["chunk_count"])
+        total = int(one(cur)["chunk_count"])
         cur.execute("UPDATE jobs SET status = 'done', updated_at = now() WHERE tenant_id = %s AND kind = 'embed' AND subject_id = %s "
                     "AND status IN ('queued', 'running')", (tenant_id, source_id))
         cur.execute("SELECT count(*)::int AS n FROM redaction_findings WHERE tenant_id = %s AND source_id = %s", (tenant_id, source_id))
-        redactions = int(cur.fetchone()["n"])
+        redactions = int(one(cur)["n"])
         write_audit(cur, tenant_id=tenant_id, card_id=card_id, action="capture:document_ready", reason_code="SOURCE_READY",
                     resource_type="source", resource_id=source_id, request_id=request_id,
                     details={"source_id": source_id, "chunk_count": total, "redactions": redactions})

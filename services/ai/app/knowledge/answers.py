@@ -15,9 +15,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.ai_gateway import AnswerOutput, Caller, DataBlock, Embedder, Gateway
-from app.capture import load_approved, redact, retrieve
-from app.capture.filters import condition
-from app.platform import Database, ServiceContext, write_audit
+from app.capture import condition, load_approved, redact, retrieve
+from app.platform import Database, ServiceContext, one, write_audit
 
 PROMPT_SOURCES = 6
 HIGH_SIMILARITY_MARGIN = 0.15
@@ -173,7 +172,8 @@ def answer(db: Database, ctx: ServiceContext, gateway: Gateway, embedder: Embedd
         return _finish(db, ctx, question, expert_person_id, _search_only(result, top, named, reason), started)
 
     parsed = outcome.parsed
-    assert isinstance(parsed, AnswerOutput)
+    if not isinstance(parsed, AnswerOutput):   # the gateway validated against the answer prompt's model; anything else is a bug
+        raise RuntimeError("answer prompt returned another output type")
     valid: list[Citation] = []
     for claim in parsed.claims:
         row = labels.get(claim.source)
@@ -230,7 +230,7 @@ def _finish(db: Database, ctx: ServiceContext, question_redacted: str, expert_pe
             (ctx.tenant_id, ctx.card_id, question_redacted[:500] or "-", expert_person_id, result.outcome, result.reason, result.confidence,
              result.candidates, result.approved, result.claims_valid, result.claims_rejected, result.fabricated, result.ledger_id,
              int((time.monotonic() - started) * 1000)))
-        log_id = cur.fetchone()["id"]
+        log_id = one(cur)["id"]
         for c in result.citations:
             if result.outcome != "answered":
                 break

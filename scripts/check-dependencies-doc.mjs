@@ -24,7 +24,9 @@ for (const file of ['requirements.txt', 'requirements-dev.txt']) {
   for (const line of readFileSync(path.join(root, 'services', 'ai', file), 'utf8').split('\n')) {
     const t = line.trim();
     if (t === '' || t.startsWith('#') || t.startsWith('-r ')) continue;
-    const m = /^([A-Za-z0-9_.-]+)==([0-9][^\s#]*)/.exec(t);
+    // A direct wheel link counts as pinned when the URL names one exact version of that package.
+    const m = /^([A-Za-z0-9_.-]+)==([0-9][^\s#]*)/.exec(t)
+      ?? /^([A-Za-z0-9_.-]+) @ https:\/\/\S+\/\1-([0-9][0-9.]*)-py3-none-any\.whl$/.exec(t);
     if (!m) {
       missing.push(`${file}: "${t}" is not pinned with ==`);
       continue;

@@ -20,6 +20,18 @@ class UnsafeDatabaseRole(Exception):
     pass
 
 
+class MissingRow(Exception):
+    """A statement that always returns a row returned none."""
+
+
+def one(cur: Any) -> dict[str, Any]:
+    """The next row of a statement that must return one (INSERT ... RETURNING, an aggregate)."""
+    row = cur.fetchone()
+    if row is None:
+        raise MissingRow("expected a row")
+    return dict(row)
+
+
 def _configure(conn: psycopg.Connection[Any]) -> None:
     register_vector(conn)
 
@@ -39,20 +51,16 @@ class Database:
     def tenant_tx(self, tenant_id: str) -> Iterator[psycopg.Cursor[dict[str, Any]]]:
         """One transaction for one company. Commits on success, rolls back on any exception."""
         str(uuid.UUID(tenant_id))  # refuses anything that is not a UUID
-        with self._pool.connection() as conn:
-            with conn.transaction():
-                with conn.cursor() as cur:
-                    cur.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id,))
-                    cur.execute("SELECT set_config('statement_timeout', '15000', true)")
-                    yield cur
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute("SELECT set_config('app.tenant_id', %s, true)", (tenant_id,))
+            cur.execute("SELECT set_config('statement_timeout', '15000', true)")
+            yield cur
 
     @contextmanager
     def global_cursor(self) -> Iterator[psycopg.Cursor[dict[str, Any]]]:
         """For GLOBAL tables only (no company is set; row-level security returns nothing of a company)."""
-        with self._pool.connection() as conn:
-            with conn.transaction():
-                with conn.cursor() as cur:
-                    yield cur
+        with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            yield cur
 
     def assert_safe_role(self) -> None:
         with self.global_cursor() as cur:

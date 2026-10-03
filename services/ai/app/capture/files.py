@@ -103,7 +103,7 @@ def _parse_pdf_child(data: bytes, max_pages: int, conn: object) -> None:
         conn.send(("error", "too_complex"))  # type: ignore[attr-defined]
     except (PdfReadError, ValueError, KeyError, TypeError, RecursionError, OSError):
         conn.send(("error", "unreadable_pdf"))  # type: ignore[attr-defined]
-    except Exception:  # noqa: BLE001 - any other parser failure is a refusal, never a crash
+    except Exception:
         conn.send(("error", "unreadable_pdf"))  # type: ignore[attr-defined]
 
 

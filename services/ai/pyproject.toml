@@ -1,0 +1,47 @@
+# Tool settings only (the service is not packaged). Pins live in requirements*.txt.
+
+[tool.ruff]
+target-version = "py312"
+line-length = 160
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "TID", "SIM", "RUF"]
+ignore = [
+  "S608",   # SQL built from fixed descriptors only; every value is a bound parameter (app/capture/filters.py)
+  "S311",   # random is used for option shuffling, not for anything secret
+  "RUF001", "RUF002", "RUF003",
+  "SIM108",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S108"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# Only the AI gateway may talk to a model provider or load an embedding model (docs/phase2/04).
+"anthropic".msg = "provider SDKs are used only inside app/ai_gateway"
+"openai".msg = "provider SDKs are used only inside app/ai_gateway"
+"requests".msg = "no outbound HTTP from this service except through app/ai_gateway"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+exclude = ["^\\.venv/"]
+
+[[tool.mypy.overrides]]
+module = ["presidio_analyzer.*", "spacy.*", "fastembed.*", "puremagic.*", "pgvector.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q -ra"
+markers = [
+  "db: needs the test PostgreSQL (DATABASE_URL_AI); skipped when it is not set",
+  "models: loads the real redaction or embedding models (slow)",
+]

@@ -19,7 +19,7 @@ from pgvector import HalfVector
 
 from app.ai_gateway import Caller, DataBlock, Embedder, Gateway, ItemExtractOutput
 from app.capture import redact
-from app.platform import Database, ServiceContext, write_audit
+from app.platform import Database, ServiceContext, one, write_audit
 
 BODY_MAX = 2000
 
@@ -61,18 +61,18 @@ def create_item(cur: psycopg.Cursor[Any], *, tenant_id: str, title: str, body: s
     if provenance:
         cur.execute("SELECT COALESCE(max(sensitivity), 0) AS s FROM chunks WHERE tenant_id = %s AND id = ANY(%s::uuid[])",
                     (tenant_id, [p[0] for p in provenance]))
-        sensitivity = max(sensitivity, int(cur.fetchone()["s"]))
+        sensitivity = max(sensitivity, int(one(cur)["s"]))
     cur.execute(
         """INSERT INTO knowledge_items (tenant_id, title, origin, ai_extracted, department_id, sensitivity, owner_person_id, consent_id,
                                         created_by_card_id)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id::text AS id""",
         (tenant_id, (title or "Untitled")[:200], origin, ai_extracted, department_id, sensitivity, owner_person_id, consent_id, created_by_card_id))
-    item_id = cur.fetchone()["id"]
+    item_id = one(cur)["id"]
     cur.execute(
         """INSERT INTO knowledge_versions (tenant_id, item_id, version_no, body, change_kind, author_card_id, author_person_id, prompt_version)
            VALUES (%s, %s, 1, %s, %s, %s, %s, %s) RETURNING id::text AS id""",
         (tenant_id, item_id, body[:BODY_MAX], change_kind, author_card_id, author_person_id, prompt_version))
-    version_id = cur.fetchone()["id"]
+    version_id = one(cur)["id"]
     cur.execute("UPDATE knowledge_items SET current_version_id = %s WHERE tenant_id = %s AND id = %s", (version_id, tenant_id, item_id))
     for chunk_id, start, end, digest in provenance:
         cur.execute(
@@ -81,7 +81,7 @@ def create_item(cur: psycopg.Cursor[Any], *, tenant_id: str, title: str, body: s
     if ai_extracted:   # AI-extracted candidates go straight to review
         _move(cur, tenant_id, item_id, "in_review", None)
         _task(cur, tenant_id, item_id, "verify_item", review_sla_days)
-    return item_id
+    return str(item_id)
 
 
 def _task(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str, kind: str, sla_days: int) -> None:
@@ -171,12 +171,12 @@ def propose_version(db: Database, ctx: ServiceContext, item_id: str, body: str) 
         if item["status"] in ("withdrawn",):
             raise ItemRefused("illegal_transition")
         cur.execute("SELECT max(version_no) AS n FROM knowledge_versions WHERE tenant_id = %s AND item_id = %s", (ctx.tenant_id, item_id))
-        version_no = int(cur.fetchone()["n"]) + 1
+        version_no = int(one(cur)["n"]) + 1
         cur.execute(
             """INSERT INTO knowledge_versions (tenant_id, item_id, version_no, body, change_kind, author_card_id, author_person_id)
                VALUES (%s, %s, %s, %s, 'corrected', %s, %s) RETURNING id::text AS id""",
             (ctx.tenant_id, item_id, version_no, redact(body).text[:BODY_MAX], ctx.card_id, ctx.person_id))
-        version_id = cur.fetchone()["id"]
+        version_id = one(cur)["id"]
         cur.execute("UPDATE knowledge_items SET current_version_id = %s WHERE tenant_id = %s AND id = %s", (version_id, ctx.tenant_id, item_id))
         if item["status"] != "in_review":
             if item["status"] == "candidate":
@@ -197,7 +197,7 @@ class _NoEmbedder:
         raise AssertionError("not used")
 
 
-_NO_EMBEDDER: Embedder = _NoEmbedder()  # type: ignore[assignment]
+_NO_EMBEDDER: Embedder = _NoEmbedder()
 
 
 def verify(db: Database, ctx: ServiceContext, item_id: str, embedder: Embedder) -> str:
@@ -271,12 +271,12 @@ def revert_verifications(db: Database, ctx: ServiceContext, verifier_card_id: st
     with db.tenant_tx(ctx.tenant_id) as cur:
         cur.execute(
             """SELECT id::text AS id FROM knowledge_items WHERE tenant_id = %s AND verified_by_card_id = %s
-                  AND verified_at BETWEEN %s AND %s AND status IN ('verified', 'corrected', 'stale') FOR UPDATE""",
+                  AND verified_at BETWEEN %s::timestamptz AND %s::timestamptz AND status IN ('verified', 'corrected', 'stale') FOR UPDATE""",
             (ctx.tenant_id, verifier_card_id, since, until))
         ids = [r["id"] for r in cur.fetchall()]
         cur.execute(
             """SELECT DISTINCT item_id::text AS item_id FROM knowledge_versions WHERE tenant_id = %s AND author_card_id = %s
-                  AND change_kind = 'corrected' AND created_at BETWEEN %s AND %s""", (ctx.tenant_id, verifier_card_id, since, until))
+                  AND change_kind = 'corrected' AND created_at BETWEEN %s::timestamptz AND %s::timestamptz""", (ctx.tenant_id, verifier_card_id, since, until))
         corrected_by_them = {r["item_id"] for r in cur.fetchall()}
         for item_id in ids + [i for i in corrected_by_them if i not in ids]:
             item = _item(cur, ctx.tenant_id, item_id)
@@ -308,7 +308,7 @@ def relabel(db: Database, ctx: ServiceContext, kind: str, target_id: str, depart
         if before is None:
             raise ItemRefused("not_found", 404)
         cur.execute("SELECT relabel(%s, %s, %s, %s::smallint) AS n", (kind, target_id, department_id, sensitivity))
-        n = int(cur.fetchone()["n"])
+        n = int(one(cur)["n"])
         write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="knowledge:label", reason_code="LABELS_CHANGED",
                     resource_type=kind, resource_id=target_id, request_id=ctx.request_id,
                     details={"sensitivity_from": int(before["sensitivity"]), "sensitivity_to": sensitivity,
@@ -362,3 +362,34 @@ def candidate_from_answer(cur: psycopg.Cursor[Any], ctx: ServiceContext, *, cons
     link_item_to_topics(cur, tenant_id=ctx.tenant_id, item_id=item_id, item_vector=embedder.embed([body], "document")[0],
                         embedding_model=embedder.model_id, threshold=embedder.relevance_threshold)
     return item_id, cost
+
+
+def erase_withdrawn_items(cur: psycopg.Cursor[Any], tenant_id: str, consent_id: str, mixed_item_ids: list[str]) -> int:
+    """Withdrawal, step 2 for knowledge. Items hidden by the withdrawal lose their text (every version)
+    and title. Items that ALSO rest on other material (mixed provenance) are not erased: they go back
+    to review, because a passage they cited is about to disappear. Returns the number of items erased."""
+    cur.execute(
+        """SELECT DISTINCT i.id::text AS id FROM knowledge_items i
+            WHERE i.tenant_id = %s AND i.status = 'withdrawn'
+              AND (i.consent_id = %s OR EXISTS (
+                     SELECT 1 FROM knowledge_versions v JOIN citations ci ON ci.tenant_id = v.tenant_id AND ci.subject_type = 'knowledge_version'
+                                                                        AND ci.subject_id = v.id
+                       JOIN chunks c ON c.tenant_id = ci.tenant_id AND c.id = ci.chunk_id
+                       JOIN sources s ON s.tenant_id = c.tenant_id AND s.id = c.source_id
+                      WHERE v.tenant_id = i.tenant_id AND v.item_id = i.id AND s.consent_id = %s))""",
+        (tenant_id, consent_id, consent_id))
+    erased = [r["id"] for r in cur.fetchall()]
+    for item_id in erased:
+        cur.execute("SELECT id FROM knowledge_versions WHERE tenant_id = %s AND item_id = %s AND erased_at IS NULL", (tenant_id, item_id))
+        for v in cur.fetchall():
+            cur.execute("SELECT erase_version(%s)", (v["id"],))
+        cur.execute("UPDATE knowledge_items SET title = '' WHERE tenant_id = %s AND id = %s", (tenant_id, item_id))
+    sla = int(_settings(cur, tenant_id)["review_sla_days"])
+    for item_id in mixed_item_ids:
+        item = _item(cur, tenant_id, item_id)
+        if item["status"] in ("verified", "corrected", "stale", "rejected"):
+            _move(cur, tenant_id, item_id, "in_review", None)
+            _search_copy(cur, tenant_id, item, "in_review", _NO_EMBEDDER)
+        if item["status"] != "withdrawn":
+            _task(cur, tenant_id, item_id, "verify_item", sla)
+    return len(erased)

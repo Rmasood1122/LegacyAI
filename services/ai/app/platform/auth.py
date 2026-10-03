@@ -36,6 +36,7 @@ class ServiceContext:
     filter: dict[str, Any] | None
     approved: tuple[str, ...]
     limits: dict[str, int]
+    subject: str | None = None      # the one record this operation is about, when it has one
 
 
 def verify_service_token(token: str, key: str, expected_action: str) -> ServiceContext:
@@ -76,7 +77,35 @@ def verify_service_token(token: str, key: str, expected_action: str) -> ServiceC
     if not isinstance(limits, dict) or not all(isinstance(v, int) for v in limits.values()):
         raise TokenError("limits must be whole numbers")
     request_id = str(claims.get("request_id", ""))[:100]
+    subject_raw = claims.get("subject")
+    try:
+        subject = str(uuid.UUID(str(subject_raw))) if subject_raw is not None else None
+    except ValueError as exc:
+        raise TokenError("subject is malformed") from exc
     return ServiceContext(
         tenant_id=tenant_id, card_id=card_id, person_id=person_id, roles=tuple(roles), card_phase=phase,
         action=expected_action, request_id=request_id, filter=flt, approved=tuple(approved), limits=dict(limits),
+        subject=subject,
     )
+
+
+class ReplayGuard:
+    """Each token is accepted once by this instance (its `jti` is remembered until it expires).
+    Tokens live at most two minutes, so the memory stays small. Several instances do not share
+    this memory: the short lifetime is the limit there."""
+
+    def __init__(self) -> None:
+        self._seen: dict[str, float] = {}
+
+    def check(self, jti: str, exp: float, now: float) -> None:
+        if len(self._seen) > 1000:
+            self._seen = {k: v for k, v in self._seen.items() if v > now}
+        if jti in self._seen:
+            raise TokenError("token already used")
+        self._seen[jti] = exp + LEEWAY_SECONDS
+
+
+def token_id(token: str) -> tuple[str, float]:
+    """jti and exp of a token whose signature was ALREADY verified."""
+    claims = jwt.decode(token, options={"verify_signature": False})
+    return str(claims["jti"]), float(claims["exp"])
