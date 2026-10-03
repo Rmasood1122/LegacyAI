@@ -47,7 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_SHA::12}"
-          docker build -t "$REGISTRY/api:$tag" services/api
+          docker build -f services/api/Dockerfile -t "$REGISTRY/api:$tag" .
           docker build -t "$REGISTRY/ai:$tag" services/ai
           docker build -f scripts/backup-tools.Dockerfile -t "$REGISTRY/backup-tools:$tag" scripts
           for image in api ai backup-tools; do docker push "$REGISTRY/$image:$tag"; done

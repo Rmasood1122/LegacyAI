@@ -115,8 +115,8 @@ left to the platform in front of the service.
   Fixing that needs a small backend addition (person id in the session), which is outside this step.
 - "Ask an expert" needs the right to list people for the same reason.
 - Lists load 50 entries at a time (people: 100) with a "Show more" button; there is no search or sorting.
-- The container image does not contain the application yet (`services/api/Dockerfile` is unchanged), and Terraform
-  is unchanged. Deployment remains a separate, later decision.
+- The API's container image now contains the built application (`services/api/Dockerfile`, built from the repository
+  root; `WEB_DIST_DIR=/app/web` is set in the image). Nothing is deployed; Terraform stays plan-only.
 - Step 3b (interview, topics and gaps, readiness test, people and cards, settings, operator console) is not started.
 - No brand design; English only.
 

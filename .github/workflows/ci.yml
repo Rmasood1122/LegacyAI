@@ -309,7 +309,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: docker build -t legacyai-api services/api
+      # From the repository root: the API image also holds the built web application (services/api/Dockerfile).
+      - run: docker build -f services/api/Dockerfile -t legacyai-api .
       - run: docker build -t legacyai-ai services/ai
       - run: docker build -f scripts/backup-tools.Dockerfile -t legacyai-backup-tools scripts
       - name: Images run as a non-root user, and the API refuses to start without configuration

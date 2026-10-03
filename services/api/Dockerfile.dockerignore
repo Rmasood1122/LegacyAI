@@ -1,0 +1,23 @@
+# What may enter the build of the API image (the build runs from the repository root).
+# Everything is left out first; only the two folders the image needs are let back in, without their
+# installed packages, build output, tests, local configuration or logs.
+*
+!services/api
+!web
+
+**/node_modules
+**/dist
+**/coverage
+**/.env
+**/.env.*
+**/*.log
+services/api/test
+services/api/.test-exports
+services/api/exports
+web/e2e
+web/e2e-artifacts
+web/playwright-report
+web/test-results
+**/*.test.ts
+**/*.test.tsx
+web/src/test

@@ -115,7 +115,7 @@ Backups are encrypted so that the backup job itself cannot read them.
    ```
    gcloud auth configure-docker us-central1-docker.pkg.dev
    R=us-central1-docker.pkg.dev/PROJECT/legacyai
-   docker build -t $R/api:v1 services/api && docker push $R/api:v1
+   docker build -f services/api/Dockerfile -t $R/api:v1 . && docker push $R/api:v1   # from the repository root: the image includes the screens
    docker build -t $R/ai:v1 services/ai && docker push $R/ai:v1
    docker build -f scripts/backup-tools.Dockerfile -t $R/backup-tools:v1 scripts && docker push $R/backup-tools:v1
    ```

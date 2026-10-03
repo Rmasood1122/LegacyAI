@@ -25,6 +25,18 @@ set -e
 echo "$out" | grep -q "Invalid configuration" || fail "the API did not report invalid configuration: $out"
 echo "container-checks: API without configuration exits $code with 'Invalid configuration' (fail closed)"
 
+# The API image holds the screens, and the API's own loader accepts them (scripts/ci-image-web-check.mjs).
+here="$(cd "$(dirname "$0")" && pwd)"
+docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' legacyai-api | grep -qx 'WEB_DIST_DIR=/app/web' || fail "the API image does not set WEB_DIST_DIR=/app/web"
+set +e
+web="$(docker run --rm -i --entrypoint node legacyai-api --input-type=module - < "$here/ci-image-web-check.mjs" 2>&1)"; code=$?
+set -e
+[ "$code" -eq 0 ] || fail "the screens in the API image cannot be loaded: $web"
+case "$web" in "ok "*) ;; *) fail "unexpected answer from the image check: $web" ;; esac
+leftovers="$(docker run --rm --entrypoint sh legacyai-api -c 'find /app/web /app/dist -type f -name "*.tsx"; find /app/web -type f -name "*.map"; find /app/web -type f -name "*.ts"; ls -d /app/test /app/web/e2e /app/web/src 2>/dev/null; true')"
+[ -z "$leftovers" ] || fail "the API image contains files that should not be shipped: $leftovers"
+echo "container-checks: API image holds the screens (${web#ok } files); the page and a deep link are served, /v1 is not shadowed; no web sources, source maps or tests inside"
+
 # The AI stub answers /health and nothing else.
 cid="$(docker run -d --rm -p 127.0.0.1:18080:8080 legacyai-ai)"
 trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
