@@ -80,7 +80,7 @@ tables="$(in_restored --command "SELECT count(*) FROM pg_tables WHERE schemaname
 unprotected="$(in_restored --command "
   SELECT count(*) FROM pg_class c
    WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r'
-     AND c.relname NOT IN ('auth_transactions', 'card_directory', 'login_attempts')
+     AND c.relname NOT IN ('auth_transactions', 'card_directory', 'login_attempts', 'tenant_usage_counters')  -- global by design
      AND (c.relname = 'tenants' OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname = 'tenant_id' AND NOT a.attisdropped))
      AND NOT (c.relrowsecurity AND c.relforcerowsecurity)")"
 [ "$unprotected" = "0" ] || fail "$unprotected tenant tables came back without forced row-level security"

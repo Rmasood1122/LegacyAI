@@ -1,3 +1,19 @@
-# Pinned. Versions verified against PyPI on 2026-10-02 (see docs/DEPENDENCIES.md).
+# Pinned. Versions and sources in docs/DEPENDENCIES.md (sections 5 and 9), read 2026-10-02/03.
 fastapi==0.142.2
 uvicorn==0.54.0
+starlette==1.7.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+psycopg[binary]==3.3.6
+psycopg-binary==3.3.6
+psycopg-pool==3.3.3
+pgvector==0.5.0
+PyJWT==2.15.1
+pypdf==6.19.0
+puremagic==2.2.0
+PyYAML==6.0.3
+presidio-analyzer==2.2.364
+spacy==3.8.16
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+fastembed==0.8.1
+onnxruntime==1.30.0

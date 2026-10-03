@@ -233,13 +233,13 @@ describe('cross-tenant access attempts (as the app role, in SQL)', () => {
 const OUR_FUNCTIONS = [
   'ai_usage_ledger_guard', 'app_current_tenant', 'audit_field', 'audit_log_chain', 'audit_log_reject_change',
   'audit_write', 'cards_enforce_lifecycle', 'cards_register_directory', 'chunks_count', 'chunks_guard',
-  'citations_guard', 'consent_is_valid', 'consents_guard', 'erase_version', 'expert_questions_guard',
+  'citations_guard', 'consent_is_valid', 'consents_guard', 'consents_hide_on_withdrawal', 'erase_version', 'expert_questions_guard',
   'interviews_guard', 'knowledge_items_guard', 'knowledge_versions_immutable', 'purge_login_attempts',
   'quiz_attempts_guard', 'quiz_items_guard', 'relabel', 'resolve_card', 'review_tasks_guard', 'sources_guard',
-  'topics_guard',
+  'topics_delete_guard', 'topics_guard',
 ];
 const OUR_DEFINER_FUNCTIONS = [
-  'audit_log_chain', 'audit_write', 'cards_register_directory', 'chunks_count', 'erase_version',
+  'audit_log_chain', 'audit_write', 'cards_register_directory', 'chunks_count', 'consents_hide_on_withdrawal', 'erase_version',
   'knowledge_items_guard', 'purge_login_attempts', 'resolve_card', 'sources_guard',
 ];
 

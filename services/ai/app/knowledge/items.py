@@ -1,0 +1,364 @@
+"""Knowledge items and the verification loop (feature 12; docs/phase2/06 §1).
+
+Every state change goes through `_move()`, which the database trigger double-checks (legal
+moves; "corrected" only for a corrected version; the verifier is neither the contributor nor the
+author of the current version while the company requires a second reviewer).
+
+A verified or corrected item gets a search copy (a `chunks` row of kind 'item'); the copy is
+removed when the item leaves that status and marked stale when the item goes stale. Only
+verified items are searchable as items.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from typing import Any
+
+import psycopg
+from pgvector import HalfVector
+
+from app.ai_gateway import Caller, DataBlock, Embedder, Gateway, ItemExtractOutput
+from app.capture import redact
+from app.platform import Database, ServiceContext, write_audit
+
+BODY_MAX = 2000
+
+
+class ItemRefused(Exception):
+    def __init__(self, code: str, status: int = 409) -> None:
+        super().__init__(code)
+        self.code = code
+        self.status = status
+
+
+def _settings(cur: psycopg.Cursor[Any], tenant_id: str) -> dict[str, Any]:
+    cur.execute("SELECT second_reviewer_required, stale_after_days, review_sla_days FROM knowledge_settings WHERE tenant_id = %s", (tenant_id,))
+    row = cur.fetchone()
+    return dict(row) if row else {"second_reviewer_required": True, "stale_after_days": 365, "review_sla_days": 5}
+
+
+def _item(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str, lock: bool = True) -> dict[str, Any]:
+    cur.execute(
+        f"""SELECT i.id::text AS id, i.status, i.title, i.origin, i.department_id::text AS department_id, i.sensitivity,
+                   i.owner_person_id::text AS owner_person_id, i.current_version_id::text AS current_version_id,
+                   v.body, v.change_kind, v.version_no, v.author_person_id::text AS author_person_id
+              FROM knowledge_items i LEFT JOIN knowledge_versions v ON v.tenant_id = i.tenant_id AND v.id = i.current_version_id
+             WHERE i.tenant_id = %s AND i.id = %s{' FOR UPDATE OF i' if lock else ''}""", (tenant_id, item_id))
+    row = cur.fetchone()
+    if row is None:
+        raise ItemRefused("not_found", 404)
+    return dict(row)
+
+
+def create_item(cur: psycopg.Cursor[Any], *, tenant_id: str, title: str, body: str, origin: str, ai_extracted: bool,
+                department_id: str | None, sensitivity: int, owner_person_id: str | None, consent_id: str | None,
+                created_by_card_id: str | None, author_card_id: str | None, author_person_id: str | None,
+                change_kind: str, provenance: list[tuple[str, int, int, bytes]], prompt_version: str | None = None,
+                review_sla_days: int = 5) -> str:
+    """Creates a candidate with its first version and provenance. Caller passes REDACTED text.
+    provenance: (chunk_id, quote_start, quote_end, quote_sha256). The item's sensitivity is raised to
+    the highest of its provenance before the citations are written (the database refuses otherwise)."""
+    if provenance:
+        cur.execute("SELECT COALESCE(max(sensitivity), 0) AS s FROM chunks WHERE tenant_id = %s AND id = ANY(%s::uuid[])",
+                    (tenant_id, [p[0] for p in provenance]))
+        sensitivity = max(sensitivity, int(cur.fetchone()["s"]))
+    cur.execute(
+        """INSERT INTO knowledge_items (tenant_id, title, origin, ai_extracted, department_id, sensitivity, owner_person_id, consent_id,
+                                        created_by_card_id)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id::text AS id""",
+        (tenant_id, (title or "Untitled")[:200], origin, ai_extracted, department_id, sensitivity, owner_person_id, consent_id, created_by_card_id))
+    item_id = cur.fetchone()["id"]
+    cur.execute(
+        """INSERT INTO knowledge_versions (tenant_id, item_id, version_no, body, change_kind, author_card_id, author_person_id, prompt_version)
+           VALUES (%s, %s, 1, %s, %s, %s, %s, %s) RETURNING id::text AS id""",
+        (tenant_id, item_id, body[:BODY_MAX], change_kind, author_card_id, author_person_id, prompt_version))
+    version_id = cur.fetchone()["id"]
+    cur.execute("UPDATE knowledge_items SET current_version_id = %s WHERE tenant_id = %s AND id = %s", (version_id, tenant_id, item_id))
+    for chunk_id, start, end, digest in provenance:
+        cur.execute(
+            """INSERT INTO citations (tenant_id, subject_type, subject_id, chunk_id, quote_start, quote_end, quote_sha256)
+               VALUES (%s, 'knowledge_version', %s, %s, %s, %s, %s)""", (tenant_id, version_id, chunk_id, start, end, digest))
+    if ai_extracted:   # AI-extracted candidates go straight to review
+        _move(cur, tenant_id, item_id, "in_review", None)
+        _task(cur, tenant_id, item_id, "verify_item", review_sla_days)
+    return item_id
+
+
+def _task(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str, kind: str, sla_days: int) -> None:
+    cur.execute(
+        """INSERT INTO review_tasks (tenant_id, kind, subject_type, subject_id, department_id, sensitivity, owner_person_id, priority, due_at)
+           SELECT tenant_id, %s, 'knowledge_item', id, department_id, sensitivity, owner_person_id, usage_count, now() + make_interval(days => %s)
+             FROM knowledge_items WHERE tenant_id = %s AND id = %s
+           ON CONFLICT DO NOTHING""", (kind, sla_days, tenant_id, item_id))
+
+
+def _resolve_tasks(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str, card_id: str | None, resolution: str) -> None:
+    cur.execute(
+        """UPDATE review_tasks SET status = 'resolved', resolved_at = now(), resolved_by_card_id = %s, resolution = %s,
+                  assigned_to_card_id = NULL, first_response_at = COALESCE(first_response_at, now())
+            WHERE tenant_id = %s AND subject_type = 'knowledge_item' AND subject_id = %s AND status IN ('open', 'assigned')""",
+        (card_id, resolution, tenant_id, item_id))
+
+
+def _move(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str, status: str, verifier_card: str | None) -> None:
+    if status in ("verified", "corrected"):
+        cur.execute(
+            """UPDATE knowledge_items SET status = %s, verified_by_card_id = %s, verified_at = now(),
+                      stale_after = now() + make_interval(days => COALESCE((SELECT stale_after_days FROM knowledge_settings WHERE tenant_id = %s), 365))
+                WHERE tenant_id = %s AND id = %s""", (status, verifier_card, tenant_id, tenant_id, item_id))
+    else:
+        cur.execute("UPDATE knowledge_items SET status = %s WHERE tenant_id = %s AND id = %s", (status, tenant_id, item_id))
+
+
+def _search_copy(cur: psycopg.Cursor[Any], tenant_id: str, item: dict[str, Any], status: str, embedder: Embedder) -> None:
+    """Keep the item's chunk in step with its status: present while verified/corrected/stale, gone otherwise."""
+    if status in ("verified", "corrected"):
+        vector = HalfVector(embedder.embed([item["body"]], "document")[0])
+        cur.execute(
+            """INSERT INTO chunks (tenant_id, kind, knowledge_item_id, ordinal, text, token_estimate, embedding, embedding_model,
+                                   department_id, sensitivity, owner_person_id, verification_status, status)
+               VALUES (%s, 'item', %s, 0, %s, %s, %s, %s, %s, %s, %s, %s, 'active')
+               ON CONFLICT (tenant_id, knowledge_item_id) WHERE knowledge_item_id IS NOT NULL
+               DO UPDATE SET text = EXCLUDED.text, token_estimate = EXCLUDED.token_estimate, embedding = EXCLUDED.embedding,
+                             embedding_model = EXCLUDED.embedding_model, verification_status = EXCLUDED.verification_status""",
+            (tenant_id, item["id"], item["body"], max(1, len(item["body"]) // 4), vector, embedder.model_id, item["department_id"],
+             item["sensitivity"], item["owner_person_id"], status))
+    elif status == "stale":
+        cur.execute("UPDATE chunks SET verification_status = 'stale' WHERE tenant_id = %s AND knowledge_item_id = %s", (tenant_id, item["id"]))
+    else:
+        cur.execute("DELETE FROM chunks WHERE tenant_id = %s AND knowledge_item_id = %s", (tenant_id, item["id"]))
+
+
+def _audit(cur: psycopg.Cursor[Any], ctx: ServiceContext, item_id: str, action: str, reason: str, version_no: int | None = None) -> None:
+    write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action=action, reason_code=reason, resource_type="knowledge_item",
+                resource_id=item_id, request_id=ctx.request_id, details={"item_id": item_id, **({"version_no": version_no} if version_no else {})})
+
+
+def write_manual(db: Database, ctx: ServiceContext, *, title: str, body: str, department_id: str | None, sensitivity: int,
+                 contributor_person_id: str | None) -> str:
+    with db.tenant_tx(ctx.tenant_id) as cur:
+        consent_id = None
+        if contributor_person_id is not None:
+            cur.execute("""SELECT id::text AS id FROM consents WHERE tenant_id = %s AND person_id = %s AND scope = 'own_words'
+                             AND withdrawn_at IS NULL AND superseded_at IS NULL AND (expires_at IS NULL OR expires_at > now())""",
+                        (ctx.tenant_id, contributor_person_id))
+            row = cur.fetchone()
+            if row is None:
+                raise ItemRefused("consent_missing", 422)
+            consent_id = row["id"]
+        item_id = create_item(cur, tenant_id=ctx.tenant_id, title=redact(title).text, body=redact(body).text, origin="manual",
+                              ai_extracted=False, department_id=department_id, sensitivity=sensitivity, owner_person_id=contributor_person_id,
+                              consent_id=consent_id, created_by_card_id=ctx.card_id, author_card_id=ctx.card_id, author_person_id=ctx.person_id,
+                              change_kind="written", provenance=[])
+        _audit(cur, ctx, item_id, "knowledge:item_written", "ITEM_WRITTEN")
+    return item_id
+
+
+def submit(db: Database, ctx: ServiceContext, item_id: str) -> None:
+    with db.tenant_tx(ctx.tenant_id) as cur:
+        item = _item(cur, ctx.tenant_id, item_id)
+        if item["status"] != "candidate":
+            raise ItemRefused("illegal_transition")
+        _move(cur, ctx.tenant_id, item_id, "in_review", None)
+        _task(cur, ctx.tenant_id, item_id, "verify_item", _settings(cur, ctx.tenant_id)["review_sla_days"])
+        _audit(cur, ctx, item_id, "knowledge:submit", "ITEM_SUBMITTED")
+
+
+def propose_version(db: Database, ctx: ServiceContext, item_id: str, body: str) -> int:
+    """A corrected text, by a reviewer or by the contributor. It verifies nothing: the item is (back) in review."""
+    with db.tenant_tx(ctx.tenant_id) as cur:
+        item = _item(cur, ctx.tenant_id, item_id)
+        if item["status"] in ("withdrawn",):
+            raise ItemRefused("illegal_transition")
+        cur.execute("SELECT max(version_no) AS n FROM knowledge_versions WHERE tenant_id = %s AND item_id = %s", (ctx.tenant_id, item_id))
+        version_no = int(cur.fetchone()["n"]) + 1
+        cur.execute(
+            """INSERT INTO knowledge_versions (tenant_id, item_id, version_no, body, change_kind, author_card_id, author_person_id)
+               VALUES (%s, %s, %s, %s, 'corrected', %s, %s) RETURNING id::text AS id""",
+            (ctx.tenant_id, item_id, version_no, redact(body).text[:BODY_MAX], ctx.card_id, ctx.person_id))
+        version_id = cur.fetchone()["id"]
+        cur.execute("UPDATE knowledge_items SET current_version_id = %s WHERE tenant_id = %s AND id = %s", (version_id, ctx.tenant_id, item_id))
+        if item["status"] != "in_review":
+            if item["status"] == "candidate":
+                _move(cur, ctx.tenant_id, item_id, "in_review", None)
+            else:
+                _move(cur, ctx.tenant_id, item_id, "in_review", None)
+            _search_copy(cur, ctx.tenant_id, item, "in_review", _NO_EMBEDDER)
+        _task(cur, ctx.tenant_id, item_id, "verify_item", _settings(cur, ctx.tenant_id)["review_sla_days"])
+        _audit(cur, ctx, item_id, "knowledge:propose_version", "VERSION_PROPOSED", version_no)
+        return version_no
+
+
+class _NoEmbedder:
+    model_id = "none"
+    relevance_threshold = 1.0
+
+    def embed(self, texts: list[str], kind: str) -> list[list[float]]:  # pragma: no cover - never called for removals
+        raise AssertionError("not used")
+
+
+_NO_EMBEDDER: Embedder = _NoEmbedder()  # type: ignore[assignment]
+
+
+def verify(db: Database, ctx: ServiceContext, item_id: str, embedder: Embedder) -> str:
+    """in_review -> verified (original text) or corrected (a corrected version). The database refuses
+    a verifier who is the contributor or the author of the current version (while required)."""
+    with db.tenant_tx(ctx.tenant_id) as cur:
+        item = _item(cur, ctx.tenant_id, item_id)
+        if item["status"] != "in_review":
+            raise ItemRefused("illegal_transition")
+        status = "corrected" if item["change_kind"] == "corrected" else "verified"
+        try:
+            _move(cur, ctx.tenant_id, item_id, status, ctx.card_id)
+        except psycopg.errors.InsufficientPrivilege as exc:
+            raise ItemRefused("self_review", 403) from exc
+        _search_copy(cur, ctx.tenant_id, item, status, embedder)
+        _resolve_tasks(cur, ctx.tenant_id, item_id, ctx.card_id, status)
+        _audit(cur, ctx, item_id, f"knowledge:{status}", f"ITEM_{status.upper()}", int(item["version_no"]))
+        return status
+
+
+def reject(db: Database, ctx: ServiceContext, item_id: str) -> None:
+    with db.tenant_tx(ctx.tenant_id) as cur:
+        item = _item(cur, ctx.tenant_id, item_id)
+        if item["status"] not in ("candidate", "in_review", "stale"):
+            raise ItemRefused("illegal_transition")
+        if item["status"] == "candidate" and item["owner_person_id"] != ctx.person_id:
+            raise ItemRefused("illegal_transition")   # a draft is discarded by its contributor
+        _move(cur, ctx.tenant_id, item_id, "rejected", None)
+        _search_copy(cur, ctx.tenant_id, item, "rejected", _NO_EMBEDDER)
+        _resolve_tasks(cur, ctx.tenant_id, item_id, ctx.card_id, "rejected")
+        cur.execute("UPDATE quiz_items SET status = 'retired' WHERE tenant_id = %s AND knowledge_item_id = %s AND status <> 'retired'",
+                    (ctx.tenant_id, item_id))
+        _audit(cur, ctx, item_id, "knowledge:reject", "ITEM_REJECTED")
+
+
+def reopen(db: Database, ctx: ServiceContext, item_id: str, rollback_to_version: int | None = None) -> None:
+    with db.tenant_tx(ctx.tenant_id) as cur:
+        item = _item(cur, ctx.tenant_id, item_id)
+        if item["status"] not in ("verified", "corrected", "stale", "rejected"):
+            raise ItemRefused("illegal_transition")
+        if rollback_to_version is not None:
+            cur.execute("SELECT id::text AS id FROM knowledge_versions WHERE tenant_id = %s AND item_id = %s AND version_no = %s AND erased_at IS NULL",
+                        (ctx.tenant_id, item_id, rollback_to_version))
+            row = cur.fetchone()
+            if row is None:
+                raise ItemRefused("no_such_version", 404)
+            cur.execute("UPDATE knowledge_items SET current_version_id = %s WHERE tenant_id = %s AND id = %s", (row["id"], ctx.tenant_id, item_id))
+        _move(cur, ctx.tenant_id, item_id, "in_review", None)
+        _search_copy(cur, ctx.tenant_id, item, "in_review", _NO_EMBEDDER)
+        cur.execute("UPDATE quiz_items SET status = 'retired' WHERE tenant_id = %s AND knowledge_item_id = %s AND status <> 'retired'",
+                    (ctx.tenant_id, item_id))
+        _task(cur, ctx.tenant_id, item_id, "verify_item", _settings(cur, ctx.tenant_id)["review_sla_days"])
+        _audit(cur, ctx, item_id, "knowledge:reopen", "ITEM_REOPENED")
+
+
+def retire(db: Database, ctx: ServiceContext, item_id: str) -> None:
+    with db.tenant_tx(ctx.tenant_id) as cur:
+        item = _item(cur, ctx.tenant_id, item_id)
+        if item["status"] != "stale":
+            raise ItemRefused("illegal_transition")
+        _move(cur, ctx.tenant_id, item_id, "rejected", None)
+        _search_copy(cur, ctx.tenant_id, item, "rejected", _NO_EMBEDDER)
+        _resolve_tasks(cur, ctx.tenant_id, item_id, ctx.card_id, "retired")
+        _audit(cur, ctx, item_id, "knowledge:retire", "ITEM_RETIRED")
+
+
+def revert_verifications(db: Database, ctx: ServiceContext, verifier_card_id: str, since: str, until: str) -> int:
+    """Owner's clean-up after a bad reviewer: reopen everything that card verified in the window, and
+    roll corrections that card made back to the version before them."""
+    count = 0
+    with db.tenant_tx(ctx.tenant_id) as cur:
+        cur.execute(
+            """SELECT id::text AS id FROM knowledge_items WHERE tenant_id = %s AND verified_by_card_id = %s
+                  AND verified_at BETWEEN %s AND %s AND status IN ('verified', 'corrected', 'stale') FOR UPDATE""",
+            (ctx.tenant_id, verifier_card_id, since, until))
+        ids = [r["id"] for r in cur.fetchall()]
+        cur.execute(
+            """SELECT DISTINCT item_id::text AS item_id FROM knowledge_versions WHERE tenant_id = %s AND author_card_id = %s
+                  AND change_kind = 'corrected' AND created_at BETWEEN %s AND %s""", (ctx.tenant_id, verifier_card_id, since, until))
+        corrected_by_them = {r["item_id"] for r in cur.fetchall()}
+        for item_id in ids + [i for i in corrected_by_them if i not in ids]:
+            item = _item(cur, ctx.tenant_id, item_id)
+            if item_id in corrected_by_them:
+                cur.execute(
+                    """SELECT id::text AS id FROM knowledge_versions WHERE tenant_id = %s AND item_id = %s AND erased_at IS NULL
+                          AND NOT (author_card_id = %s AND change_kind = 'corrected') ORDER BY version_no DESC LIMIT 1""",
+                    (ctx.tenant_id, item_id, verifier_card_id))
+                prev = cur.fetchone()
+                if prev is not None:
+                    cur.execute("UPDATE knowledge_items SET current_version_id = %s WHERE tenant_id = %s AND id = %s",
+                                (prev["id"], ctx.tenant_id, item_id))
+            if item["status"] in ("verified", "corrected", "stale", "rejected"):
+                _move(cur, ctx.tenant_id, item_id, "in_review", None)
+                _search_copy(cur, ctx.tenant_id, item, "in_review", _NO_EMBEDDER)
+                _task(cur, ctx.tenant_id, item_id, "verify_item", 5)
+            count += 1
+        write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="knowledge:revert", reason_code="VERIFICATIONS_REVERTED",
+                    request_id=ctx.request_id, details={"count": count})
+    return count
+
+
+def relabel(db: Database, ctx: ServiceContext, kind: str, target_id: str, department_id: str | None, sensitivity: int) -> int:
+    with db.tenant_tx(ctx.tenant_id) as cur:
+        table = "sources" if kind == "source" else "knowledge_items"
+        cur.execute(f"SELECT department_id::text AS d, sensitivity FROM {table} WHERE tenant_id = %s AND id = %s FOR UPDATE",
+                    (ctx.tenant_id, target_id))
+        before = cur.fetchone()
+        if before is None:
+            raise ItemRefused("not_found", 404)
+        cur.execute("SELECT relabel(%s, %s, %s, %s::smallint) AS n", (kind, target_id, department_id, sensitivity))
+        n = int(cur.fetchone()["n"])
+        write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="knowledge:label", reason_code="LABELS_CHANGED",
+                    resource_type=kind, resource_id=target_id, request_id=ctx.request_id,
+                    details={"sensitivity_from": int(before["sensitivity"]), "sensitivity_to": sensitivity,
+                             "department_from": before["d"], "department_to": department_id, "count": n})
+    return n
+
+
+def link_item_to_topics(cur: psycopg.Cursor[Any], *, tenant_id: str, item_id: str, item_vector: list[float], embedding_model: str,
+                        threshold: float) -> int:
+    """Links an item to every active topic whose description is similar enough (code, repeatable).
+    Manual links made by a reviewer are never changed here."""
+    cur.execute(
+        """INSERT INTO knowledge_item_topics (tenant_id, item_id, topic_id, link_source, score)
+           SELECT tenant_id, %s, id, 'similarity', 1 - (embedding <=> %s)
+             FROM topics WHERE tenant_id = %s AND status = 'active' AND embedding_model = %s AND 1 - (embedding <=> %s) >= %s
+           ON CONFLICT DO NOTHING""",
+        (item_id, HalfVector(item_vector), tenant_id, embedding_model, HalfVector(item_vector), threshold))
+    return cur.rowcount
+
+
+def candidate_from_answer(cur: psycopg.Cursor[Any], ctx: ServiceContext, *, consent_id: str, chunk_id: str, text: str,
+                          embedder: Embedder, gateway: Gateway | None, caller: Caller | None) -> tuple[str | None, int]:
+    """Turns an interview answer into a candidate item with provenance. The model may only restate the
+    answer; its quote must appear in the answer, otherwise the extraction is not used. Without AI the
+    answer itself becomes the item. Returns (item id or None, AI cost)."""
+    if len(text.split()) < 8:
+        return None, 0
+    title, body, quote, ai, cost = " ".join(text.split()[:10]), text, None, False, 0
+    if gateway is not None and caller is not None:
+        outcome = gateway.generate(caller, "item_extract", "item_extract", [DataBlock("ANSWER", text)])
+        cost = outcome.cost_micro_usd
+        if isinstance(outcome.parsed, ItemExtractOutput):
+            if not outcome.parsed.substantive:
+                return None, cost
+            title, body, quote, ai = outcome.parsed.title, outcome.parsed.body, outcome.parsed.quote, True
+    start, end = 0, min(len(text), 600)
+    if quote:
+        pos = text.find(quote)
+        if pos < 0:
+            title, body, ai = " ".join(text.split()[:10]), text, False
+        else:
+            start, end = pos, pos + len(quote)
+    settings = _settings(cur, ctx.tenant_id)
+    item_id = create_item(
+        cur, tenant_id=ctx.tenant_id, title=redact(title).text, body=redact(body).text, origin="interview", ai_extracted=ai,
+        department_id=None, sensitivity=1, owner_person_id=ctx.person_id, consent_id=consent_id, created_by_card_id=ctx.card_id,
+        author_card_id=None if ai else ctx.card_id, author_person_id=None if ai else ctx.person_id,
+        change_kind="extracted" if ai else "written",
+        provenance=[(chunk_id, start, max(end, start + 1), hashlib.sha256(text[start:end].encode()).digest())],
+        prompt_version="item_extract@v1" if ai else None, review_sla_days=int(settings["review_sla_days"]))
+    link_item_to_topics(cur, tenant_id=ctx.tenant_id, item_id=item_id, item_vector=embedder.embed([body], "document")[0],
+                        embedding_model=embedder.model_id, threshold=embedder.relevance_threshold)
+    return item_id, cost

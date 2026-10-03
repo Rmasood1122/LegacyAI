@@ -1,0 +1,22 @@
+# Prices per million tokens, in micro-dollars (1 USD = 1,000,000). A model without an entry here
+# cannot be called. Every entry names its source and the date it was read (docs/DEPENDENCIES.md §9.4).
+# Re-read at Gate 2 before any key is created.
+models:
+  fake-1:
+    provider: fake
+    input_micro_per_mtok: 1000000
+    output_micro_per_mtok: 5000000
+    source: "made-up price for the fake provider, so the budget code is exercised in tests"
+    read: "2026-10-03"
+  claude-haiku-4-5-20251001:
+    provider: anthropic
+    input_micro_per_mtok: 1000000
+    output_micro_per_mtok: 5000000
+    source: "https://platform.claude.com/docs/en/about-claude/pricing"
+    read: "2026-10-03"
+  gpt-5.6-luna:
+    provider: openai
+    input_micro_per_mtok: 200000
+    output_micro_per_mtok: 1200000
+    source: "https://developers.openai.com/api/docs/models/gpt-5.6-luna (read through a summariser)"
+    read: "2026-10-03"
