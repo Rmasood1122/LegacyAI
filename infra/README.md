@@ -14,7 +14,7 @@ You do **not** need any of this to run or test the product on your own computer.
 |---|---|---|
 | A Neon database | Stores everything | Free plan; sleeps when idle |
 | An image registry | Holds the program images | Old images deleted automatically |
-| 6 empty "secrets" | Safe storage for keys and passwords | Exactly the free allowance |
+| 5 empty "secrets" | Safe storage for keys and passwords | Inside the free allowance of 6 |
 | 2 storage buckets | Encrypted backups; audit anchors | Private; old backups deleted automatically |
 | A budget alert | Emails you at 50 %, 90 %, 100 % of $1 | **An email only — it does not stop spending** |
 | *(second step)* 2 services + 2 nightly jobs | The API, the AI stub, backup, audit anchor | Off when idle; capped at 2 + 1 instances |
@@ -66,14 +66,14 @@ You do **not** need any of this to run or test the product on your own computer.
    terraform init
    terraform plan
    ```
-   Read the plan. It should list about **40 things to add** and **nothing to change or destroy**: 11 enabled APIs, 1 registry, 5 service accounts, 6 secrets, 13 access rules, 2 buckets, 1 email channel, 1 budget. **No Cloud Run service, no job.**
+   Read the plan. It should list about **40 things to add** and **nothing to change or destroy**: 11 enabled APIs, 1 registry, 5 service accounts, 5 secrets, about 13 access rules, 2 buckets, 1 email channel, 1 budget. **No Cloud Run service, no job.**
 7. If the plan looks right: `terraform apply`. (This is the step Claude will never do for you.)
 
 ---
 
-## Part C — Fill in the six secrets (by hand)
+## Part C — Fill in the five secrets (by hand)
 
-Terraform created the secrets **empty**. Give each one a value. For the four keys, generate fresh random values — do not reuse the fake ones from `.env.example`:
+Terraform created the secrets **empty**. Give each one a value. For the keys, generate fresh random values — do not reuse the fake ones from `.env.example`:
 
 ```
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
@@ -83,20 +83,19 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 |---|---|
 | `legacyai-database-url` | The **app** connection string from Part A (pooled host) |
 | `legacyai-database-url-admin` | The **backup** connection string from Part A (`legacyai_backup`, direct host). Despite the name it is used only by the backup job. Not the migrator's. |
-| `legacyai-sc-pepper-keyring` | `{"current":"v1","keys":{"v1":"<random key>"}}` |
-| `legacyai-credential-enc-keyring` | `{"current":"k1","keys":{"k1":"<another random key>"}}` |
-| `legacyai-hmac-index-key` | `<another random key>` |
-| `legacyai-internal-service-token` | `<another random key>` |
+| `legacyai-api-keyrings` | One JSON value with the API's three keys: `{"SC_PEPPER_KEYRING":{"current":"v1","keys":{"v1":"<random key>"}},"CREDENTIAL_ENC_KEYRING":{"current":"k1","keys":{"k1":"<another random key>"}},"HMAC_INDEX_KEY":"<another random key>"}` |
+| `legacyai-service-token-key` | `<another random key>` (the API and the AI service both read it) |
+| `legacyai-ai-service-config` | `{"DATABASE_URL":"<the AI service's connection string (legacyai_ai login)>"}`. After Gate 2, and only then, the AI provider key is added here as `"AI_PROVIDER_KEY"`. |
 
 To add a value without it landing in your terminal history, put it in a temporary file and run:
 ```
-gcloud secrets versions add legacyai-sc-pepper-keyring --project=YOUR_PROJECT_ID --data-file=TEMP_FILE
+gcloud secrets versions add legacyai-api-keyrings --project=YOUR_PROJECT_ID --data-file=TEMP_FILE
 ```
 then delete the temporary file. Create the temporary file **outside this repository folder** (for example on your Desktop), with no blank line at the end.
 
 **Write the pepper and the encryption key down somewhere safe (password manager).** If the pepper is lost, nobody can log in until every card is renewed. If the encryption key is lost, every authenticator-app enrollment must be redone.
 
-**When you rotate a secret later:** add the new version, then *disable* the old version. Six active versions are free; a seventh costs $0.06 per month.
+**When you rotate a secret later:** add the new version, then *disable* the old version. Six active versions are free (five are in use, so one rotation at a time fits); a seventh costs $0.06 per month.
 
 ---
 
@@ -131,14 +130,14 @@ Backups are encrypted so that the backup job itself cannot read them.
    ```
    (There is no web app yet. Until Phase 3 you can leave the two placeholder values; the API will run, but nobody can log in from a browser.)
 3. `terraform plan` — it should add 2 services, 2 jobs, 2 schedules and a few access rules. Then `terraform apply`.
-4. Create the first operator card. In `services/api`, with `DATABASE_URL` and the four key variables set in your terminal to the **same values as the secrets**:
+4. Create the first operator card. In `services/api`, with `DATABASE_URL`, `API_KEYRINGS`, `SERVICE_TOKEN_KEY` and `AI_SERVICE_URL` (the AI service address Terraform printed) set in your terminal to the **same values as the secrets**:
    ```
    npm run platform:bootstrap
    ```
    It prints a card number, a 3-digit code and a one-time token **once**. Write them down.
 5. Check: open the API address that Terraform printed, followed by `/v1/health`. You should see `{"status":"ok",…}`.
 
-**Known limits of this step (Phase 1):** tenant exports are written to the container's temporary disk, which disappears when the service scales down — fine for a skeleton, not for real use. The AI service cannot be reached by anything yet (see the cost document). The budget is in US dollars and will be refused if your billing account uses another currency. If your Google organisation forbids public services, the step that makes the API reachable will fail.
+**Known limits of this step (Phase 1):** tenant exports are written to the container's temporary disk, which disappears when the service scales down — fine for a skeleton, not for real use. Only the API can reach the AI service (Google checks the API's identity, and the AI service checks the API's own short-lived token). Until Gate 2 the AI service uses a fake AI provider: nothing is sent to an AI company. The budget is in US dollars and will be refused if your billing account uses another currency. If your Google organisation forbids public services, the step that makes the API reachable will fail.
 
 ---
 
@@ -157,7 +156,7 @@ Backups are encrypted so that the backup job itself cannot read them.
 | Claim | Status |
 |---|---|
 | Terraform files are well-formed and valid for Google provider 7.46.1 | **Proven**: `terraform fmt -check` and `terraform validate` pass (run in Docker, no credentials) |
-| The guardrails are in the code (min 0, max caps, request-based billing, budget, 6 empty secrets, private buckets) | **Proven** by `scripts/ci-terraform-guardrails.sh` |
+| The guardrails are in the code (min 0, max caps, request-based billing, budget, 5 empty secrets, private buckets, AI service invokable only by the API, fake AI provider by default) | **Proven** by `scripts/ci-terraform-guardrails.sh` |
 | `terraform plan` succeeds against a real project | **Not proven** — needs your account |
 | Anything works on Google Cloud or Neon | **Not proven** — nothing was deployed |
 | Backup → encrypt → restore → verify works | **Proven locally** against the Docker database; **not proven** against Neon or a real bucket (the upload-to-bucket step in particular has never run) |

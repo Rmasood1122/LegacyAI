@@ -3,6 +3,13 @@
 > **Updated after the build (2026-10-02).** Approved at Gate 1, then corrected to match what was built.
 > Differences are listed in `REPORT.md` under "Deviations".
 
+> **Phase 2 changes (2026-10-03, still plan-only — nothing applied, no cloud resource created).** Details: `docs/phase2/01` and `08`.
+> - **Secrets: 5, not 6** (red flag 3 now has one spare): `database-url`, `database-url-admin`, `api-keyrings` (the three API keys as one JSON value), `service-token-key` (was `internal-service-token`), `ai-service-config` (the AI service's database login; after Gate 2 also the AI provider key).
+> - **The AI service is reachable** (the Phase 1 "internal only" setting left it unreachable): ingress "all", but only the API's service account may invoke it (no public access), and every request also needs the API's 60-second service token. No private network, so no Cloud NAT or DNS charge.
+> - **AI service: 1 GiB memory and 120-second requests** (was 512 MiB / 30 s); API requests 60 s (was 30 s). At zero traffic still $0; under load the free allowance is used faster (`docs/phase2/08`).
+> - **Neon free storage is 1 GB per project** (read 2026-10-03; red flag 6 planned for 0.5 GB). Captured knowledge now competes with the audit log for it; uploads stop at 80 % of the storage budget.
+> - The AI image is ≈720 MB uncompressed with both models baked in (measured in CI; the compressed size in the registry was not measured). Red flag 2 (Artifact Registry, 0.5 GB free) is therefore **likely to be exceeded**: about **$0.10 per GB per month** beyond the allowance.
+
 > ## 🔴 Things that are NOT guaranteed to be $0 — read first
 >
 > 1. **Google Cloud requires a billing account with a payment card on file** before Cloud Run, Artifact Registry or Secret Manager can be used at all. Expected charge at zero traffic: **$0**. But "free tier" is an allowance, not a hard stop. **A budget alert only sends an email — it does not stop spending.**
@@ -36,7 +43,7 @@ Terraform 1.16.4, provider `hashicorp/google ~> 7.46` (sources and dates in `doc
 | 5 | `google_cloud_run_v2_service` **ai** | The AI stub | `min 0`, `max 1`, 1 vCPU, 512 MiB, `cpu_idle = true`. **Internal ingress only**; only `legacyai-api` may invoke it. **As written, nothing can reach it yet**: the API would need its outbound traffic routed through a VPC, which is not set up (it must be costed first). Fine for a stub; a Phase 2 decision. |
 | 6 | `google_cloud_run_v2_job` **backup** + `google_cloud_scheduler_job` (nightly) | Encrypted `pg_dump` to the backups bucket | 1 task, 10-minute timeout, no retries beyond 1 |
 | 7 | `google_cloud_run_v2_job` **audit-anchor** + `google_cloud_scheduler_job` (daily) | Writes audit chain heads to the anchor bucket (runs the API image's `anchor-audit-head` command) | Same limits |
-| 8 | `google_secret_manager_secret` × 6 | **Names only — Terraform never sees a value.** `database-url`, `database-url-admin`, `sc-pepper-keyring`, `credential-enc-keyring`, `hmac-index-key`, `internal-service-token` | You add the values by hand (steps in `infra/README.md`) |
+| 8 | `google_secret_manager_secret` × 5 (Phase 2; was 6) | **Names only — Terraform never sees a value.** `database-url`, `database-url-admin`, `api-keyrings`, `service-token-key`, `ai-service-config` | You add the values by hand (steps in `infra/README.md`) |
 | 9 | `google_secret_manager_secret_iam_member`, `google_storage_bucket_iam_member`, `google_cloud_run_v2_service_iam_member`, `google_cloud_run_v2_job_iam_member` | Least privilege: `legacyai-api` reads 5 secrets (**not** `database-url-admin`); `legacyai-backup` reads `database-url-admin` and can only *create* objects in the backups bucket (cannot read or delete them); `legacyai-anchor` reads the same 5 secrets as the API and can only *create* objects in the anchor bucket; `legacyai-scheduler` may start the two jobs and nothing else | No project-wide roles for any of these accounts |
 | 10 | `google_storage_bucket` **backups** (`us-central1`, Standard) | Encrypted database dumps | Uniform access, public access prevention **enforced**, retention policy 7 days (unlocked), lifecycle: delete after 30 days |
 | 11 | `google_storage_bucket` **audit-anchors** (`us-central1`, Standard) | Write-once-style record of audit chain heads | Uniform access, public access prevention, retention policy 400 days. **`is_locked` is a variable, default `false`** — locking is permanent and is your decision (see `08`). |
@@ -74,7 +81,7 @@ Terraform 1.16.4, provider `hashicorp/google ~> 7.46` (sources and dates in `doc
 | Cloud Run (api, ai) | $0 |
 | Cloud Run jobs + Scheduler (2 jobs) | $0 |
 | Artifact Registry | $0 if under 0.5 GB (see 🔴 2) |
-| Secret Manager | $0 at exactly 6 versions (see 🔴 3) |
+| Secret Manager | $0 at 5 versions since Phase 2 (see 🔴 3) |
 | Cloud Storage | $0 under 5 GB in `us-central1` |
 | Budget alert, IAM, logging | $0 |
 | Neon Free | $0 |
