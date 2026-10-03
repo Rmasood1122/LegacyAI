@@ -44,6 +44,8 @@ export function KnowledgeScreen() {
 
 function WriteItem() {
   const create = useCreateItem();
+  const { state } = useSession();
+  const personId = state.status === 'signed_in' ? state.session.person_id : null;
   const navigate = useNavigate();
   const pathTo = useScreenPath();
   const [open, setOpen] = useState(false);
@@ -53,7 +55,9 @@ function WriteItem() {
 
   const onSubmit = (e: FormEvent): void => {
     e.preventDefault();
-    create.mutate({ body: { title: title.trim(), body: body.trim(), sensitivity } }, {
+    // The writer is named as the contributor: the API lets a card write items only for its own person (a company card has none).
+    const contributor = personId === null ? {} : { contributor_person_id: personId };
+    create.mutate({ body: { title: title.trim(), body: body.trim(), sensitivity, ...contributor } }, {
       onSuccess: (created) => {
         setTitle('');
         setBody('');

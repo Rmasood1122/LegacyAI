@@ -524,6 +524,7 @@ export async function sessionBody(
   return {
     card_id: subject.card_id,
     tenant_id: subject.tenant_id,
+    person_id: subject.person_id,
     card_number_masked: maskCardNumber(subject.card_number),
     roles: subject.roles.map((r) => r.role_key),
     permissions: described.permissions,

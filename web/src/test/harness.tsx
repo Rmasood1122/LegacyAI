@@ -36,7 +36,7 @@ export const problem = (status: number, title: string, kind: ApiError['kind'] = 
 
 export function makeSession(permissions: string[], overrides: Partial<Session> = {}): Session {
   return {
-    card_id: '01a10174-0000-7000-8000-000000000001', tenant_id: '01a10174-0000-7000-8000-0000000000aa', card_number_masked: 'LGY-••••-••••-4242',
+    card_id: '01a10174-0000-7000-8000-000000000001', tenant_id: '01a10174-0000-7000-8000-0000000000aa', person_id: '01a10174-0000-7000-8000-0000000000b1', card_number_masked: 'LGY-••••-••••-4242',
     roles: ['expert'], permissions, card_state: 'active', read_only: false, export_only: false,
     expires_at: '2099-01-01T00:00:00.000Z', grace_until: '2099-02-01T00:00:00.000Z', renewal_due: '2098-12-01T00:00:00.000Z',
     session_idle_expires_at: '2099-01-01T00:00:00.000Z', session_absolute_expires_at: '2099-01-01T00:00:00.000Z', csrf_token: 'csrf-test-token',

@@ -192,7 +192,10 @@ describe('knowledge', () => {
     await user.type(screen.getByLabelText('Title'), 'Pump seal');
     await user.type(screen.getByLabelText('What should a successor know?'), 'Replace the seal every 2,000 hours.');
     await user.click(screen.getByRole('button', { name: 'Save as draft' }));
-    await waitFor(() => expect(api.callsTo('createKnowledgeItem')[0]?.body).toEqual({ title: 'Pump seal', body: 'Replace the seal every 2,000 hours.', sensitivity: 1 }));
+    await waitFor(() => expect(api.callsTo('createKnowledgeItem')[0]?.body).toEqual({
+      title: 'Pump seal', body: 'Replace the seal every 2,000 hours.', sensitivity: 1,
+      contributor_person_id: '01a10174-0000-7000-8000-0000000000b1',   // the signed-in person is named as the writer
+    }));
   });
 
   it('a reviewer can verify or reject an item in review; the author\'s card sees neither button', async () => {

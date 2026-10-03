@@ -7150,6 +7150,7 @@ components:
       required:
         - card_id
         - tenant_id
+        - person_id
         - card_number_masked
         - roles
         - permissions
@@ -7165,6 +7166,12 @@ components:
       properties:
         card_id: *a1
         tenant_id: *a1
+        person_id:
+          description: The person this card belongs to (null for a company card). Lets a client name the signed-in person as the contributor of their own material.
+          type:
+            - "string"
+            - "null"
+          format: "uuid"
         card_number_masked:
           type: string
         roles:

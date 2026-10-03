@@ -516,6 +516,7 @@ export interface LoginVerifyRequest {
 export interface Session {
   card_id: string;
   tenant_id: string;
+  person_id: string | null;
   card_number_masked: string;
   roles: Array<"company_owner" | "admin" | "department_manager" | "auditor" | "reviewer" | "expert" | "successor" | "contractor">;
   permissions: string[];
