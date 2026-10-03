@@ -1,0 +1,850 @@
+{
+  "kind": "model behaviour without database - judge",
+  "provider": "anthropic",
+  "model": "claude-haiku-4-5-20251001",
+  "started_at": "2026-10-03T13:22:29.048280+00:00",
+  "finished_at": "2026-10-03T13:23:38.344003+00:00",
+  "budget_micro_usd": 2000000,
+  "recorded_spend_before_micro_usd": 166928,
+  "total_cost_micro_usd": 31271,
+  "stopped_by_budget": false,
+  "calls_made": 39,
+  "input_tokens": 18636,
+  "output_tokens": 2527,
+  "errors": 0,
+  "invalid_outputs": 0,
+  "latency_ms_median": 1782,
+  "result": {
+    "summary": {
+      "judged_source_file": "20261003T132213Z-anthropic-model-behaviour-questions.json",
+      "correct": 36,
+      "partly": 3,
+      "wrong": 0,
+      "unjudged": 0,
+      "not answered": 1
+    },
+    "rows": {
+      "table": [
+        {
+          "id": "A01",
+          "question": "What must the main air regulator read before Line 2 is started?",
+          "points": [
+            "6.0 bar"
+          ],
+          "outcome": "answered",
+          "answer": "The main air regulator must read 6.0 bar before Line 2 is started.",
+          "judge": "correct"
+        },
+        {
+          "id": "A02",
+          "question": "What should the rinser water pressure be at start-up?",
+          "points": [
+            "2.5 bar"
+          ],
+          "outcome": "answered",
+          "answer": "The rinser water pressure must be 2.5 bar at start-up.",
+          "judge": "correct"
+        },
+        {
+          "id": "A03",
+          "question": "How many caps from the first run are checked for torque?",
+          "points": [
+            "5 caps"
+          ],
+          "outcome": "answered",
+          "answer": "5 caps from the first run are checked for torque.",
+          "judge": "correct"
+        },
+        {
+          "id": "A04",
+          "question": "Where does the operator sign the start-up log?",
+          "points": [
+            "on the HMI",
+            "under Shift start"
+          ],
+          "outcome": "answered",
+          "answer": "The operator signs the start-up log on the HMI screen under \"Shift start\".",
+          "judge": "correct"
+        },
+        {
+          "id": "A05",
+          "question": "Which extension do I call if the air pressure is too low at start-up?",
+          "points": [
+            "extension 4410"
+          ],
+          "outcome": "answered",
+          "answer": "Call maintenance on extension 4410 if the air pressure is too low at start-up.",
+          "judge": "correct"
+        },
+        {
+          "id": "A06",
+          "question": "What must be checked on the walk-around before starting Line 2?",
+          "points": [
+            "guards closed",
+            "emergency stops released",
+            "no tools or loose parts on the conveyor"
+          ],
+          "outcome": "answered",
+          "answer": "Before starting Line 2, you must check that all guards are closed, every emergency stop is released, there are no tools or loose parts on the conveyor, the main air regulator reads 6.0 bar, the CO2 bank gauge pressure meets specifications, and the rinser water pressure is 2.5 bar.",
+          "judge": "correct"
+        },
+        {
+          "id": "A07",
+          "question": "To what speed is the conveyor ramped up after start-up, and when?",
+          "points": [
+            "420 bottles per minute",
+            "after 10 minutes of stable running"
+          ],
+          "outcome": "answered",
+          "answer": "The conveyor is ramped up to 420 bottles per minute after 10 minutes of stable running.",
+          "judge": "correct"
+        },
+        {
+          "id": "A08",
+          "question": "Which grease is used on the filler star wheel bearings?",
+          "points": [
+            "food-grade H1 grease",
+            "NLGI 2"
+          ],
+          "outcome": "answered",
+          "answer": "Food-grade H1 grease, NLGI 2 is used on the filler star wheel bearings.",
+          "judge": "correct"
+        },
+        {
+          "id": "A09",
+          "question": "How often is the capper head chain oiled?",
+          "points": [
+            "weekly",
+            "on Mondays"
+          ],
+          "outcome": "answered",
+          "answer": "The capper head chain is oiled weekly, on Mondays.",
+          "judge": "correct"
+        },
+        {
+          "id": "A10",
+          "question": "When does the conveyor chain get its dry lubricant spray?",
+          "points": [
+            "daily",
+            "at the start of each shift"
+          ],
+          "outcome": "answered",
+          "answer": "The conveyor chain gets its dry lubricant spray daily, at the start of each shift.",
+          "judge": "correct"
+        },
+        {
+          "id": "A11",
+          "question": "Which oil goes in the main gearbox?",
+          "points": [
+            "food-grade gear oil",
+            "ISO VG 220"
+          ],
+          "outcome": "answered",
+          "answer": "Food-grade gear oil ISO VG 220 goes in the main gearbox.",
+          "judge": "correct"
+        },
+        {
+          "id": "A12",
+          "question": "Which task code is used when a lubrication task is recorded?",
+          "points": [
+            "LUB-02"
+          ],
+          "outcome": "answered",
+          "answer": "The task code LUB-02 is used when a lubrication task is recorded.",
+          "judge": "correct"
+        },
+        {
+          "id": "A13",
+          "question": "What should I do if a bearing is noisy or hot after greasing?",
+          "points": [
+            "report it on the same work order",
+            "tell the maintenance lead"
+          ],
+          "outcome": "answered",
+          "answer": "If a bearing is noisy or hot after greasing, report it on the work order and tell the maintenance lead.",
+          "judge": "correct"
+        },
+        {
+          "id": "A14",
+          "question": "What does fault F12 mean and what should be checked?",
+          "points": [
+            "low bowl level",
+            "product supply valve PV-3",
+            "level in the product tank"
+          ],
+          "outcome": "answered",
+          "answer": "Fault F12 means low bowl level. Check the product supply valve PV-3 and the level in the product tank. Do not override the level switch.",
+          "judge": "correct"
+        },
+        {
+          "id": "A15",
+          "question": "How do I recover from fault F21?",
+          "points": [
+            "stop the infeed and clear the jammed bottles",
+            "reset the fault at the panel",
+            "restart in jog mode"
+          ],
+          "outcome": "answered",
+          "answer": "To recover from fault F21, stop the infeed, clear the jammed bottles, reset the fault at the panel and restart in jog mode before switching back to automatic.",
+          "judge": "correct"
+        },
+        {
+          "id": "A16",
+          "question": "What should I do when fault F33 appears?",
+          "points": [
+            "switch to CO2 bank B",
+            "tell the shift lead"
+          ],
+          "outcome": "dont_know",
+          "answer": null,
+          "judge": "not answered"
+        },
+        {
+          "id": "A17",
+          "question": "How many filling valves may be isolated before the filler must be stopped?",
+          "points": [
+            "at most 2 valves",
+            "stop the filler and call maintenance if a third leaks"
+          ],
+          "outcome": "answered",
+          "answer": "At most 2 filling valves may be isolated before the filler must be stopped.",
+          "judge": "partly"
+        },
+        {
+          "id": "A18",
+          "question": "Above what product temperature must filling be held?",
+          "points": [
+            "above 6 °C",
+            "call quality"
+          ],
+          "outcome": "answered",
+          "answer": "Filling must be held if the product temperature is above 6 °C.",
+          "judge": "partly"
+        },
+        {
+          "id": "A19",
+          "question": "How often is the vibration of the main drive checked?",
+          "points": [
+            "monthly",
+            "hand-held vibration meter"
+          ],
+          "outcome": "answered",
+          "answer": "The vibration of the main drive is checked monthly using a hand-held vibration meter.",
+          "judge": "correct"
+        },
+        {
+          "id": "A20",
+          "question": "Where is the main disconnect for Line 2?",
+          "points": [
+            "electrical cabinet E3"
+          ],
+          "outcome": "answered",
+          "answer": "The main disconnect for Line 2 is in electrical cabinet E3.",
+          "judge": "correct"
+        },
+        {
+          "id": "A21",
+          "question": "How is stored air pressure released during lock-out?",
+          "points": [
+            "open valve V-9",
+            "on the pneumatic panel"
+          ],
+          "outcome": "answered",
+          "answer": "Stored air pressure is released by opening valve V-9 on the pneumatic panel.",
+          "judge": "correct"
+        },
+        {
+          "id": "A22",
+          "question": "How do I verify zero energy after locking out?",
+          "points": [
+            "press the start button",
+            "nothing may move"
+          ],
+          "outcome": "answered",
+          "answer": "To verify zero energy after locking out, press the start button. Nothing may move. If anything moves, stop and call the maintenance lead.",
+          "judge": "correct"
+        },
+        {
+          "id": "A23",
+          "question": "What happens if the key of a lock-out lock is lost?",
+          "points": [
+            "the lock is cut only with the shift lead and the plant manager present",
+            "recorded in the LOTO register"
+          ],
+          "outcome": "answered",
+          "answer": "If the key of a lock-out lock is lost, the lock may be cut only with the shift lead and the plant manager both present as witnesses, and the event is recorded in the LOTO register.",
+          "judge": "correct"
+        },
+        {
+          "id": "A24",
+          "question": "Who must be told before a machine is locked out?",
+          "points": [
+            "the operator of the machine",
+            "the shift lead"
+          ],
+          "outcome": "answered",
+          "answer": "The operator of the machine and the shift lead must be told before a machine is locked out.",
+          "judge": "correct"
+        },
+        {
+          "id": "A25",
+          "question": "What is the OEE target for Line 2?",
+          "points": [
+            "78 %"
+          ],
+          "outcome": "answered",
+          "answer": "The OEE target for Line 2 is 78%.",
+          "judge": "correct"
+        },
+        {
+          "id": "A26",
+          "question": "Which star wheel set is used for 500 ml bottles?",
+          "points": [
+            "set B"
+          ],
+          "outcome": "answered",
+          "answer": "Star wheel set B is used for 500 ml bottles.",
+          "judge": "correct"
+        },
+        {
+          "id": "A27",
+          "question": "What is the guide rail setting for 500 ml bottles?",
+          "points": [
+            "72 mm"
+          ],
+          "outcome": "answered",
+          "answer": "The guide rail setting for 500 ml bottles is 72 mm.",
+          "judge": "correct"
+        },
+        {
+          "id": "A28",
+          "question": "By how much is the filler raised for 500 ml bottles?",
+          "points": [
+            "40 mm"
+          ],
+          "outcome": "answered",
+          "answer": "The filler is raised by 40 mm for 500 ml bottles.",
+          "judge": "correct"
+        },
+        {
+          "id": "A29",
+          "question": "Which label roll is used for 500 ml bottles?",
+          "points": [
+            "500-L"
+          ],
+          "outcome": "answered",
+          "answer": "Label roll type 500-L is used for 500 ml bottles.",
+          "judge": "correct"
+        },
+        {
+          "id": "A30",
+          "question": "How many first-off bottles go to the lab after a changeover?",
+          "points": [
+            "3 bottles",
+            "wait for lab approval before full speed"
+          ],
+          "outcome": "answered",
+          "answer": "3 first-off bottles go to the lab after a changeover.",
+          "judge": "correct"
+        },
+        {
+          "id": "A31",
+          "question": "What was wrong with rinser nozzle 7?",
+          "points": [
+            "it was blocked",
+            "it was replaced"
+          ],
+          "outcome": "answered",
+          "answer": "Rinser nozzle 7 was blocked and has been replaced.",
+          "judge": "correct"
+        },
+        {
+          "id": "A32",
+          "question": "What temperature is the labeler glue station set to?",
+          "points": [
+            "160 °C"
+          ],
+          "outcome": "answered",
+          "answer": "The labeler glue station is set to 160 °C.",
+          "judge": "correct"
+        },
+        {
+          "id": "A33",
+          "question": "When is the refill for CO2 bank A expected?",
+          "points": [
+            "Thursday"
+          ],
+          "outcome": "answered",
+          "answer": "The refill for CO2 bank A is expected on Thursday.",
+          "judge": "correct"
+        },
+        {
+          "id": "A34",
+          "question": "How often are the capping chucks inspected?",
+          "points": [
+            "monthly",
+            "for wear and cracks"
+          ],
+          "outcome": "answered",
+          "answer": "The capping chucks are inspected monthly for wear and cracks.",
+          "judge": "correct"
+        },
+        {
+          "id": "A35",
+          "question": "How often are the capper springs replaced?",
+          "points": [
+            "every 6 months",
+            "earlier if a head gives low torque readings"
+          ],
+          "outcome": "answered",
+          "answer": "Capper springs are replaced every 6 months, or earlier if a head gives low torque readings.",
+          "judge": "correct"
+        },
+        {
+          "id": "A36",
+          "question": "What cap size is used on Line 2?",
+          "points": [
+            "28 mm",
+            "for both 330 ml and 500 ml"
+          ],
+          "outcome": "answered",
+          "answer": "The cap size used on Line 2 is 28 mm.",
+          "judge": "partly"
+        },
+        {
+          "id": "A37",
+          "question": "What is the fill level specification for 500 ml bottles?",
+          "points": [
+            "500 ml ± 5 ml"
+          ],
+          "outcome": "answered",
+          "answer": "The fill level specification for 500 ml bottles is 500 ml ± 5 ml.",
+          "judge": "correct"
+        },
+        {
+          "id": "A38",
+          "question": "What cap removal torque is allowed in quality sampling?",
+          "points": [
+            "between 1.2 and 2.0 Nm"
+          ],
+          "outcome": "answered",
+          "answer": "The cap removal torque allowed in quality sampling is between 1.2 and 2.0 Nm.",
+          "judge": "correct"
+        },
+        {
+          "id": "A39",
+          "question": "What happens to a pallet when a sample is out of specification?",
+          "points": [
+            "held with a yellow HOLD tag",
+            "tell the shift lead and the quality lab"
+          ],
+          "outcome": "answered",
+          "answer": "When a sample is out of specification, the pallet is held in production with a yellow HOLD tag. The shift lead and quality lab must be notified, and the sample is recorded in the quality log with the time and line speed.",
+          "judge": "correct"
+        },
+        {
+          "id": "A40",
+          "question": "What is the CO2 content target for sparkling water?",
+          "points": [
+            "5.5 g/L"
+          ],
+          "outcome": "answered",
+          "answer": "The CO2 content target for sparkling water is 5.5 g/L.",
+          "judge": "correct"
+        }
+      ]
+    }
+  },
+  "calls": [
+    {
+      "tag": "A01",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 463,
+      "output_tokens": 67,
+      "cost_micro_usd": 798,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"The answer states 'The main air regulator must read 6.0 bar before Line 2 is started', which directly contains the value '6.0 bar'\"}], \"contradiction\": false}",
+      "latency_ms": 2593
+    },
+    {
+      "tag": "A02",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 460,
+      "output_tokens": 69,
+      "cost_micro_usd": 805,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"The answer states 'The rinser water pressure must be 2.5 bar at start-up,' which directly contains the value '2.5 bar' from the expected point.\"}], \"contradiction\": false}",
+      "latency_ms": 2094
+    },
+    {
+      "tag": "A03",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 453,
+      "output_tokens": 54,
+      "cost_micro_usd": 723,
+      "raw_output": "{\"points\":[{\"point\":0,\"met\":true,\"evidence\":\"The answer states '5 caps from the first run are checked for torque,' which directly contains the expected point of '5 caps'.\"}],\"contradiction\":false}",
+      "latency_ms": 1953
+    },
+    {
+      "tag": "A04",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 481,
+      "output_tokens": 58,
+      "cost_micro_usd": 771,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"on the HMI screen\"}, {\"point\": 1, \"met\": true, \"evidence\": \"under \\\"Shift start\\\"\"}], \"contradiction\": false}",
+      "latency_ms": 2094
+    },
+    {
+      "tag": "A05",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 461,
+      "output_tokens": 52,
+      "cost_micro_usd": 721,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"The answer contains 'extension 4410' in the phrase 'Call maintenance on extension 4410'\"}], \"contradiction\": false}",
+      "latency_ms": 1875
+    },
+    {
+      "tag": "A06",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 551,
+      "output_tokens": 83,
+      "cost_micro_usd": 966,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"all guards are closed\"}, {\"point\": 1, \"met\": true, \"evidence\": \"every emergency stop is released\"}, {\"point\": 2, \"met\": true, \"evidence\": \"there are no tools or loose parts on the conveyor\"}], \"contradiction\": false}",
+      "latency_ms": 1391
+    },
+    {
+      "tag": "A07",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 488,
+      "output_tokens": 69,
+      "cost_micro_usd": 833,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"The answer states '420 bottles per minute'\"}, {\"point\": 1, \"met\": true, \"evidence\": \"The answer states 'after 10 minutes of stable running'\"}], \"contradiction\": false}",
+      "latency_ms": 2656
+    },
+    {
+      "tag": "A08",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 491,
+      "output_tokens": 81,
+      "cost_micro_usd": 896,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"The answer states 'Food-grade H1 grease' directly matching the expected point\"}, {\"point\": 1, \"met\": true, \"evidence\": \"The answer states 'NLGI 2' directly matching the expected point\"}], \"contradiction\": false}",
+      "latency_ms": 1500
+    },
+    {
+      "tag": "A09",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 472,
+      "output_tokens": 51,
+      "cost_micro_usd": 727,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"weekly\"}, {\"point\": 1, \"met\": true, \"evidence\": \"on Mondays\"}], \"contradiction\": false}",
+      "latency_ms": 1687
+    },
+    {
+      "tag": "A10",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 479,
+      "output_tokens": 88,
+      "cost_micro_usd": 919,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"The answer contains 'daily' when describing when the conveyor chain gets its dry lubricant spray.\"}, {\"point\": 1, \"met\": true, \"evidence\": \"The answer contains 'at the start of each shift' as part of the lubrication schedule.\"}], \"contradiction\": false}",
+      "latency_ms": 1329
+    },
+    {
+      "tag": "A11",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 481,
+      "output_tokens": 65,
+      "cost_micro_usd": 806,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"Answer contains 'Food-grade gear oil'\"}, {\"point\": 1, \"met\": true, \"evidence\": \"Answer contains 'ISO VG 220'\"}], \"contradiction\": false}",
+      "latency_ms": 1906
+    },
+    {
+      "tag": "A12",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 462,
+      "output_tokens": 65,
+      "cost_micro_usd": 787,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"The answer explicitly states 'The task code LUB-02 is used when a lubrication task is recorded', which directly identifies and references LUB-02\"}], \"contradiction\": false}",
+      "latency_ms": 1562
+    },
+    {
+      "tag": "A13",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 487,
+      "output_tokens": 56,
+      "cost_micro_usd": 767,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"report it on the work order\"}, {\"point\": 1, \"met\": true, \"evidence\": \"tell the maintenance lead\"}], \"contradiction\": false}",
+      "latency_ms": 1782
+    },
+    {
+      "tag": "A14",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 517,
+      "output_tokens": 80,
+      "cost_micro_usd": 917,
+      "raw_output": "{\"points\":[{\"point\":0,\"met\":true,\"evidence\":\"low bowl level appears directly in the answer\"},{\"point\":1,\"met\":true,\"evidence\":\"product supply valve PV-3 is mentioned in the answer\"},{\"point\":2,\"met\":true,\"evidence\":\"level in the product tank is referenced in the answer\"}],\"contradiction\":false}",
+      "latency_ms": 2171
+    },
+    {
+      "tag": "A15",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 524,
+      "output_tokens": 84,
+      "cost_micro_usd": 944,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"stop the infeed, clear the jammed bottles\"}, {\"point\": 1, \"met\": true, \"evidence\": \"reset the fault at the panel\"}, {\"point\": 2, \"met\": true, \"evidence\": \"restart in jog mode\"}], \"contradiction\": false}",
+      "latency_ms": 1250
+    },
+    {
+      "tag": "A17",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 490,
+      "output_tokens": 78,
+      "cost_micro_usd": 880,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"Answer states 'At most 2 filling valves may be isolated'\"}, {\"point\": 1, \"met\": false, \"evidence\": \"Answer does not mention stopping the filler or calling maintenance if a third valve leaks\"}], \"contradiction\": false}",
+      "latency_ms": 1438
+    },
+    {
+      "tag": "A18",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 477,
+      "output_tokens": 59,
+      "cost_micro_usd": 772,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"above 6 °C\"}, {\"point\": 1, \"met\": false, \"evidence\": \"The answer does not mention call quality\"}], \"contradiction\": false}",
+      "latency_ms": 1437
+    },
+    {
+      "tag": "A19",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 478,
+      "output_tokens": 53,
+      "cost_micro_usd": 743,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"monthly\"}, {\"point\": 1, \"met\": true, \"evidence\": \"hand-held vibration meter\"}], \"contradiction\": false}",
+      "latency_ms": 1219
+    },
+    {
+      "tag": "A20",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 456,
+      "output_tokens": 40,
+      "cost_micro_usd": 656,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"The answer explicitly states 'electrical cabinet E3'\"}], \"contradiction\": false}",
+      "latency_ms": 1110
+    },
+    {
+      "tag": "A21",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 481,
+      "output_tokens": 56,
+      "cost_micro_usd": 761,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"opening valve V-9\"}, {\"point\": 1, \"met\": true, \"evidence\": \"on the pneumatic panel\"}], \"contradiction\": false}",
+      "latency_ms": 1984
+    },
+    {
+      "tag": "A22",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 488,
+      "output_tokens": 53,
+      "cost_micro_usd": 753,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"press the start button\"}, {\"point\": 1, \"met\": true, \"evidence\": \"Nothing may move\"}], \"contradiction\": false}",
+      "latency_ms": 1203
+    },
+    {
+      "tag": "A23",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 516,
+      "output_tokens": 74,
+      "cost_micro_usd": 886,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"the lock may be cut only with the shift lead and the plant manager both present as witnesses\"}, {\"point\": 1, \"met\": true, \"evidence\": \"the event is recorded in the LOTO register\"}], \"contradiction\": false}",
+      "latency_ms": 2172
+    },
+    {
+      "tag": "A24",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 479,
+      "output_tokens": 54,
+      "cost_micro_usd": 749,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"the operator of the machine\"}, {\"point\": 1, \"met\": true, \"evidence\": \"the shift lead\"}], \"contradiction\": false}",
+      "latency_ms": 1391
+    },
+    {
+      "tag": "A25",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 454,
+      "output_tokens": 58,
+      "cost_micro_usd": 744,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"The answer states 'The OEE target for Line 2 is 78%' which contains the expected value of 78%\"}], \"contradiction\": false}",
+      "latency_ms": 2000
+    },
+    {
+      "tag": "A26",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 452,
+      "output_tokens": 48,
+      "cost_micro_usd": 692,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"The answer explicitly mentions 'Star wheel set B' which directly references 'set B'\"}], \"contradiction\": false}",
+      "latency_ms": 1984
+    },
+    {
+      "tag": "A27",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 456,
+      "output_tokens": 60,
+      "cost_micro_usd": 756,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"The answer states 'The guide rail setting for 500 ml bottles is 72 mm.' which directly contains the value '72 mm'\"}], \"contradiction\": false}",
+      "latency_ms": 1844
+    },
+    {
+      "tag": "A28",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 457,
+      "output_tokens": 53,
+      "cost_micro_usd": 722,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"The answer states '40 mm' when describing how much the filler is raised for 500 ml bottles.\"}], \"contradiction\": false}",
+      "latency_ms": 1734
+    },
+    {
+      "tag": "A29",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 456,
+      "output_tokens": 51,
+      "cost_micro_usd": 711,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"The answer explicitly mentions '500-L' as a label roll type used for 500 ml bottles.\"}], \"contradiction\": false}",
+      "latency_ms": 1406
+    },
+    {
+      "tag": "A30",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 477,
+      "output_tokens": 77,
+      "cost_micro_usd": 862,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"Answer states '3 first-off bottles'\"}, {\"point\": 1, \"met\": true, \"evidence\": \"Answer states bottles 'go to the lab' which implies waiting for lab approval before proceeding to full speed\"}], \"contradiction\": false}",
+      "latency_ms": 2219
+    },
+    {
+      "tag": "A31",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 474,
+      "output_tokens": 77,
+      "cost_micro_usd": 859,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"it was blocked - shown in 'Rinser nozzle 7 was blocked'\"}, {\"point\": 1, \"met\": true, \"evidence\": \"it was replaced - shown in 'has been replaced'\"}], \"contradiction\": false}",
+      "latency_ms": 2156
+    },
+    {
+      "tag": "A32",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 456,
+      "output_tokens": 58,
+      "cost_micro_usd": 746,
+      "raw_output": "{\"points\":[{\"point\":0,\"met\":true,\"evidence\":\"The answer states 'The labeler glue station is set to 160 °C' which directly contains the expected point of 160 °C.\"}],\"contradiction\":false}",
+      "latency_ms": 1563
+    },
+    {
+      "tag": "A33",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 452,
+      "output_tokens": 57,
+      "cost_micro_usd": 737,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"The answer states 'The refill for CO2 bank A is expected on Thursday' which contains the expected point 'Thursday'\"}], \"contradiction\": false}",
+      "latency_ms": 1906
+    },
+    {
+      "tag": "A34",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 473,
+      "output_tokens": 72,
+      "cost_micro_usd": 833,
+      "raw_output": "{\"points\":[{\"point\":0,\"met\":true,\"evidence\":\"The answer states 'inspected monthly' which directly contains the word 'monthly'\"},{\"point\":1,\"met\":true,\"evidence\":\"The answer states 'for wear and cracks' which directly matches the expected point\"}],\"contradiction\":false}",
+      "latency_ms": 1469
+    },
+    {
+      "tag": "A35",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 489,
+      "output_tokens": 61,
+      "cost_micro_usd": 794,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"every 6 months\"}, {\"point\": 1, \"met\": true, \"evidence\": \"or earlier if a head gives low torque readings\"}], \"contradiction\": false}",
+      "latency_ms": 1203
+    },
+    {
+      "tag": "A36",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 481,
+      "output_tokens": 109,
+      "cost_micro_usd": 1026,
+      "raw_output": "{\"points\":[{\"point\":0,\"met\":true,\"evidence\":\"The answer states 'The cap size used on Line 2 is 28 mm', which contains '28 mm'\"},{\"point\":1,\"met\":false,\"evidence\":\"The answer does not mention 'for both 330 ml and 500 ml' or any volume specifications. It only states the cap size for Line 2 without indicating whether this applies to both bottle volumes.\"}],\"contradiction\":false}",
+      "latency_ms": 1812
+    },
+    {
+      "tag": "A37",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 468,
+      "output_tokens": 63,
+      "cost_micro_usd": 783,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"The answer states 'The fill level specification for 500 ml bottles is 500 ml ± 5 ml.' which directly matches the expected point.\"}], \"contradiction\": false}",
+      "latency_ms": 2079
+    },
+    {
+      "tag": "A38",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 476,
+      "output_tokens": 56,
+      "cost_micro_usd": 756,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"The answer states 'between 1.2 and 2.0 Nm' which exactly matches the expected point.\"}], \"contradiction\": false}",
+      "latency_ms": 1765
+    },
+    {
+      "tag": "A39",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 516,
+      "output_tokens": 69,
+      "cost_micro_usd": 861,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"the pallet is held in production with a yellow HOLD tag\"}, {\"point\": 1, \"met\": true, \"evidence\": \"The shift lead and quality lab must be notified\"}], \"contradiction\": false}",
+      "latency_ms": 2860
+    },
+    {
+      "tag": "A40",
+      "feature": "eval_judge",
+      "prompt": "eval_judge@v1",
+      "input_tokens": 464,
+      "output_tokens": 69,
+      "cost_micro_usd": 809,
+      "raw_output": "{\"points\": [{\"point\": 0, \"met\": true, \"evidence\": \"The answer states 'The CO2 content target for sparkling water is 5.5 g/L' which directly matches the expected point of 5.5 g/L\"}], \"contradiction\": false}",
+      "latency_ms": 1484
+    }
+  ]
+}

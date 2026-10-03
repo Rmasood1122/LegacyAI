@@ -47,7 +47,13 @@ def strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
             return [walk(n) for n in node]
         if not isinstance(node, dict):
             return node
-        out = {k: walk(v) for k, v in node.items() if k not in _UNSUPPORTED and not (k == "minItems" and v not in (0, 1))}
+        out: dict[str, Any] = {}
+        for k, v in node.items():
+            if k in ("properties", "$defs") and isinstance(v, dict):
+                # the keys here are FIELD or definition names (a field may be called "title"): keep every one
+                out[k] = {name: walk(sub) for name, sub in v.items()}
+            elif k not in _UNSUPPORTED and not (k == "minItems" and v not in (0, 1)):
+                out[k] = walk(v)
         if out.get("type") == "object" or "properties" in out:
             out["additionalProperties"] = False
             out["required"] = sorted(out.get("properties", {}).keys())

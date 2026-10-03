@@ -98,3 +98,14 @@ def test_a_timeout_is_a_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_blocks_are_labelled() -> None:
     text = render_blocks((DataBlock("S1", "a"), DataBlock("S2", "b")))
     assert '<data label="S1">' in text and '<data label="S2">' in text
+
+
+def test_a_field_named_like_a_schema_keyword_is_kept() -> None:
+    """Found by the first real call: stripping the keyword "title" also removed the FIELD "title", so the model never produced it."""
+    from app.ai_gateway import ItemExtractOutput
+    from app.ai_gateway.outputs import OUTPUT_MODELS
+
+    s = strict_schema(ItemExtractOutput.model_json_schema())
+    assert set(s["properties"]) == {"substantive", "title", "body", "quote"} and "title" in s["required"]
+    for model in OUTPUT_MODELS.values():      # every output model keeps every one of its fields
+        assert set(strict_schema(model.model_json_schema())["properties"]) == set(model.model_fields)

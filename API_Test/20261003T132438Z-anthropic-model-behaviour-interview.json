@@ -1,0 +1,436 @@
+{
+  "kind": "model behaviour without database - interview",
+  "provider": "anthropic",
+  "model": "claude-haiku-4-5-20251001",
+  "started_at": "2026-10-03T13:23:40.427955+00:00",
+  "finished_at": "2026-10-03T13:24:38.542110+00:00",
+  "budget_micro_usd": 2000000,
+  "recorded_spend_before_micro_usd": 198199,
+  "total_cost_micro_usd": 24140,
+  "stopped_by_budget": false,
+  "calls_made": 30,
+  "input_tokens": 13530,
+  "output_tokens": 2122,
+  "errors": 0,
+  "invalid_outputs": 15,
+  "latency_ms_median": 1891,
+  "result": {
+    "summary": {
+      "turns": 15,
+      "questions_worded": 15,
+      "items_extracted": 0,
+      "items_whose_quote_is_in_the_answer": 0
+    },
+    "rows": {
+      "turns": [
+        {
+          "turn": 1,
+          "topic": "Star wheel lubrication",
+          "expert_answer": "I grease the star wheel bearings every 250 hours with the H1 grease and always wipe off the excess, because drips on the bottle path give us contamination complaints.",
+          "question": "Walk me through the specific steps you follow when you lubricate the star wheel bearings—from when you first inspect them to when you wipe them clean. What are the most common mistakes you've seen newcomers make that lead to contamination?"
+        },
+        {
+          "turn": 2,
+          "topic": "CO2 supply",
+          "expert_answer": "When F33 comes up I switch to CO2 bank B straight away and phone the gas supplier; bank A usually runs out on Wednesday nights in summer.",
+          "question": "When you check the CO2 banks themselves, what are you looking for in terms of pressure readings or physical condition, and how often do you need to check them?"
+        },
+        {
+          "turn": 3,
+          "topic": "Capper torque and springs",
+          "expert_answer": "The springs on the capper heads weaken after about five months, so I change them before the six months in the old sheet and check five caps per head afterwards.",
+          "question": "When you're setting up the capper torque for a new product run, what specific steps do you go through to find the right torque setting, and what problems do you see most often when the torque is wrong?"
+        },
+        {
+          "turn": 4,
+          "topic": "Lock-out tag-out",
+          "expert_answer": "Before I open a guard I lock out at cabinet E3, open valve V-9 to dump the air and press start to prove that nothing moves.",
+          "question": "When you need to work inside the guards on the star wheel or capper heads, walk me through exactly how you isolate the energy and what you do before you put your hands in there. What are the steps you always follow?"
+        },
+        {
+          "turn": 5,
+          "topic": "Filling valve leaks",
+          "expert_answer": "A leaking filling valve is almost always the lower seal. Two isolated valves are fine; at the third I stop the filler because the fill levels start drifting.",
+          "question": "When a filling valve starts leaking, how do you first notice it's happening, and what are the steps you take to fix it?"
+        },
+        {
+          "turn": 6,
+          "topic": "Rinser nozzles",
+          "expert_answer": "The rinser nozzles block with limescale, so I soak them in descaler for an hour every Friday instead of waiting for them to block.",
+          "question": "When a rinser nozzle gets blocked, what signs do you see first on the machine or in the product that tell you something is wrong with that nozzle?"
+        },
+        {
+          "turn": 7,
+          "topic": "Gearbox maintenance",
+          "expert_answer": "The gearbox oil is changed every 4000 hours, and I take an oil sample at 2000 hours to look for metal particles before they do damage.",
+          "question": "When you take an oil sample from the main gearbox, walk me through exactly how you do it—where you collect it from, what container you use, how often you do it, and what you're looking for in the results that would tell you something is wrong."
+        },
+        {
+          "turn": 8,
+          "topic": "Spare parts store",
+          "expert_answer": "I keep the spare parts store key; the critical spares are the filling valve seals, the capper springs and one spare star wheel set.",
+          "question": "When you need a critical spare part from the store, what's your process for getting it out—who do you contact, where is the key kept, and what do you do if the part isn't there or is the wrong one?"
+        },
+        {
+          "turn": 9,
+          "topic": "Star wheel lubrication",
+          "expert_answer": "Star wheel bearings that run hot usually have too much grease rather than too little, so I never pump in more than two strokes.",
+          "question": "Walk me through what you actually do when you're greasing the star wheel bearings—what grease do you use, how often, how much, and what specific points do you grease to avoid getting contamination into the fill mechanism?"
+        },
+        {
+          "turn": 10,
+          "topic": "CO2 supply",
+          "expert_answer": "In summer I keep one full CO2 bank on site at all times, because the supplier needs up to a day when they are busy.",
+          "question": "Tell me about how you monitor and maintain the CO2 supply system and CO2 banks—what do you check regularly, what problems do you catch before they shut down production, and what would you tell someone new about keeping that system running?"
+        },
+        {
+          "turn": 11,
+          "topic": "Capper torque and springs",
+          "expert_answer": "If one capper head drifts low on torque while the others are fine, it is nearly always that head's spring, not the setting.",
+          "question": "When you're setting or adjusting the capper torque, what specific signs tell you the torque is too tight or too loose, and how do you check if the setting needs to be changed?"
+        },
+        {
+          "turn": 12,
+          "topic": "Lock-out tag-out",
+          "expert_answer": "Never let anyone remove your lock for you, even at the end of a long shift; if the key is lost the shift lead and plant manager must be there.",
+          "question": "When you need to work inside the guards on the capping heads or star wheel area, walk me through the exact steps you take to lock out and tag out the machine so it cannot start up while you're in there."
+        },
+        {
+          "turn": 13,
+          "topic": "Filling valve leaks",
+          "expert_answer": "After replacing a filling valve seal, test that valve in jog mode with water before running product through it.",
+          "question": "When a filling valve starts leaking, what are the first things you check or do to diagnose whether it's something you can fix on the line versus needing a replacement valve?"
+        },
+        {
+          "turn": 14,
+          "topic": "Rinser nozzles",
+          "expert_answer": "If the rinser pressure drops below 2.5 bar, check the nozzles before you touch the pump settings.",
+          "question": "When a rinser nozzle gets blocked, what's the first sign you notice on the line, and what's your go-to method for clearing it?"
+        },
+        {
+          "turn": 15,
+          "topic": "Gearbox maintenance",
+          "expert_answer": "Every spare that leaves the store is written on the clipboard inside the door, so the reorder list stays right.",
+          "question": "Walk me through your process for taking an oil sample from the main gearbox—where do you take it from, what container do you use, how often do you do it, and what warning signs in a sample would tell you something is going wrong with the gearbox?"
+        }
+      ]
+    }
+  },
+  "calls": [
+    {
+      "tag": "ask-0",
+      "feature": "interview_question",
+      "prompt": "interview_question@v1",
+      "input_tokens": 340,
+      "output_tokens": 59,
+      "cost_micro_usd": 635,
+      "raw_output": "{\"question\": \"Walk me through the specific steps you follow when you lubricate the star wheel bearings—from when you first inspect them to when you wipe them clean. What are the most common mistakes you've seen newcomers make that lead to contamination?\"}",
+      "latency_ms": 3265
+    },
+    {
+      "tag": "extract-0",
+      "feature": "item_extract",
+      "prompt": "item_extract@v1",
+      "input_tokens": 409,
+      "output_tokens": 101,
+      "cost_micro_usd": 914,
+      "raw_output": "{\"substantive\": true, \"body\": \"Grease star wheel bearings every 250 hours using H1 grease. Always wipe off excess grease to prevent drips on the bottle path, which can cause contamination complaints.\", \"quote\": \"I grease the star wheel bearings every 250 hours with the H1 grease and always wipe off the excess, because drips on the bottle path give us contamination complaints.\"}",
+      "invalid_output": "ValidationError",
+      "latency_ms": 2719
+    },
+    {
+      "tag": "ask-1",
+      "feature": "interview_question",
+      "prompt": "interview_question@v1",
+      "input_tokens": 389,
+      "output_tokens": 42,
+      "cost_micro_usd": 599,
+      "raw_output": "{\"question\": \"When you check the CO2 banks themselves, what are you looking for in terms of pressure readings or physical condition, and how often do you need to check them?\"}",
+      "latency_ms": 1969
+    },
+    {
+      "tag": "extract-1",
+      "feature": "item_extract",
+      "prompt": "item_extract@v1",
+      "input_tokens": 401,
+      "output_tokens": 84,
+      "cost_micro_usd": 821,
+      "raw_output": "{\"substantive\": true, \"body\": \"When F33 indicator appears, immediately switch to CO2 bank B and contact the gas supplier. Bank A typically depletes on Wednesday nights during summer months.\", \"quote\": \"When F33 comes up I switch to CO2 bank B straight away and phone the gas supplier; bank A usually runs out on Wednesday nights in summer.\"}",
+      "invalid_output": "ValidationError",
+      "latency_ms": 1500
+    },
+    {
+      "tag": "ask-2",
+      "feature": "interview_question",
+      "prompt": "interview_question@v1",
+      "input_tokens": 444,
+      "output_tokens": 54,
+      "cost_micro_usd": 714,
+      "raw_output": "{\"question\": \"When you're setting up the capper torque for a new product run, what specific steps do you go through to find the right torque setting, and what problems do you see most often when the torque is wrong?\"}",
+      "latency_ms": 2078
+    },
+    {
+      "tag": "extract-2",
+      "feature": "item_extract",
+      "prompt": "item_extract@v1",
+      "input_tokens": 402,
+      "output_tokens": 92,
+      "cost_micro_usd": 862,
+      "raw_output": "{\"substantive\": true, \"body\": \"Springs on capper heads weaken after about five months of use. Replace them before the six-month mark mentioned in old documentation. After replacement, check five caps per head to verify proper function.\", \"quote\": \"The springs on the capper heads weaken after about five months, so I change them before the six months in the old sheet and check five caps per head afterwards.\"}",
+      "invalid_output": "ValidationError",
+      "latency_ms": 2078
+    },
+    {
+      "tag": "ask-3",
+      "feature": "interview_question",
+      "prompt": "interview_question@v1",
+      "input_tokens": 497,
+      "output_tokens": 55,
+      "cost_micro_usd": 772,
+      "raw_output": "{\"question\": \"When you need to work inside the guards on the star wheel or capper heads, walk me through exactly how you isolate the energy and what you do before you put your hands in there. What are the steps you always follow?\"}",
+      "latency_ms": 2344
+    },
+    {
+      "tag": "extract-3",
+      "feature": "item_extract",
+      "prompt": "item_extract@v1",
+      "input_tokens": 400,
+      "output_tokens": 92,
+      "cost_micro_usd": 860,
+      "raw_output": "{\"substantive\": true, \"body\": \"Before opening a guard, lock out at cabinet E3, open valve V-9 to dump the air, and press start to verify that nothing moves. This proves the system is safe before proceeding.\", \"quote\": \"Before I open a guard I lock out at cabinet E3, open valve V-9 to dump the air and press start to prove that nothing moves.\"}",
+      "invalid_output": "ValidationError",
+      "latency_ms": 1750
+    },
+    {
+      "tag": "ask-4",
+      "feature": "interview_question",
+      "prompt": "interview_question@v1",
+      "input_tokens": 544,
+      "output_tokens": 36,
+      "cost_micro_usd": 724,
+      "raw_output": "{\"question\": \"When a filling valve starts leaking, how do you first notice it's happening, and what are the steps you take to fix it?\"}",
+      "latency_ms": 1265
+    },
+    {
+      "tag": "extract-4",
+      "feature": "item_extract",
+      "prompt": "item_extract@v1",
+      "input_tokens": 404,
+      "output_tokens": 106,
+      "cost_micro_usd": 934,
+      "raw_output": "{\"substantive\": true, \"body\": \"When a filling valve leaks, the problem is almost always the lower seal. A few isolated leaking valves can be tolerated, but once you reach a third valve that leaks, stop using the filler because fill levels will start to drift.\", \"quote\": \"A leaking filling valve is almost always the lower seal. Two isolated valves are fine; at the third I stop the filler because the fill levels start drifting.\"}",
+      "invalid_output": "ValidationError",
+      "latency_ms": 2641
+    },
+    {
+      "tag": "ask-5",
+      "feature": "interview_question",
+      "prompt": "interview_question@v1",
+      "input_tokens": 541,
+      "output_tokens": 43,
+      "cost_micro_usd": 756,
+      "raw_output": "{\"question\": \"When a rinser nozzle gets blocked, what signs do you see first on the machine or in the product that tell you something is wrong with that nozzle?\"}",
+      "latency_ms": 1984
+    },
+    {
+      "tag": "extract-5",
+      "feature": "item_extract",
+      "prompt": "item_extract@v1",
+      "input_tokens": 401,
+      "output_tokens": 93,
+      "cost_micro_usd": 866,
+      "raw_output": "{\"substantive\": true, \"body\": \"Rinser nozzles can block with limescale buildup. To prevent blockages, soak the nozzles in descaler for an hour every Friday rather than waiting until they become blocked.\", \"quote\": \"The rinser nozzles block with limescale, so I soak them in descaler for an hour every Friday instead of waiting for them to block.\"}",
+      "invalid_output": "ValidationError",
+      "latency_ms": 1407
+    },
+    {
+      "tag": "ask-6",
+      "feature": "interview_question",
+      "prompt": "interview_question@v1",
+      "input_tokens": 543,
+      "output_tokens": 64,
+      "cost_micro_usd": 863,
+      "raw_output": "{\"question\": \"When you take an oil sample from the main gearbox, walk me through exactly how you do it—where you collect it from, what container you use, how often you do it, and what you're looking for in the results that would tell you something is wrong.\"}",
+      "latency_ms": 1796
+    },
+    {
+      "tag": "extract-6",
+      "feature": "item_extract",
+      "prompt": "item_extract@v1",
+      "input_tokens": 404,
+      "output_tokens": 104,
+      "cost_micro_usd": 924,
+      "raw_output": "{\"substantive\": true, \"body\": \"Gearbox oil should be changed every 4000 hours of operation. An oil sample should be taken at 2000 hours to check for metal particles, which can indicate damage developing in the gearbox before it becomes serious.\", \"quote\": \"The gearbox oil is changed every 4000 hours, and I take an oil sample at 2000 hours to look for metal particles before they do damage.\"}",
+      "invalid_output": "ValidationError",
+      "latency_ms": 1625
+    },
+    {
+      "tag": "ask-7",
+      "feature": "interview_question",
+      "prompt": "interview_question@v1",
+      "input_tokens": 544,
+      "output_tokens": 56,
+      "cost_micro_usd": 824,
+      "raw_output": "{\"question\": \"When you need a critical spare part from the store, what's your process for getting it out—who do you contact, where is the key kept, and what do you do if the part isn't there or is the wrong one?\"}",
+      "latency_ms": 1704
+    },
+    {
+      "tag": "extract-7",
+      "feature": "item_extract",
+      "prompt": "item_extract@v1",
+      "input_tokens": 398,
+      "output_tokens": 77,
+      "cost_micro_usd": 783,
+      "raw_output": "{\"substantive\": true, \"body\": \"The spare parts store key is kept by one person. The most critical spare parts to maintain on hand are filling valve seals, capper springs, and one complete spare star wheel set.\", \"quote\": \"the critical spares are the filling valve seals, the capper springs and one spare star wheel set\"}",
+      "invalid_output": "ValidationError",
+      "latency_ms": 1671
+    },
+    {
+      "tag": "ask-8",
+      "feature": "interview_question",
+      "prompt": "interview_question@v1",
+      "input_tokens": 547,
+      "output_tokens": 57,
+      "cost_micro_usd": 832,
+      "raw_output": "{\"question\": \"Walk me through what you actually do when you're greasing the star wheel bearings—what grease do you use, how often, how much, and what specific points do you grease to avoid getting contamination into the fill mechanism?\"}",
+      "latency_ms": 1625
+    },
+    {
+      "tag": "extract-8",
+      "feature": "item_extract",
+      "prompt": "item_extract@v1",
+      "input_tokens": 397,
+      "output_tokens": 83,
+      "cost_micro_usd": 812,
+      "raw_output": "{\"substantive\": true, \"body\": \"Star wheel bearings that run hot typically have too much grease, not too little. When servicing them, use no more than two strokes when pumping grease.\", \"quote\": \"Star wheel bearings that run hot usually have too much grease rather than too little, so I never pump in more than two strokes.\"}",
+      "invalid_output": "ValidationError",
+      "latency_ms": 1516
+    },
+    {
+      "tag": "ask-9",
+      "feature": "interview_question",
+      "prompt": "interview_question@v1",
+      "input_tokens": 530,
+      "output_tokens": 58,
+      "cost_micro_usd": 820,
+      "raw_output": "{\"question\": \"Tell me about how you monitor and maintain the CO2 supply system and CO2 banks—what do you check regularly, what problems do you catch before they shut down production, and what would you tell someone new about keeping that system running?\"}",
+      "latency_ms": 2281
+    },
+    {
+      "tag": "extract-9",
+      "feature": "item_extract",
+      "prompt": "item_extract@v1",
+      "input_tokens": 397,
+      "output_tokens": 97,
+      "cost_micro_usd": 882,
+      "raw_output": "{\"substantive\": true, \"body\": \"Keep one full CO2 bank on site during summer. The supplier can take up to a day to deliver when they are busy, so maintaining a full backup tank ensures you don't run out of CO2 while waiting for replenishment.\", \"quote\": \"In summer I keep one full CO2 bank on site at all times, because the supplier needs up to a day when they are busy.\"}",
+      "invalid_output": "ValidationError",
+      "latency_ms": 2375
+    },
+    {
+      "tag": "ask-10",
+      "feature": "interview_question",
+      "prompt": "interview_question@v1",
+      "input_tokens": 530,
+      "output_tokens": 49,
+      "cost_micro_usd": 775,
+      "raw_output": "{\"question\": \"When you're setting or adjusting the capper torque, what specific signs tell you the torque is too tight or too loose, and how do you check if the setting needs to be changed?\"}",
+      "latency_ms": 1407
+    },
+    {
+      "tag": "extract-10",
+      "feature": "item_extract",
+      "prompt": "item_extract@v1",
+      "input_tokens": 399,
+      "output_tokens": 83,
+      "cost_micro_usd": 814,
+      "raw_output": "{\"substantive\": true, \"body\": \"If one capper head drifts low on torque while others remain fine, the problem is typically the spring on that specific head rather than the torque setting.\", \"quote\": \"If one capper head drifts low on torque while the others are fine, it is nearly always that head's spring, not the setting.\"}",
+      "invalid_output": "ValidationError",
+      "latency_ms": 1484
+    },
+    {
+      "tag": "ask-11",
+      "feature": "interview_question",
+      "prompt": "interview_question@v1",
+      "input_tokens": 526,
+      "output_tokens": 53,
+      "cost_micro_usd": 791,
+      "raw_output": "{\"question\": \"When you need to work inside the guards on the capping heads or star wheel area, walk me through the exact steps you take to lock out and tag out the machine so it cannot start up while you're in there.\"}",
+      "latency_ms": 2203
+    },
+    {
+      "tag": "extract-11",
+      "feature": "item_extract",
+      "prompt": "item_extract@v1",
+      "input_tokens": 401,
+      "output_tokens": 96,
+      "cost_micro_usd": 881,
+      "raw_output": "{\"substantive\": true, \"body\": \"Never allow anyone to remove your lock for you, even when you are tired at the end of a long shift. If a key is lost, both the shift lead and plant manager must be present before the lock is removed.\", \"quote\": \"Never let anyone remove your lock for you, even at the end of a long shift; if the key is lost the shift lead and plant manager must be there.\"}",
+      "invalid_output": "ValidationError",
+      "latency_ms": 2469
+    },
+    {
+      "tag": "ask-12",
+      "feature": "interview_question",
+      "prompt": "interview_question@v1",
+      "input_tokens": 526,
+      "output_tokens": 45,
+      "cost_micro_usd": 751,
+      "raw_output": "{\"question\": \"When a filling valve starts leaking, what are the first things you check or do to diagnose whether it's something you can fix on the line versus needing a replacement valve?\"}",
+      "latency_ms": 2062
+    },
+    {
+      "tag": "extract-12",
+      "feature": "item_extract",
+      "prompt": "item_extract@v1",
+      "input_tokens": 390,
+      "output_tokens": 74,
+      "cost_micro_usd": 760,
+      "raw_output": "{\"substantive\": true, \"body\": \"After replacing a filling valve seal, test the valve in jog mode with water before running product through it. This ensures the seal is working correctly before processing actual product.\", \"quote\": \"After replacing a filling valve seal, test that valve in jog mode with water before running product through it.\"}",
+      "invalid_output": "ValidationError",
+      "latency_ms": 1391
+    },
+    {
+      "tag": "ask-13",
+      "feature": "interview_question",
+      "prompt": "interview_question@v1",
+      "input_tokens": 521,
+      "output_tokens": 41,
+      "cost_micro_usd": 726,
+      "raw_output": "{\"question\": \"When a rinser nozzle gets blocked, what's the first sign you notice on the line, and what's your go-to method for clearing it?\"}",
+      "latency_ms": 1812
+    },
+    {
+      "tag": "extract-13",
+      "feature": "item_extract",
+      "prompt": "item_extract@v1",
+      "input_tokens": 394,
+      "output_tokens": 96,
+      "cost_micro_usd": 874,
+      "raw_output": "{\"substantive\": true, \"body\": \"If the rinser pressure drops below 2.5 bar, check the nozzles before adjusting the pump settings. This means inspecting the nozzles first as they are likely the source of the pressure problem rather than a pump malfunction.\", \"quote\": \"If the rinser pressure drops below 2.5 bar, check the nozzles before you touch the pump settings.\"}",
+      "invalid_output": "ValidationError",
+      "latency_ms": 1891
+    },
+    {
+      "tag": "ask-14",
+      "feature": "interview_question",
+      "prompt": "interview_question@v1",
+      "input_tokens": 520,
+      "output_tokens": 65,
+      "cost_micro_usd": 845,
+      "raw_output": "{\"question\": \"Walk me through your process for taking an oil sample from the main gearbox—where do you take it from, what container do you use, how often do you do it, and what warning signs in a sample would tell you something is going wrong with the gearbox?\"}",
+      "latency_ms": 1641
+    },
+    {
+      "tag": "extract-14",
+      "feature": "item_extract",
+      "prompt": "item_extract@v1",
+      "input_tokens": 391,
+      "output_tokens": 67,
+      "cost_micro_usd": 726,
+      "raw_output": "{\"substantive\": true, \"body\": \"To maintain an accurate reorder list for spare parts, record every spare that leaves the store on a clipboard kept inside the door.\", \"quote\": \"Every spare that leaves the store is written on the clipboard inside the door, so the reorder list stays right.\"}",
+      "invalid_output": "ValidationError",
+      "latency_ms": 2109
+    }
+  ]
+}
