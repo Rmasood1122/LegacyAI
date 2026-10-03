@@ -37,8 +37,11 @@ CI run 37125776171 on commit `fe5ef55`: 10 of 10 jobs green.
    card write items only for its own person, and the session did not tell the screen who that person is. Fixed by
    adding one field, `person_id`, to the session answer. This is a small change to the API contract; no new operation.
 2. **Redaction blanked out an ordinary word.** A document titled "Boiler manual (synthetic)" was stored and shown as
-   "[PERSON_1] manual (synthetic)": "Boiler" was taken for a person's name. Not fixed. It is the same weakness the
-   Phase 2 redaction test measured (6 of 40 hard cases wrongly redacted), now visible on a screen.
+   "[PERSON_1] manual (synthetic)": "Boiler" was taken for a person's name. **Narrowly fixed afterwards** (commit
+   `0f2886e`): a name finding made only of equipment words from a built-in list of 38 ("boiler", "valve", "pump" ...)
+   is kept as text; a real name beside such a word is still redacted (tested). This is not a general cure: other
+   ordinary words can still be blanked out, and the company allow-list remains the remedy for those. Redaction recall
+   on the golden set is unchanged (398 of 410) in CI run 37127546475.
 3. A new company does not have the "reviewer" role switched on; reviewing is done by the "expert" role there. The
    tests were corrected; the product was not changed.
 
@@ -46,12 +49,17 @@ CI run 37125776171 on commit `fe5ef55`: 10 of 10 jobs green.
 
 Three independent reviews (object-oriented design, clean architecture, interface design), two rounds. No critical
 finding in either round. Round 1: six warnings, all fixed. Round 2: four new warnings, of which one is fixed
-(a wrong word in an on-screen hint). **Open warnings:**
+(a wrong word in an on-screen hint) at once and the other three afterwards (commit `0f2886e`, CI run 37127546475,
+10 of 10 jobs green; 49 web unit tests, 9 of 9 browser tests):
 
-- The home screen's "questions for you" count can be too low when there are more than 50 (no "+" shown).
-- If a document is created but its file upload fails, trying again creates a second document instead of re-sending
-  the file.
-- The lint rule that keeps features apart would not catch an import from a sub-folder (no feature has one today).
+- The home screen now says "At least N" when the list of waiting questions was cut short (unit test).
+- A failed file upload is retried on the same document instead of creating a second one (unit test). The browser
+  tests do not cover this case.
+- Lint now refuses sub-folders inside a feature, which the feature-isolation rule relies on (self-test case added;
+  20 deliberate violations rejected).
+
+No design-review warning is open. The suggestions the reviews listed were not all taken (see the review notes in
+`docs/phase3/01-web-application.md`).
 
 ## Deviations from the proposal
 
