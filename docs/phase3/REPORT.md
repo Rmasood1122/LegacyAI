@@ -1,4 +1,4 @@
-# Phase 3a report — the first screens
+# Phase 3 report — the screens (3a, then 3b below)
 
 > Written 2026-10-03. Every claim is backed by a CI run or labelled ASSUMPTION / NOT PROVEN.
 > Proposal: `docs/phase3/00-proposal.md` (approved by the founder). Design notes: `docs/phase3/01-web-application.md`.
@@ -12,8 +12,8 @@ with the fake AI. **They are not deployed anywhere**, so nobody can open them on
 Screens built (step 3a of the proposal): sign in and first-time set-up, home, ask, documents, knowledge and
 verification, review queue, my consent and contributions.
 
-Not built (step 3b): interview, topics and gaps, readiness test, people and cards, company settings and audit log,
-operator console.
+Step 3b (interview, topics and gaps, readiness test, people and cards, company settings and audit log, operator
+console) was built afterwards: see "Phase 3b" at the end of this document.
 
 ## Evidence
 
@@ -83,3 +83,84 @@ No design-review warning is open. The suggestions the reviews listed were not al
 ## Cost
 
 $0. No paid AI call was made for this phase. Total real-AI spend of the project stays $0.642 (Phase 2 evaluation).
+
+---
+
+# Phase 3b — the remaining screens
+
+> Added 2026-10-03. Evidence: CI run 37132958848 on commit `e39b614`, 10 of 10 jobs green.
+
+## In plain language
+
+The remaining six groups of screens are built: interviews, topics and gaps, readiness test and question bank, people
+and cards, company administration (settings, AI budget, audit log, export, consents), and the operator console.
+**Still not deployed.** While testing them, a real privacy fault of Phase 2 was found and fixed, and the rule behind
+it is now enforced for every list in the API.
+
+## Evidence
+
+| Claim | Evidence |
+|---|---|
+| The new screens work with the real API in a real browser | browser tests: 16 of 16 passed (Chromium, fake AI). New flows: an expert accepts an interview and answers a turn; an admin sets topics and reads the gap report; reviewers generate and approve questions, a learner takes the test and opens the report; an admin issues a card and suspends it; the owner opens settings and the audit log; a learner is offered no management screen and the API refuses each one directly |
+| Web unit tests | 90 passed |
+| Lint keeps the layers apart | 22 deliberate violations rejected, 3 clean files accepted |
+| API | 656 tests passed, 1 skipped; statements 85.98 %, branches 81.43 % |
+| The operator console | **unit tests only; no browser test** |
+
+## A privacy fault found by the browser tests (Phase 2 code)
+
+**What was wrong:** a card of an Expert or Successor could list the consent records of every person in its company
+(who agreed to what, and when). Those roles hold the right to read consents only for their own records; the policy
+allowed the list on condition that the result is filtered, and the list did not filter. Read from the code and then
+confirmed by a test; nothing is deployed and all data is invented, so no real record was exposed.
+
+**Fix 1:** the consent list applies the filter. Test: a learner sees its own consent, not a colleague's, also when
+asking for the colleague by id; the owner sees both.
+
+**Fix 2, the rule behind it (decision D23):** every route that reads a whole list must declare how the condition is
+met — filtered in the API (7 routes), filter passed to the AI service (5), or "one company-wide answer" (9). A request
+whose policy decision demands a filter is refused, and the refusal is written to the audit log, unless the route
+filters or passes the filter on. A list route that declares nothing is refused. One more list had the same fault in
+a latent form: the redaction allow-list returned the company list to a department-scope card (the Department Manager
+role, which a new company does not have switched on). That card is now refused.
+
+**Review before pushing:** an independent read of the change found no way around the check and no wrong filter.
+Its four low-severity notes, all open:
+
+- The gap report is narrowed by the right to read knowledge, not by the right to read gaps. No single role differs
+  between the two today; a card holding two particular roles together could see a company-wide gap report.
+- "Filtered" and "passed on" are declarations. The tests pin the declarations and prove the refusal; they do not
+  prove that each handler's query really uses the filter (the consent list has its own test; the others were read).
+- The Department Manager is now refused the redaction allow-list; the settings screen may still show that panel
+  and then an error.
+- The "declares nothing" refusal covers GET routes only; other undeclared reads are refused only when a filter is due.
+
+## Design reviews
+
+Three reviews, two rounds, then one round of fixes. No critical finding. Round 1: nine warnings, all fixed.
+Round 2: five warnings, all fixed in the third round, which was then covered by the security read above and by CI
+but **not by another design review**. Fixed among them: confirmation buttons could be confirmed after their inputs
+changed (for example a different card number in owner recovery); typed test answers could be lost at hand-in; the
+answer key was hidden by a rule that would have failed open on an unknown test state.
+
+## What the API lacks for these screens (not changed)
+
+- **No way to link a knowledge item to a topic.** Generated test questions therefore cannot reach a test through
+  the screens alone; the browser test makes that link directly in the test database. **Until this exists, the
+  readiness test is not usable end to end by a customer.**
+- No list of job roles (typed by name); the people of a job role cannot be read back (the form replaces the list).
+- No list of the tests a person has taken.
+- Expert questions and "my consents" have no next page.
+- The session lists permissions without their scope, so the menu uses a stand-in ("may read company settings") to
+  decide who is offered consent administration.
+
+## Done, but NOT proven (3b)
+
+- Not deployed; the container image still does not include the screens.
+- One browser (Chromium), desktop size; passkeys in a real browser untested; no test with real people.
+- People and cards: only the read-only restriction can be edited; other restrictions are displayed.
+- The accessibility result is an automated scan of the screens the tests visit.
+
+## Cost
+
+$0 for Phase 3. Total real-AI spend of the project stays $0.642.
