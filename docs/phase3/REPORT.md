@@ -71,7 +71,7 @@ No design-review warning is open. The suggestions the reviews listed were not al
 
 ## Done, but NOT proven
 
-- **Not deployed.** The container image does not yet include the screens (`WEB_DIST_DIR` is not set in it).
+- **Not deployed.** At the end of 3a the container image did not include the screens; it does now (see the 3b part below).
 - **Passkeys** in a real browser: unit-tested with a stand-in only; the browser tests sign in with authenticator codes.
 - **One browser only** (Chromium), desktop size. No Firefox, Safari or phone.
 - **Real AI answers on the screens**: the browser tests use the fake AI.
