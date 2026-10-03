@@ -23,8 +23,8 @@ export function argumentRules(): void {
   // only lists that can be continued are paged lists
   // @ts-expect-error getSource is not a list
   useApiList('getSource');
-  // @ts-expect-error listMyConsents accepts no cursor
-  useApiList('listMyConsents');
+  // @ts-expect-error listRedactionAllowlist accepts no cursor
+  useApiList('listRedactionAllowlist');
   useApiList('listSources', { query: { limit: 10 } });
 
   // a change that needs a path cannot be made without it; one that needs nothing takes nothing

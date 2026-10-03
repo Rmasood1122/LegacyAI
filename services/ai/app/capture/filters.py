@@ -127,3 +127,18 @@ def condition(spec: Any, table: str, token_tenant_id: str) -> tuple[str, list[An
             return NOTHING  # "verified only" cannot be honoured on this table: show nothing
         sql += f" AND {descriptor.verified}"
     return sql + ")", params
+
+
+def topic_condition(spec: Any, token_tenant_id: str) -> tuple[str, list[Any]]:
+    """The condition for topics (alias tp) from the token's `topic_filter`: which topics this card may READ.
+
+    It must be the filter of the permission topic:read - the filter of another permission (for example the one for
+    reading knowledge) says nothing about topics and gives FALSE. Topics are not verified or unverified, so the
+    "verified only" rule for learners does not apply to them (the API's own topic list ignores it in the same way);
+    everything else is as strict as condition(): anything missing or malformed gives FALSE.
+    """
+    if not isinstance(spec, dict) or spec.get("action") != "topic:read":
+        return NOTHING
+    if not isinstance(spec.get("only_verified", False), bool):
+        return NOTHING
+    return condition({**spec, "only_verified": False}, "topics", token_tenant_id)

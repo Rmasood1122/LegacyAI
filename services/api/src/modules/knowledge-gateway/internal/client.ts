@@ -21,6 +21,8 @@ export interface TokenClaims {
   card_phase: 'normal' | 'grace';
   request_id: string;
   filter?: FilterSpec | null;
+  /** Which topics the card may read (permission topic:read): sent by operations that show or link an item's topics. */
+  topic_filter?: FilterSpec | null;
   approved?: string[];
   limits?: Record<string, number>;
 }
@@ -96,7 +98,7 @@ export class AiServiceClient {
     const now = Math.floor(Date.now() / 1000);   // real time: the AI service checks the token against its own clock
     const body: Record<string, unknown> = {
       action, tenant_id: claims.tenant_id, card_id: claims.card_id, person_id: claims.person_id, roles: claims.roles,
-      card_phase: claims.card_phase, request_id: claims.request_id, filter: claims.filter ?? null, approved: claims.approved ?? [],
+      card_phase: claims.card_phase, request_id: claims.request_id, filter: claims.filter ?? null, topic_filter: claims.topic_filter ?? null, approved: claims.approved ?? [],
       limits: claims.limits ?? {},
     };
     if (subject !== undefined) body.subject = subject;

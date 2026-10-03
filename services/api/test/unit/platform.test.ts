@@ -3,7 +3,7 @@
 import { inspect } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import {
-  canonicalDetails, ConfigError, createLogger, loadConfig, scrub, scrubString, Secret, stripOneTimeSecrets,
+  canonicalDetails, ConfigError, createLogger, decodeCursor, decodeIdCursor, encodeCursor, loadConfig, scrub, scrubString, Secret, stripOneTimeSecrets,
 } from '../../src/modules/platform/index.ts';
 import { testEnv } from '../helpers/env.ts';
 
@@ -220,5 +220,23 @@ describe('grouped secrets (docs/phase2/01, "Secrets: five")', () => {
     expect(loadConfig(testEnv()).aiServiceIdentity).toBe('none');
     expect(loadConfig(testEnv({ AI_SERVICE_IDENTITY: 'google-metadata' })).aiServiceIdentity).toBe('google-metadata');
     expect(() => loadConfig(testEnv({ AI_SERVICE_IDENTITY: 'anything' }))).toThrow(ConfigError);
+  });
+});
+
+describe('list cursors', () => {
+  const id = '01a10174-0000-7000-8000-000000000001';
+
+  it('an id cursor round-trips, and nothing else is accepted as one', () => {
+    expect(decodeIdCursor(encodeCursor(id))).toBe(id);
+    expect(decodeIdCursor(undefined)).toBeNull();
+    for (const bad of ['1234', 'abc', id.slice(0, 35), `${id}0`, id.toUpperCase(), "'; DROP TABLE topics; --", '']) {
+      expect(() => decodeIdCursor(encodeCursor(bad)), bad).toThrowError();
+    }
+    expect(() => decodeIdCursor(42)).toThrowError();
+  });
+
+  it('a numbered cursor (the audit log is ordered by sequence number) is still accepted by the general decoder', () => {
+    expect(decodeCursor(encodeCursor(1234))).toBe('1234');
+    expect(() => decodeCursor(encodeCursor('not hex'))).toThrowError();
   });
 });

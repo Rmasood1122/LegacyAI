@@ -205,3 +205,21 @@ What the API does not offer, and what the screens do about it (no contract chang
 - **API side (not a screen):** routes that read a whole collection declare how the list is narrowed
   (`docs/decisions.md`, D23). No change to the HTTP contract.
 - Not done: one `requires` list instead of `requiredOperation` + `alsoRequires` (review suggestion API-030).
+
+## After Phase 3b: the screens use five added operations (decision D24)
+
+- **Knowledge item:** a "Topics" card shows the item's topics and how each link was made; a card that may label
+  items and read topics can replace them (`features/knowledge/ItemTopics.tsx`). Saving is blocked while the topic list
+  is cut short, because the saved list replaces the links.
+  On an item that is already verified, the API refuses its contributor and the author of its current version (the
+  second-reviewer rule, decision D24); the card shows the API's refusal. The screen cannot know this in advance, because
+  the session does not say who contributed an item.
+- **Job roles and gaps:** job roles that have topics are offered as buttons; the people form starts from the people
+  stored for the role (`getRolePeople`) instead of an empty form with a warning.
+- **Readiness test:** job roles are offered when starting; a "Tests taken" table (the learner's own, or the company's
+  for Owner and Admin) links back to each test and its report.
+- **Questions and my consents:** "Show more" fetches the next page.
+
+Unit tests: `features/gaps-closed.test.tsx` (9). Browser test: a reviewer links the seeded item to its topic through
+the screen; the test seed no longer writes that link to the database.
+

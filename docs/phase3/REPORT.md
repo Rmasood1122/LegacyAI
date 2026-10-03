@@ -143,16 +143,23 @@ but **not by another design review**. Fixed among them: confirmation buttons cou
 changed (for example a different card number in owner recovery); typed test answers could be lost at hand-in; the
 answer key was hidden by a rule that would have failed open on an unknown test state.
 
-## What the API lacks for these screens (not changed)
+## What the API lacked for these screens
 
-- **No way to link a knowledge item to a topic.** Generated test questions therefore cannot reach a test through
-  the screens alone; the browser test makes that link directly in the test database. **Until this exists, the
-  readiness test is not usable end to end by a customer.**
-- No list of job roles (typed by name); the people of a job role cannot be read back (the form replaces the list).
-- No list of the tests a person has taken.
-- Expert questions and "my consents" have no next page.
-- The session lists permissions without their scope, so the menu uses a stand-in ("may read company settings") to
-  decide who is offered consent administration.
+State at the end of Phase 3b, and what was closed afterwards (decision D24; five operations added, 124 in total;
+no permission or grant changed, no migration). **Until a CI run is named here, the closing is written and passes
+the local checks only: the database tests and browser tests for it have not run.**
+
+- **CLOSED — link a knowledge item to topics.** A reviewer does it on the item's screen (on a verified item: a second person,
+  not its contributor or the author of its current version - enforced by the API, decision D24)
+  (`PUT /v1/knowledge/items/{id}/topics`). The browser test now makes the link through the screen; nothing in the
+  tests writes it to the database any more.
+- **CLOSED — job roles.** They are listed (`GET /v1/job-roles`) and offered to pick from on the gap screen and when
+  starting a test; a role's people are read back, so the people form starts from what is stored. Limit: a job role
+  with people but no topics is not in the list (it is still typed by name).
+- **CLOSED — tests taken.** `GET /v1/readiness/attempts`: a learner sees its own, Owner and Admin the company's.
+- **CLOSED — next page** for expert questions and "my consents".
+- **OPEN —** the session lists permissions without their scope, so the menu still uses a stand-in ("may read company
+  settings") to decide who is offered consent administration.
 
 ## Done, but NOT proven (3b)
 

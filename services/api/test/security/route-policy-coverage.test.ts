@@ -106,15 +106,15 @@ describe('the list of routes that skip the session check is short and pinned', (
     const known = new Set((await su.query('SELECT permission_key FROM permissions')).rows.map((r) => r.permission_key as string));
     await su.end();
     const session = t.app.http.registeredRoutes().filter((r) => r.kind === 'session' || r.kind === 'gateway');
-    expect(session).toHaveLength(113);
+    expect(session).toHaveLength(118);
     for (const r of session) expect(known.has(r.permission!), `${r.operationId} uses unknown permission ${r.permission}`).toBe(true);
   });
 
-  it('routes registered in the server == operations in openapi.yaml (119, no more, no fewer)', () => {
+  it('routes registered in the server == operations in openapi.yaml (124, no more, no fewer)', () => {
     const registered = t.app.http.registeredRoutes().map((r) => `${r.method} ${r.path}`).sort();
     const contract = [...t.app.http.contract.operations.values()].map((o) => `${o.method} ${o.path}`).sort();
     expect(registered).toEqual(contract);
-    expect(registered).toHaveLength(119);
+    expect(registered).toHaveLength(124);
     // and Fastify itself knows no route beyond those (HEAD/OPTIONS helpers aside)
     const printed = t.app.http.app.printRoutes({ commonPrefix: false });
     expect(printed).not.toMatch(/rogue/);
@@ -239,7 +239,8 @@ describe('a read of a whole collection must say how it is narrowed to what the c
       .map((r) => [r.operationId, typeof r.listFilter === 'string' ? r.listFilter : 'unfiltered']));
     expect(declared).toEqual({
       listCards: 'applied', listPeople: 'applied', listConsents: 'applied', listReviewTasks: 'applied', listSources: 'applied',
-      listInterviews: 'applied', listTopics: 'applied',
+      listInterviews: 'applied', listTopics: 'applied', listJobRoles: 'applied', getRoleTopics: 'applied', getRolePeople: 'applied',
+      listReadinessAttempts: 'applied',
       askKnowledge: 'delegated', listKnowledgeItems: 'delegated', getGapReport: 'delegated', listExpertQuestions: 'delegated',
       listQuizQuestions: 'delegated',
       listRoles: 'unfiltered', listDepartments: 'unfiltered', listTenants: 'unfiltered', listAuditEvents: 'unfiltered',
@@ -293,7 +294,7 @@ describe('a read of a whole collection must say how it is narrowed to what the c
 });
 
 describe('real app: a card with almost no permissions cannot get a 2xx from anything it is not granted', () => {
-  it('walks all 113 protected operations as a Successor', async () => {
+  it('walks all 118 protected operations as a Successor', async () => {
     const su = await superuser();
     const granted = new Set((await su.query(`SELECT permission_key FROM role_permissions WHERE role_key = 'successor'`)).rows.map((r) => r.permission_key as string));
     await su.end();
@@ -311,7 +312,7 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
       renewCompanyCard: {}, recoverOwnerCard: { card_id: tenant.ownerCard.id, verification_reference: 'CASE-000001' },
       // Phase 2: valid bodies, so that the contract check cannot be what stops the request
       createSource: { title: 'x', company_document: true }, setSourceLabels: { sensitivity: 1 }, createKnowledgeItem: { title: 'x', body: 'x' },
-      proposeItemVersion: { body: 'x' }, reopenKnowledgeItem: {}, setItemLabels: { sensitivity: 1 },
+      proposeItemVersion: { body: 'x' }, reopenKnowledgeItem: {}, setItemLabels: { sensitivity: 1 }, setItemTopics: { topic_ids: [] },
       revertVerifications: { card_id: tenant.ownerCard.id, since: '2026-01-01T00:00:00Z', until: '2026-12-31T00:00:00Z' },
       createInterview: { expert_person_id: successor.personId, job_role: 'x' }, answerInterviewTurn: { answer: 'x' }, createTopic: { name: 'x' },
       updateTopic: { name: 'x' }, setRoleTopics: { topics: [] }, setRolePeople: { people: [] }, suggestTopics: { source_id: randomUUID() },
@@ -337,8 +338,9 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
       if (res.status === 404 && !phase2Target) expect(op.operationId).toBe('getExport'); // the only Phase 1 one whose target does not exist
       denied += 1;
     }
-    // Phase 1: 40 protected operations minus the 12 the Successor's permissions reach; Phase 2: 73 minus the 18 its permissions reach.
-    expect(denied).toBe(28 + 55);
+    // Phase 1: 40 protected operations minus the 12 the Successor's permissions reach; Phase 2: 78 minus the 21 its permissions reach
+    // (of the five added later it reaches the job-role list, a role's topics and its own tests taken; not item topics, not a role's people).
+    expect(denied).toBe(28 + 57);
   });
 });
 

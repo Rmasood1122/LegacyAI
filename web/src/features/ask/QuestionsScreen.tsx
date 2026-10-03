@@ -1,7 +1,7 @@
 // Questions between colleagues: the ones sent to me as an expert (answer or decline), and the
 // ones I asked (see what became of them).
 import { useState, type FormEvent } from 'react';
-import { useApiMutation, useApiQuery } from '../../api/context.tsx';
+import { useApiList, useApiMutation } from '../../api/context.tsx';
 import type { KExpertQuestion } from '../../api/generated.ts';
 import { ScreenLink } from '../../navigation/ScreenLink.tsx';
 import { useSession } from '../../session/session.tsx';
@@ -29,8 +29,8 @@ export function QuestionsScreen() {
   const { can } = useSession();
   const mayAnswer = can('replyExpertQuestion');
   const [box, setBox] = useState<Box>(mayAnswer ? 'addressed' : 'asked');
-  const questions = useApiQuery('listExpertQuestions', { query: { box, limit: LIMIT } });
-  const items = questions.data?.items ?? [];
+  const questions = useApiList('listExpertQuestions', { query: { box, limit: LIMIT } });
+  const items = questions.items ?? [];
   return (
     <Page title="Questions" intro="When the documents cannot answer, a colleague can be asked. An expert’s answer becomes a draft knowledge item that a second person checks.">
       {mayAnswer && (
@@ -41,9 +41,9 @@ export function QuestionsScreen() {
       )}
       {questions.isPending && <Loading what="questions" />}
       <ErrorNote error={questions.error} />
-      {questions.data !== undefined && items.length === 0 && <Empty>{box === 'addressed' ? 'Nobody is waiting for an answer from you.' : 'You have not asked a colleague anything.'}</Empty>}
+      {questions.items !== undefined && items.length === 0 && <Empty>{box === 'addressed' ? 'Nobody is waiting for an answer from you.' : 'You have not asked a colleague anything.'}</Empty>}
       {items.map((q) => <QuestionCard key={q.id} question={q} mine={box === 'addressed' && mayAnswer} />)}
-      {questions.data !== undefined && questions.data.next_cursor !== null && <PartialListNote shown={items.length} noun="questions" />}
+      {questions.hasMore && <PartialListNote shown={items.length} noun="questions" busy={questions.isLoadingMore} onLoadMore={questions.loadMore} />}
     </Page>
   );
 }

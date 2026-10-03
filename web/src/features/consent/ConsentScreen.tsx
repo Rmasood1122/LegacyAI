@@ -1,7 +1,7 @@
 // My consent and my contributions: what I agreed to share, withdrawing it, and limiting who may
 // read what I contributed.
 import { useState, type FormEvent } from 'react';
-import { useApiList, useApiMutation, useApiQuery } from '../../api/context.tsx';
+import { useApiList, useApiMutation } from '../../api/context.tsx';
 import type { KConsent, KItemSummary } from '../../api/generated.ts';
 import { useSession } from '../../session/session.tsx';
 import { Badge, Banner, Button, Card, DataTable, Empty, ErrorNote, formatDate, humanize, Loading, Page, PartialListNote, SelectField, SENSITIVITY_LABELS, sensitivityLabel } from '../../ui/index.tsx';
@@ -37,10 +37,10 @@ const isLive = (c: KConsent): boolean => c.withdrawn_at === null && c.superseded
 
 export function ConsentScreen() {
   const { can } = useSession();
-  const consents = useApiQuery('listMyConsents');
+  const consents = useApiList('listMyConsents', { query: { limit: 50 } });
   const withdraw = useApiMutation('withdrawConsent', ['listMyConsents', 'listMyContributions']);
   const [confirming, setConfirming] = useState<string | null>(null);
-  const items = consents.data?.items ?? [];
+  const items = consents.items ?? [];
 
   return (
     <Page title="My consent" intro="You decide whether your own words and documents are used. You can withdraw at any time.">
@@ -49,7 +49,7 @@ export function ConsentScreen() {
       {consents.isPending && <Loading what="your consents" />}
       <ErrorNote error={consents.error ?? withdraw.error} />
       {withdraw.isSuccess && <Banner tone="success" title="Your consent was withdrawn">The material given under it is hidden now and is being erased.</Banner>}
-      {consents.data !== undefined && (items.length === 0 ? <Empty>You have not given any consent.</Empty> : (
+      {consents.items !== undefined && (items.length === 0 ? <Empty>You have not given any consent.</Empty> : (
         <DataTable caption="My consents" columns={['For', 'State', 'Given', 'Actions']}>
           {items.map((c) => {
             const s = consentState(c);
@@ -71,7 +71,7 @@ export function ConsentScreen() {
           })}
         </DataTable>
       ))}
-      {consents.data !== undefined && consents.data.next_cursor !== null && <PartialListNote shown={items.length} noun="consents" />}
+      {consents.hasMore && <PartialListNote shown={items.length} noun="consents" busy={consents.isLoadingMore} onLoadMore={consents.loadMore} />}
       {can('listMyContributions') && <Contributions />}
     </Page>
   );

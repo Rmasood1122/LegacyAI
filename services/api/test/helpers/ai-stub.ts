@@ -59,6 +59,9 @@ const DEFAULTS: Record<string, Answer> = {
     versions: [{ version_no: 1, change_kind: 'written', author_person_id: null, created_at: now(), erased_at: null, current: true }], provenance: [],
   }),
   'item.write': () => ({ id: id(), status: 'candidate' }),
+  'item.topics': (c) => ({
+    id: c.claims.subject, topics: (c.body.topic_ids as string[]).map((t) => ({ topic_id: t, name: 'Synthetic topic', link_source: 'reviewer' })),
+  }),
   'item.submit': (c) => ({ id: c.claims.subject, status: 'in_review' }),
   'item.verify': (c) => ({ id: c.claims.subject, status: 'verified' }),
   'item.reject': (c) => ({ id: c.claims.subject, status: 'rejected' }),

@@ -195,7 +195,7 @@ describe('knowledge', () => {
     usage_count: 0, verified_at: null, stale_after: null, updated_at: T, ...over,
   });
   const detail = (over: Partial<KItemDetail> = {}): KItemDetail => ({
-    ...summary(), body: 'The relief valve lifts at 6 bar.', self_verified: false, provenance: [],
+    ...summary(), body: 'The relief valve lifts at 6 bar.', self_verified: false, provenance: [], topics: [],
     versions: [{ version_no: 1, change_kind: 'created', author_person_id: null, created_at: T, erased_at: null, current: true }], ...over,
   });
   const at = { at: `/knowledge/${ID(30)}`, route: '/knowledge/:itemId' };

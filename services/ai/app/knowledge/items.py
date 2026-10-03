@@ -18,7 +18,7 @@ import psycopg
 from pgvector import HalfVector
 
 from app.ai_gateway import Caller, DataBlock, Embedder, Gateway, ItemExtractOutput
-from app.capture import consent_family, redact
+from app.capture import consent_family, redact, topic_condition
 from app.platform import Database, ServiceContext, one, write_audit
 
 BODY_MAX = 2000
@@ -314,6 +314,62 @@ def relabel(db: Database, ctx: ServiceContext, kind: str, target_id: str, depart
                     details={"sensitivity_from": int(before["sensitivity"]), "sensitivity_to": sensitivity,
                              "department_from": before["d"], "department_to": department_id, "count": n})
     return n
+
+
+MAX_TOPICS_PER_ITEM = 20
+
+
+def set_topics(db: Database, ctx: ServiceContext, item_id: str, topic_ids: list[str]) -> list[dict[str, Any]]:
+    """A reviewer says which topics an item belongs to (docs/phase2/05: "a reviewer can add or remove a link, and
+    manual links win"). The given list REPLACES the item's links to the topics THIS reviewer may read (the topic filter
+    in the token); a link to a topic the reviewer cannot see is neither shown nor removed. The new links are reviewer
+    links, so a later similarity run (which never touches existing links) leaves them alone. Every topic must be an
+    active topic of the same company; the composite foreign keys make a link to another company's topic impossible."""
+    wanted = list(dict.fromkeys(topic_ids))
+    if len(wanted) > MAX_TOPICS_PER_ITEM:
+        raise ItemRefused("too_many_topics", 422)
+    with db.tenant_tx(ctx.tenant_id) as cur:
+        item = _item(cur, ctx.tenant_id, item_id)
+        if item["status"] == "withdrawn":
+            raise ItemRefused("not_found", 404)
+        where, params = topic_condition(ctx.topic_filter, ctx.tenant_id)
+        before = {t["topic_id"] for t in item_topics(cur, ctx.tenant_id, item_id, where, params)}
+        if wanted:
+            # active topics of this company that this reviewer may read; anything else is "unknown" (the API checked the same)
+            cur.execute(f"SELECT tp.id::text AS id FROM topics tp WHERE tp.tenant_id = %s AND tp.id = ANY(%s::uuid[]) AND tp.status = 'active' AND {where}",
+                        [ctx.tenant_id, wanted, *params])
+            if {r["id"] for r in cur.fetchall()} != set(wanted):
+                raise ItemRefused("unknown_topic", 422)
+        cur.execute(
+            f"""DELETE FROM knowledge_item_topics kt USING topics tp
+                 WHERE tp.tenant_id = kt.tenant_id AND tp.id = kt.topic_id AND kt.tenant_id = %s AND kt.item_id = %s AND {where}""",
+            [ctx.tenant_id, item_id, *params])
+        for topic_id in wanted:
+            cur.execute("""INSERT INTO knowledge_item_topics (tenant_id, item_id, topic_id, link_source) VALUES (%s, %s, %s, 'reviewer')
+                           ON CONFLICT DO NOTHING""", (ctx.tenant_id, item_id, topic_id))
+        # One row for the request, and one per link that was really added or removed (ids only, never names): the log
+        # then shows WHICH topics an item was put into or taken out of, and by which card.
+        write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="knowledge:label", reason_code="ITEM_TOPICS_SET",
+                    resource_type="knowledge_item", resource_id=item_id, request_id=ctx.request_id,
+                    details={"item_id": item_id, "count": len(wanted)})
+        for changed, topic_ids_changed in (("removed", sorted(before - set(wanted))), ("added", sorted(set(wanted) - before))):
+            for topic_id in topic_ids_changed:
+                write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="knowledge:label",
+                            reason_code="ITEM_TOPIC_UNLINKED" if changed == "removed" else "ITEM_TOPIC_LINKED",
+                            resource_type="knowledge_item", resource_id=item_id, request_id=ctx.request_id,
+                            details={"item_id": item_id, "topic_id": topic_id, "changed": changed})
+        return item_topics(cur, ctx.tenant_id, item_id, where, params)
+
+
+def item_topics(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str, topic_where: str = "TRUE",
+                topic_params: list[Any] | None = None) -> list[dict[str, Any]]:
+    """The topics an item is linked to. `topic_where` narrows them to what a reader may see (alias tp)."""
+    cur.execute(
+        f"""SELECT kt.topic_id::text AS topic_id, tp.name, kt.link_source
+              FROM knowledge_item_topics kt JOIN topics tp ON tp.tenant_id = kt.tenant_id AND tp.id = kt.topic_id
+             WHERE kt.tenant_id = %s AND kt.item_id = %s AND {topic_where} ORDER BY tp.name, kt.topic_id""",
+        [tenant_id, item_id, *(topic_params or [])])
+    return [dict(r) for r in cur.fetchall()]
 
 
 def link_item_to_topics(cur: psycopg.Cursor[Any], *, tenant_id: str, item_id: str, item_vector: list[float], embedding_model: str,

@@ -40,6 +40,17 @@ export async function itemRef(tx: Tx, tenantId: string, id: unknown): Promise<(R
   };
 }
 
+/** Item states in which the item is (or was) released as verified knowledge: learners are tested on it and the gap report counts it. */
+const RELEASED = new Set(['verified', 'corrected', 'stale']);
+
+/**
+ * The item as the policy must see it when its TOPICS are changed. On a released item that change needs a second
+ * person, like verifying it (decision D24); on a draft or an item in review the author may still sort it into topics.
+ */
+export function forTopicChange<T extends ResourceRef & { status: string }>(ref: T): T {
+  return { ...ref, changes_released_knowledge: RELEASED.has(ref.status) };
+}
+
 export async function chunkRefs(tx: Tx, tenantId: string, ids: string[]): Promise<ResourceRef[]> {
   const valid = ids.filter(isId);
   if (valid.length === 0) return [];

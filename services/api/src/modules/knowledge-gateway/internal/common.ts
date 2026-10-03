@@ -45,6 +45,11 @@ export async function aiLimits(tx: Tx, tenantId: string): Promise<Record<string,
 export interface CallPlan extends Omit<AiCall, 'claims'> {
   /** Add the access filter of this permission to the token (for reads of stored content). */
   filterAction?: string;
+  /**
+   * Also add the card's topic:read filter, as a second and separate filter. The right to read knowledge up to a level
+   * says nothing about topics, so the topics of an item are never narrowed with `filterAction`.
+   */
+  topicFilter?: boolean;
   /** Add the AI limits to the token (only for operations that may call a model). */
   ai?: boolean;
   approved?: string[];
@@ -72,6 +77,7 @@ export function gatewayRoute(
       if ('result' in p) return p.result;
       const claims: TokenClaims = baseClaims(a.subject, a.decision, a.ctx);
       if (p.filterAction !== undefined) claims.filter = await deps.authorizer.filterSpec(a.tx, a.subject, p.filterAction, a.ctx);
+      if (p.topicFilter === true) claims.topic_filter = await deps.authorizer.filterSpec(a.tx, a.subject, 'topic:read', a.ctx);
       if (p.ai === true) claims.limits = await aiLimits(a.tx, a.subject.tenant_id);
       if (p.approved !== undefined) claims.approved = p.approved;
       const call: AiCall = { path: p.path, method: p.method, action: p.action, subject: p.subject, json: p.json, bytes: p.bytes, claims };

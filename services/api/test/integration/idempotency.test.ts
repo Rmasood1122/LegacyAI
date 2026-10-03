@@ -130,7 +130,7 @@ describe('idempotency keys', () => {
       'declineExpertQuestion', 'deleteRedactionAllowlistTerm', 'dismissReviewTask', 'editQuizQuestion', 'generateQuizQuestions', 'giveConsent',
       'holdConsent', 'overrideQuizAnswer', 'pauseInterview', 'proposeItemVersion', 'recordWithdrawalForPerson', 'rejectKnowledgeItem',
       'releaseConsentHold', 'reopenKnowledgeItem', 'replyExpertQuestion', 'restrictContribution', 'resumeInterview', 'retireKnowledgeItem',
-      'retireQuizQuestion', 'revertVerifications', 'saveAttemptAnswer', 'setAiKillSwitch', 'setItemLabels', 'setRolePeople', 'setRoleTopics',
+      'retireQuizQuestion', 'revertVerifications', 'saveAttemptAnswer', 'setAiKillSwitch', 'setItemLabels', 'setItemTopics', 'setRolePeople', 'setRoleTopics',
       'setSourceLabels', 'setTenantAiBudget', 'startReadinessAttempt', 'submitKnowledgeItem', 'submitReadinessAttempt', 'suggestTopics',
       'unassignReviewTask', 'updateKnowledgeSettings', 'updateTopic', 'verifyKnowledgeItem', 'withdrawConsent', 'withdrawSource'];
     for (const id of required) expect(t.app.http.contract.operations.get(id)?.idempotent, id).toBe(true);

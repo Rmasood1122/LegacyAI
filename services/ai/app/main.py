@@ -90,6 +90,10 @@ class Labels(Body):
     sensitivity: Sensitivity
 
 
+class ItemTopics(Body):
+    topic_ids: list[Uuid] = Field(max_length=20)
+
+
 class Revert(Body):
     verifier_card_id: Uuid
     since: str = Field(max_length=40)
@@ -181,6 +185,7 @@ class QuizList(Body):
 class QuestionBox(Body):
     box: Literal["asked", "addressed", "all"]
     limit: int = Field(default=50, ge=1, le=50)
+    after: Uuid | None = None
 
 
 class Services:
@@ -401,6 +406,10 @@ def create_app(services: Services | None = None) -> FastAPI:
                ctx: Annotated[ServiceContext, Depends(token("label.change", "target_id"))]) -> dict[str, Any]:
         return {"rows": items.relabel(svc().db, ctx, kind, target_id, body.department_id, body.sensitivity)}
 
+    @app.post("/internal/items/{item_id}/topics")
+    def item_topics(item_id: str, body: ItemTopics, ctx: Annotated[ServiceContext, Depends(token("item.topics", "item_id"))]) -> dict[str, Any]:
+        return {"id": item_id, "topics": items.set_topics(svc().db, ctx, item_id, body.topic_ids)}
+
     @app.post("/internal/verifications/revert")
     def revert(body: Revert, ctx: Annotated[ServiceContext, Depends(token("verification.revert"))]) -> dict[str, Any]:
         return {"count": items.revert_verifications(svc().db, ctx, body.verifier_card_id, body.since, body.until)}
@@ -474,7 +483,7 @@ def create_app(services: Services | None = None) -> FastAPI:
 
     @app.post("/internal/expert-questions/list")
     def eq_list(body: QuestionBox, ctx: Annotated[ServiceContext, Depends(token("expert_question.list"))]) -> dict[str, Any]:
-        return reads.list_expert_questions(svc().db, ctx, box=body.box, limit=body.limit)
+        return reads.list_expert_questions(svc().db, ctx, box=body.box, limit=body.limit, after=body.after)
 
     @app.post("/internal/expert-questions/{question_id}/reply")
     def eq_reply(question_id: str, body: ExpertReply,

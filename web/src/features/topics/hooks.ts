@@ -15,8 +15,12 @@ export const useReadyDocuments = ({ enabled }: { enabled: boolean }) => useApiLi
 
 /** The gap report of one job role; nothing is asked until a role is named. */
 export const useGapReport = (jobRole: string) => useApiQuery('getGapReport', { query: { job_role: jobRole } }, { enabled: jobRole !== '' });
-export const useSetRoleTopics = () => useApiMutation('setRoleTopics', ['getGapReport']);
-export const useSetRolePeople = () => useApiMutation('setRolePeople', ['getGapReport']);
+export const useSetRoleTopics = () => useApiMutation('setRoleTopics', ['getGapReport', 'listJobRoles', 'getRoleTopics']);
+export const useSetRolePeople = () => useApiMutation('setRolePeople', ['getGapReport', 'getRolePeople']);
+/** The job roles that already have topics (a role is only a name; one with no topics yet is typed in). */
+export const useJobRoles = ({ enabled }: { enabled: boolean }) => useApiList('listJobRoles', { query: { limit: 50 } }, { enabled });
+/** Who is set for a job role now. */
+export const useRolePeople = (jobRole: string, { enabled }: { enabled: boolean }) => useApiQuery('getRolePeople', { path: { job_role: jobRole } }, { enabled });
 export const useRolePeopleChoices = useActivePeople;
 
 type GapLabel = KGapReport['topics'][number]['label'];

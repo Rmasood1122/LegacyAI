@@ -8,7 +8,7 @@ import { Badge, Banner, Button, Card, CheckboxField, ConfirmButton, ErrorNote, L
 import {
   GENERATE_REFUSALS, useApproveQuestion, useEditQuestion, useGenerateQuestions, useQuestionList, useRetireQuestion, useVerifiedItems, type QuestionStatus,
 } from './hooks.ts';
-import { OpenByReference } from './ReadinessScreen.tsx';
+import { OpenByReference, TestsTaken } from './ReadinessScreen.tsx';
 
 const STATUS_TEXT: Readonly<Record<QuestionStatus, string>> = { draft: 'Drafts — waiting for approval', approved: 'Approved — used in tests', retired: 'Retired' };
 
@@ -52,6 +52,7 @@ export function QuestionBankScreen() {
         </Card>
       )))}
       {questions.hasMore && <PartialListNote shown={items.length} noun="questions" busy={questions.isLoadingMore} onLoadMore={questions.loadMore} />}
+      {can('listReadinessAttempts') && !can('startReadinessAttempt') && <TestsTaken />}
       {can('getReadinessReport') && !can('startReadinessAttempt') && <OpenByReference />}
     </Page>
   );

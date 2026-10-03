@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.capture import condition
-from app.knowledge.items import ItemRefused
+from app.capture import condition, topic_condition
+from app.knowledge.items import ItemRefused, item_topics
 from app.platform import Database, ServiceContext, one, write_audit
 
 PAGE = 50
@@ -72,11 +72,15 @@ def get_item(db: Database, ctx: ServiceContext, item_id: str) -> dict[str, Any]:
                  WHERE ci.tenant_id = %s AND ci.subject_type = 'knowledge_version' AND ci.subject_id = %s AND s.status = 'ready' AND {swhere}""",
             [ctx.tenant_id, item["current_version_id"], *sparams])
         provenance = [dict(r) for r in cur.fetchall()]
+        # only topics this reader may READ: the token's topic filter (permission topic:read), not the knowledge filter
+        twhere, tparams = topic_condition(ctx.topic_filter, ctx.tenant_id)
+        topics = item_topics(cur, ctx.tenant_id, item_id, twhere, tparams)
     current = next((v for v in versions if v["id"] == item["current_version_id"]), None)
     item["body"] = current["body"] if current else ""
     keep = ("version_no", "change_kind", "author_person_id", "created_at", "erased_at")
     item["versions"] = [{k: v[k] for k in keep} | {"current": v["id"] == item["current_version_id"]} for v in versions]
     item["provenance"] = provenance
+    item["topics"] = topics
     del item["current_version_id"]
     return item
 
@@ -135,22 +139,29 @@ def get_attempt(db: Database, ctx: ServiceContext, attempt_id: str) -> dict[str,
     return a
 
 
-def list_expert_questions(db: Database, ctx: ServiceContext, *, box: str, limit: int) -> dict[str, Any]:
-    """box: 'asked' (by me) or 'addressed' (to me) or 'all' (filtered: Owners)."""
+def list_expert_questions(db: Database, ctx: ServiceContext, *, box: str, limit: int, after: str | None = None) -> dict[str, Any]:
+    """box: 'asked' (by me) or 'addressed' (to me) or 'all' (filtered: Owners). Newest first; ids are time-ordered
+    (uuidv7), so the id of the last row is the cursor for the next page."""
     where, params = condition(ctx.filter, "expert_questions", ctx.tenant_id)
     extra, extra_params = "", list[Any]()
     if box == "asked":
         extra, extra_params = " AND eq.asked_by_card_id = %s", [ctx.card_id]
     elif box == "addressed":
         extra, extra_params = " AND eq.expert_person_id = %s", [ctx.person_id]
+    if after is not None:
+        extra += " AND eq.id < %s"
+        extra_params.append(after)
+    limit = max(1, min(limit, PAGE))
     with db.tenant_tx(ctx.tenant_id) as cur:
         cur.execute(
             f"""SELECT eq.id::text AS id, eq.question_redacted AS question, eq.expert_person_id::text AS expert_person_id, eq.status,
                        eq.decline_reason, eq.answer_item_id::text AS answer_item_id, eq.created_at, eq.answered_at, eq.expires_at
                   FROM expert_questions eq WHERE eq.tenant_id = %s AND eq.erased_at IS NULL AND {where}{extra}
-                 ORDER BY eq.created_at DESC LIMIT %s""", [ctx.tenant_id, *params, *extra_params, max(1, min(limit, PAGE))])
+                 ORDER BY eq.id DESC LIMIT %s""", [ctx.tenant_id, *params, *extra_params, limit + 1])
         rows = [_iso(dict(r), "created_at", "answered_at", "expires_at") for r in cur.fetchall()]
-    return {"items": rows, "next_cursor": None}
+    more = len(rows) > limit
+    rows = rows[:limit]
+    return {"items": rows, "next_cursor": rows[-1]["id"] if more and rows else None}
 
 
 def restrict_contribution(db: Database, ctx: ServiceContext, item_id: str, sensitivity: int) -> dict[str, Any]:

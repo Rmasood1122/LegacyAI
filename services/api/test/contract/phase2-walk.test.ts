@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { addMember, createTenant, platformOperator, startApp, superuser, type Res, type TestApp, type TestTenant } from '../helpers/harness.ts';
 
 const REAL = process.env.AI_SERVICE_URL_REAL;
-const PHASE2_OPERATIONS = 73;
+const PHASE2_OPERATIONS = 78;
 
 describe.skipIf(!REAL)('Phase 2 walk with the real AI service', () => {
   let t: TestApp;
@@ -49,7 +49,9 @@ describe.skipIf(!REAL)('Phase 2 walk with the real AI service', () => {
     for (const scope of ['own_words', 'documents', 'named_expert']) {
       ok('giveConsent', await e.post('/v1/consents', { scope, purpose: 'Synthetic walk', policy_version: 'walk-1' }), 201);
     }
-    ok('listMyConsents', await e.get('/v1/me/consents'), 200);
+    const mine = ok('listMyConsents', await e.get('/v1/me/consents?limit=2'), 200);
+    expect(mine.body.items).toHaveLength(2);                                   // three were given: the list is cut and says so
+    expect((await e.get(`/v1/me/consents?limit=2&cursor=${mine.body.next_cursor}`)).body.items).toHaveLength(1);
     ok('listConsents', await o.get(`/v1/consents?person_id=${expert.personId}`), 200);
 
     // ---- settings and budget
@@ -85,6 +87,13 @@ describe.skipIf(!REAL)('Phase 2 walk with the real AI service', () => {
     ok('setRoleTopics', await o.put(`/v1/job-roles/${encodeURIComponent(role)}/topics`, { topics: [{ topic_id: topic.body.id, importance: 3 }] }), 200);
     ok('setRolePeople', await o.put(`/v1/job-roles/${encodeURIComponent(role)}/people`, { people: [{ person_id: learner.personId, relation: 'successor' }] }), 200);
     ok('getGapReport', await o.get(`/v1/gaps?job_role=${encodeURIComponent(role)}`), 200);
+    const roles = ok('listJobRoles', await l.get('/v1/job-roles'), 200);
+    expect(roles.body.items).toEqual([{ job_role: role, topic_count: 1 }]);
+    const roleTopics = ok('getRoleTopics', await l.get(`/v1/job-roles/${encodeURIComponent(role)}/topics`), 200);
+    expect(roleTopics.body.topics).toEqual([{ topic_id: topic.body.id, required: true, importance: 3 }]);
+    const rolePeople = ok('getRolePeople', await o.get(`/v1/job-roles/${encodeURIComponent(role)}/people`), 200);
+    expect(rolePeople.body.people).toEqual([{ person_id: learner.personId, relation: 'successor' }]);
+    expect((await l.get(`/v1/job-roles/${encodeURIComponent(role)}/people`)).status).toBe(403);   // a learner has no gap report
 
     // ---- knowledge items and verification
     const itemRes = ok('createKnowledgeItem', await e.post('/v1/knowledge/items', {
@@ -103,10 +112,16 @@ describe.skipIf(!REAL)('Phase 2 walk with the real AI service', () => {
     expect((await r.post(`/v1/knowledge/items/${itemId}/verify`)).status).toBe(403);       // nobody confirms their own correction
     expect((await r2.post(`/v1/knowledge/items/${itemId}/verify`)).body.status).toBe('corrected');
     ok('setItemLabels', await o.patch(`/v1/knowledge/items/${itemId}/labels`, { department_id: null, sensitivity: 0 }), 200);   // released to learners
-    await su.query('BEGIN');
-    await su.query("SELECT set_config('app.tenant_id', $1, true)", [tenant.tenantId]);
-    await su.query(`INSERT INTO knowledge_item_topics (tenant_id, item_id, topic_id, link_source) VALUES ($1, $2, $3, 'reviewer')`, [tenant.tenantId, itemId, topic.body.id]);
-    await su.query('COMMIT');
+    // the reviewer links the item to its topic through the API (until 2026-10 this was only possible in the database)
+    expect((await l.put(`/v1/knowledge/items/${itemId}/topics`, { topic_ids: [topic.body.id] })).status).toBe(403);   // a learner may not
+    expect((await e.put(`/v1/knowledge/items/${itemId}/topics`, { topic_ids: [topic.body.id] })).status).toBe(403);   // nor its contributor, once it is verified
+    expect((await r.put(`/v1/knowledge/items/${itemId}/topics`, { topic_ids: [topic.body.id] })).status).toBe(403);   // nor the author of its current version
+    expect((await r2.put(`/v1/knowledge/items/${itemId}/topics`, { topic_ids: [randomUUID()] })).status).toBe(422);   // not a topic of this company
+    const linked = ok('setItemTopics', await r2.put(`/v1/knowledge/items/${itemId}/topics`, { topic_ids: [topic.body.id] }), 200);
+    expect(linked.body.topics).toEqual([{ topic_id: topic.body.id, name: 'Relief valves', link_source: 'reviewer' }]);
+    expect((await o.get(`/v1/knowledge/items/${itemId}`)).body.topics).toEqual(linked.body.topics);
+    const stored = await su.query('SELECT link_source FROM knowledge_item_topics WHERE item_id = $1 AND topic_id = $2', [itemId, topic.body.id]);
+    expect(stored.rows).toEqual([{ link_source: 'reviewer' }]);
 
     // ---- asking
     const answer = ok('askKnowledge', await l.post('/v1/knowledge/ask', { question: 'How often do I test a relief valve lever?' }), 200);
@@ -116,7 +131,11 @@ describe.skipIf(!REAL)('Phase 2 walk with the real AI service', () => {
     // ---- ask-the-expert
     const q1 = ok('createExpertQuestion', await l.post('/v1/expert-questions', { expert_person_id: expert.personId, question: 'What if the lever sticks?' }), 201);
     const q2 = ok('createExpertQuestion', await l.post('/v1/expert-questions', { expert_person_id: expert.personId, question: 'What is the payroll calendar?' }), 201);
-    ok('listExpertQuestions', await e.get('/v1/expert-questions?box=addressed'), 200);
+    const asked = ok('listExpertQuestions', await e.get('/v1/expert-questions?box=addressed&limit=1'), 200);
+    expect(asked.body.items.map((q: any) => q.id)).toEqual([q2.body.id]);      // newest first, one per page
+    const older = await e.get(`/v1/expert-questions?box=addressed&limit=1&cursor=${asked.body.next_cursor}`);
+    expect(older.body.items.map((q: any) => q.id)).toEqual([q1.body.id]);
+    expect(older.body.next_cursor).toBeNull();
     ok('replyExpertQuestion', await e.post(`/v1/expert-questions/${q1.body.id}/reply`, { answer: 'Tap it gently and report it; never force it.', title: 'Sticking lever' }), 200);
     ok('declineExpertQuestion', await e.post(`/v1/expert-questions/${q2.body.id}/decline`, { reason: 'not_my_area' }), 200);
 
@@ -145,6 +164,11 @@ describe.skipIf(!REAL)('Phase 2 walk with the real AI service', () => {
     ok('submitReadinessAttempt', await l.post(`/v1/readiness/attempts/${attempt.body.id}/submit`), 200);
     const read = ok('getReadinessAttempt', await l.get(`/v1/readiness/attempts/${attempt.body.id}`), 200);
     ok('overrideQuizAnswer', await r.post(`/v1/readiness/answers/${read.body.questions[0].answer_id}/override`, { score: 1 }), 200);
+    const taken = ok('listReadinessAttempts', await l.get('/v1/readiness/attempts'), 200);
+    expect(taken.body.items.map((a: any) => [a.id, a.job_role, a.learner_person_id])).toEqual([[attempt.body.id, role, learner.personId]]);
+    expect(JSON.stringify(taken.body)).not.toMatch(/correct_option|rubric|stem|score/);     // labels and times only
+    expect((await o.get('/v1/readiness/attempts')).body.items.map((a: any) => a.id)).toEqual([attempt.body.id]);   // the owner sees the company's
+    expect((await e.get('/v1/readiness/attempts')).status).toBe(403);                         // an expert has no right to results
     const report = ok('getReadinessReport', await o.get(`/v1/readiness/reports/${attempt.body.id}`), 200);
     expect(report.body.statement).toContain('not a certificate');
     ok('retireQuizQuestion', await r2.post(`/v1/readiness/questions/${qid}/retire`), 200);

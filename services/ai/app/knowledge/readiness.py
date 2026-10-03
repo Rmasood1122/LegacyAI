@@ -55,7 +55,7 @@ def generate(db: Database, ctx: ServiceContext, gateway: Gateway, caller: Caller
         cur.execute(
             """SELECT i.id::text AS id, i.current_version_id::text AS version_id, i.department_id::text AS department_id, i.owner_person_id::text AS owner,
                       v.body, (SELECT kt.topic_id::text FROM knowledge_item_topics kt WHERE kt.tenant_id = i.tenant_id AND kt.item_id = i.id
-                                ORDER BY kt.score DESC NULLS LAST LIMIT 1) AS topic_id
+                                ORDER BY (kt.link_source = 'reviewer') DESC, kt.score DESC NULLS LAST, kt.topic_id LIMIT 1) AS topic_id
                  FROM knowledge_items i JOIN knowledge_versions v ON v.tenant_id = i.tenant_id AND v.id = i.current_version_id
                 WHERE i.tenant_id = %s AND i.id = ANY(%s::uuid[]) AND i.status IN ('verified', 'corrected') AND i.sensitivity = 0""",
             (ctx.tenant_id, list(ctx.approved)))

@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { generate as totpGenerate } from 'otplib';
 import { TEST_ORIGIN } from '../helpers/env.ts';
-import { addMember, Client, enrollTotp, fromSecrets, login, platformOperator, startApp, superuser, type IssuedCard, type Res, type TestApp } from '../helpers/harness.ts';
+import { addMember, Client, enrollTotp, fromSecrets, login, platformOperator, startApp, type IssuedCard, type Res, type TestApp } from '../helpers/harness.ts';
 
 const PORT = Number(process.env.E2E_PORT ?? '8787');
 const CONTROL_PORT = Number(process.env.E2E_CONTROL_PORT ?? '8788');
@@ -26,6 +26,7 @@ interface Persona {
 
 /** The job role the seeded readiness material belongs to (web/e2e/more-screens.spec.ts types it). */
 const SEED_JOB_ROLE = 'Boiler operator';
+const SEED_TOPIC = 'Relief valves';   // the browser tests tick this topic by name (web/e2e/support.ts)
 
 function must(what: string, res: Res, status: number): Res {
   if (res.status !== status) throw new Error(`${what} failed: ${res.status} ${res.raw.slice(0, 300)}`);
@@ -59,7 +60,6 @@ async function main(): Promise<void> {
   const personas = new Map<string, Persona>();
   const ownerSecret = await enrollTotp(t, ownerCard);
   personas.set('owner', { card: ownerCard, totpSecret: ownerSecret, personId: null });
-  const tenantId = created.body.tenant.id as string;
   t.clock.advance(31_000);
   const owner = await login(t, ownerCard, { totp: ownerSecret });
   const cast = [['author', ['expert']], ['reviewer', ['expert']], ['reviewer2', ['expert']], ['learner', ['successor']], ['admin', ['admin']]] as const;
@@ -70,10 +70,10 @@ async function main(): Promise<void> {
 
   // Material for the readiness and gap screens, made through the API the way the both-services walk
   // does it (services/api/test/contract/phase2-walk.test.ts): a verified item released to learners,
-  // a topic, and a job role that needs the topic. One step has no API yet - linking an item to a
-  // topic - and is done directly in the test database, exactly as that walk does.
-  let seeded: Promise<{ job_role: string }> | null = null;
-  const seedReadiness = async (): Promise<{ job_role: string }> => {
+  // a topic, and a job role that needs the topic. Nothing is written to the database directly: the
+  // item is linked to its topic by a reviewer THROUGH THE SCREEN in web/e2e/more-screens.spec.ts.
+  let seeded: Promise<{ job_role: string; item_id: string }> | null = null;
+  const seedReadiness = async (): Promise<{ job_role: string; item_id: string }> => {
     t.clock.advance(31_000);
     const o = await login(t, ownerCard, { totp: ownerSecret });
     const writer = await addMember(t, o, [{ role_key: 'expert' }]);
@@ -86,22 +86,13 @@ async function main(): Promise<void> {
     must('submit item', await writer.client.post(`/v1/knowledge/items/${item}/submit`), 200);
     must('verify item', await checker.client.post(`/v1/knowledge/items/${item}/verify`), 200);
     must('release item', await o.patch(`/v1/knowledge/items/${item}/labels`, { department_id: null, sensitivity: 0 }), 200);
-    const topic = must('create topic', await o.post('/v1/topics', { name: 'Relief valves', description: 'monthly relief valve testing on the boiler' }), 201).body.id as string;
+    const topic = must('create topic', await o.post('/v1/topics', { name: SEED_TOPIC, description: 'monthly relief valve testing on the boiler' }), 201).body.id as string;
     const role = encodeURIComponent(SEED_JOB_ROLE);
     must('role topics', await o.put(`/v1/job-roles/${role}/topics`, { topics: [{ topic_id: topic, importance: 3 }] }), 200);
     const learner = personas.get('learner')?.personId;
     must('role people', await o.put(`/v1/job-roles/${role}/people`, { people: [{ person_id: learner, relation: 'successor' }] }), 200);
     must('test settings', await o.patch('/v1/knowledge/settings', { quiz_min_questions_per_topic: 1 }), 200);
-    const su = await superuser();
-    try {
-      await su.query('BEGIN');
-      await su.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
-      await su.query("INSERT INTO knowledge_item_topics (tenant_id, item_id, topic_id, link_source) VALUES ($1, $2, $3, 'reviewer')", [tenantId, item, topic]);
-      await su.query('COMMIT');
-    } finally {
-      await su.end();
-    }
-    return { job_role: SEED_JOB_ROLE };
+    return { job_role: SEED_JOB_ROLE, item_id: item };
   };
 
   await t.app.identity.hasher.warmUp();

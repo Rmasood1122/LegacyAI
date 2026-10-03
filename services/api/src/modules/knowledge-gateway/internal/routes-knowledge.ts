@@ -1,9 +1,9 @@
 // Documents (feature 25), cited answers (14, 15, 17) and the verification loop (12).
 import { problems } from '../../../shared/errors.ts';
 import type { ResourceRef } from '../../../shared/policy-types.ts';
-import { decodeCursor, encodeCursor, type RouteDef, type Tx } from '../../platform/index.ts';
+import { decodeIdCursor, encodeCursor, type RouteDef, type Tx } from '../../platform/index.ts';
 import { aiLimits, baseClaims, gatewayRoute, pick, uuidOrNull, withListFilter, type GatewayDeps } from './common.ts';
-import { chunkRefs, collectionRef, itemRef, newRef, sourceRef } from './resources.ts';
+import { chunkRefs, collectionRef, forTopicChange, itemRef, newRef, sourceRef, topicRef } from './resources.ts';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const SOURCE_COLUMNS = `id, kind, title, department_id, sensitivity, owner_person_id, status, failure_code, mime, byte_size, page_count,
@@ -109,7 +109,7 @@ export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
       listFilter: 'applied',
       policy: { resource: async ({ subject }) => collectionRef('source', subject.tenant_id) },
       handler: async ({ tx, subject, query, ctx }) => {
-        const after = decodeCursor(query.cursor);
+        const after = decodeIdCursor(query.cursor);
         const filter = await authorizer.filter(tx, subject, 'source:read', SOURCE_DESCRIPTOR, ctx, 4);
         const { rows } = await tx.query<SourceRow>(
           // eslint-disable-next-line no-restricted-syntax -- filter.sql is built by the policy module from code constants; all values are bound
@@ -218,17 +218,19 @@ export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
       async ({ subject }) => collectionRef('knowledge_item', subject.tenant_id),
       async ({ query }) => ({
         path: '/internal/items/list', action: 'item.list', filterAction: 'knowledge:read',
-        json: { status: query.status ?? null, owner_me: query.mine === true, limit: query.limit, after: decodeCursor(query.cursor) },
+        json: { status: query.status ?? null, owner_me: query.mine === true, limit: query.limit, after: decodeIdCursor(query.cursor) },
         map: (r) => ({ items: (r.items ?? []).map((i: any) => pick(i, ITEM_SUMMARY)), next_cursor: r.next_cursor ? encodeCursor(r.next_cursor) : null }),
       }))),
     gatewayRoute(deps, 'getKnowledgeItem',
       ({ tx, subject, params }) => itemRef(tx, subject.tenant_id, params.item_id),
       async ({ params }) => ({
         path: `/internal/items/${params.item_id}/read`, action: 'item.read', subject: params.item_id, filterAction: 'knowledge:read',
+        topicFilter: true,   // the item's topics are narrowed by topic:read, not by the right to read the item
         map: (r) => ({
           ...pick(r, [...ITEM_SUMMARY, 'body', 'self_verified']),
           versions: (r.versions ?? []).map((v: any) => pick(v, ['version_no', 'change_kind', 'author_person_id', 'created_at', 'erased_at', 'current'])),
           provenance: (r.provenance ?? []).map((p: any) => pick(p, ['source_id', 'title', 'page_from', 'page_to'])),
+          topics: (r.topics ?? []).map((t: any) => pick(t, ['topic_id', 'name', 'link_source'])),
         }),
       })),
     gatewayRoute(deps, 'createKnowledgeItem',
@@ -273,6 +275,29 @@ export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
         json: { department_id: body.department_id ?? null, sensitivity: body.sensitivity },
         map: (r) => ({ id: params.item_id, rows: r.rows }),
       })),
+    // A reviewer says which topics an item belongs to (docs/phase2/05 "a reviewer can add or remove a link, and manual
+    // links win"). It is a label of the item, so it needs knowledge:label on THAT item; and every topic named must be
+    // one this card may read - a topic it cannot see is answered exactly like one that does not exist.
+    // Second-reviewer rule: once an item is verified, its topics decide what learners are tested on and what the gap
+    // report counts, so its contributor and the author of its current version may not change them (forTopicChange).
+    gatewayRoute(deps, 'setItemTopics',
+      async ({ tx, subject, params }) => {
+        const ref = await itemRef(tx, subject.tenant_id, params.item_id);
+        return ref && forTopicChange(ref);
+      },
+      async ({ tx, subject, params, body, ctx }) => {
+        const ids = [...new Set(body.topic_ids as string[])];
+        for (const id of ids) {
+          const topic = await topicRef(tx, subject.tenant_id, id);
+          if (!topic || (await authorizer.decideOnly(tx, subject, 'topic:read', topic, ctx)).effect !== 'allow') throw problems.unprocessable('unknown topic');
+        }
+        return {
+          path: `/internal/items/${params.item_id}/topics`, action: 'item.topics', subject: params.item_id, json: { topic_ids: ids },
+          // the AI service replaces only links to topics this card may read: a link it cannot see is left alone
+          topicFilter: true,
+          map: (r) => ({ id: params.item_id, topics: (r.topics ?? []).map((t: any) => pick(t, ['topic_id', 'name', 'link_source'])) }),
+        };
+      }),
     gatewayRoute(deps, 'revertVerifications',
       async ({ subject }) => collectionRef('knowledge_item', subject.tenant_id),
       async ({ body }) => ({
@@ -284,7 +309,7 @@ export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
       async ({ subject }) => newRef('knowledge_item', subject.tenant_id, { owner_person_id: subject.person_id, sensitivity: 0 }),
       async ({ query }) => ({
         path: '/internal/items/list', action: 'item.list', filterAction: 'knowledge:read',
-        json: { status: null, owner_me: true, limit: query.limit, after: decodeCursor(query.cursor) },
+        json: { status: null, owner_me: true, limit: query.limit, after: decodeIdCursor(query.cursor) },
         map: (r) => ({ items: (r.items ?? []).map((i: any) => pick(i, ITEM_SUMMARY)), next_cursor: r.next_cursor ? encodeCursor(r.next_cursor) : null }),
       })),
     gatewayRoute(deps, 'restrictContribution',

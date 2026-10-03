@@ -2,7 +2,7 @@
 // AI budget and the operator's AI controls.
 import { problems } from '../../../shared/errors.ts';
 import type { ResourceRef, Subject } from '../../../shared/policy-types.ts';
-import { decodeCursor, encodeCursor, writeAudit, type RouteDef, type Tx } from '../../platform/index.ts';
+import { decodeIdCursor, encodeCursor, writeAudit, type RouteDef, type Tx } from '../../platform/index.ts';
 import { aiLimits, baseClaims, type GatewayDeps } from './common.ts';
 import { collectionRef, consentRef, newRef, reviewTaskRef } from './resources.ts';
 
@@ -103,7 +103,7 @@ export function adminRoutes(deps: GatewayDeps): RouteDef[] {
       listFilter: 'applied',
       policy: { resource: async ({ subject }) => collectionRef('consent', subject.tenant_id) },
       handler: async ({ tx, subject, query, ctx }) => {
-        const after = decodeCursor(query.cursor);
+        const after = decodeIdCursor(query.cursor);
         // The policy allows listing to any holder of consent:read and OBLIGES the caller to filter: without this
         // filter a card with an "own" grant could read every person's consent records (found by the Phase 3b browser tests).
         const filter = await authorizer.filter(tx, subject, 'consent:read', CONSENT_DESCRIPTOR, ctx, 5);
@@ -121,10 +121,16 @@ export function adminRoutes(deps: GatewayDeps): RouteDef[] {
       operationId: 'listMyConsents',
       kind: 'session',
       policy: { resource: async ({ subject }) => newRef('consent', subject.tenant_id, { owner_person_id: subject.person_id, owner_card_id: subject.card_id, sensitivity: 0 }) },
-      handler: async ({ tx, subject }) => {
-        const { rows } = await tx.query<ConsentRow>(`SELECT ${CONSENT_COLUMNS} FROM consents WHERE tenant_id = $1 AND person_id = $2 ORDER BY granted_at DESC`,
-          [subject.tenant_id, subject.person_id]);
-        return { body: { items: rows.map(toApiConsent), next_cursor: null } };
+      handler: async ({ tx, subject, query }) => {
+        // Newest first; ids are time-ordered (uuidv7), so the id of the last row is the cursor.
+        const before = decodeIdCursor(query.cursor);
+        const { rows } = await tx.query<ConsentRow>(
+          `SELECT ${CONSENT_COLUMNS} FROM consents WHERE tenant_id = $1 AND person_id = $2 AND ($3::uuid IS NULL OR id < $3::uuid)
+            ORDER BY id DESC LIMIT $4`,
+          [subject.tenant_id, subject.person_id, before, query.limit + 1]);
+        const page = rows.slice(0, query.limit);
+        const last = page[page.length - 1];
+        return { body: { items: page.map(toApiConsent), next_cursor: rows.length > query.limit && last ? encodeCursor(last.id) : null } };
       },
     },
     {
@@ -252,7 +258,7 @@ export function adminRoutes(deps: GatewayDeps): RouteDef[] {
       listFilter: 'applied',
       policy: { resource: async ({ subject }) => collectionRef('review_task', subject.tenant_id) },
       handler: async ({ tx, subject, query, ctx }) => {
-        const after = decodeCursor(query.cursor);
+        const after = decodeIdCursor(query.cursor);
         const filter = await authorizer.filter(tx, subject, 'review:read', REVIEW_DESCRIPTOR, ctx, 7);
         const { rows } = await tx.query<TaskRow>(
           // eslint-disable-next-line no-restricted-syntax -- filter.sql is built by the policy module from code constants; all values are bound

@@ -358,7 +358,7 @@ function decideUnsafe(subject: Subject, action: string, resource: ResourceRef, c
     // Judged on ALL applicable grants, exactly as buildResourceFilterSpec() does, so the two locks agree.
     if (!VERIFIED.has(resource.verification_status) && onlyVerified(grants, ctx)) return deny('DENY_UNVERIFIED');
   }
-  if (FOUR_EYES.has(action) && (action === 'knowledge:verify' || resource.releases_to_learners === true)) {
+  if (FOUR_EYES.has(action) && (action === 'knowledge:verify' || resource.releases_to_learners === true || resource.changes_released_knowledge === true)) {
     if (resource.owner_person_id === undefined || resource.author_person_id === undefined) return deny('DENY_SELF_REVIEW');
     const me = subject.person_id;
     const mine = me !== null && (resource.owner_person_id === me || resource.author_person_id === me);

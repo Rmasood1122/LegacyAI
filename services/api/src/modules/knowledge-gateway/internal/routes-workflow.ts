@@ -1,7 +1,7 @@
 // Interviews (feature 7), topics and gaps (10), ask-the-expert (15), readiness tests (13).
 import { problems } from '../../../shared/errors.ts';
 import type { ResourceRef } from '../../../shared/policy-types.ts';
-import { decodeCursor, encodeCursor, writeAudit, type RouteDef, type Tx } from '../../platform/index.ts';
+import { decodeIdCursor, encodeCursor, writeAudit, type RouteDef, type Tx } from '../../platform/index.ts';
 import { baseClaims, gatewayRoute, pick, uuidOrNull, withListFilter, type GatewayDeps } from './common.ts';
 import {
   attemptRef, collectionRef, expertQuestionRef, interviewRef, itemRef, newRef, quizItemRef, sourceRef, topicRef,
@@ -10,6 +10,10 @@ import {
 const INTERVIEW_COLUMNS = 'id, expert_person_id, job_role, status, turn_count, max_turns, created_at, last_turn_at, completed_at';
 const INTERVIEW_DESCRIPTOR = { type: 'interview', tenantExpr: 'interviews.tenant_id', ownerPersonExpr: 'interviews.expert_person_id' };
 const TOPIC_DESCRIPTOR = { type: 'topic', tenantExpr: 'topics.tenant_id', departmentExpr: 'topics.department_id', sensitivityExpr: 'topics.sensitivity' };
+// People are narrowed by their own department (a Department Manager's gap:read is department-wide).
+const ROLE_PERSON_DESCRIPTOR = { type: 'person', tenantExpr: 'p.tenant_id', departmentExpr: 'p.department_id' };
+// A readiness attempt belongs to the learner who took it (a Successor's quiz:read_results is "own").
+const ATTEMPT_DESCRIPTOR = { type: 'quiz_attempt', tenantExpr: 'a.tenant_id', ownerPersonExpr: 'a.learner_person_id', ownerCardExpr: 'a.learner_card_id' };
 const TURN = ['interview_id', 'status', 'next_question', 'turn_count', 'candidate_item_id'] as const;
 const MAX_ITEMS_PER_GENERATION = 20;
 
@@ -27,6 +31,16 @@ const toApiTopic = (r: TopicRow): Record<string, unknown> => ({
   id: r.id, name: r.name, description: r.description, department_id: r.department_id, sensitivity: r.sensitivity, origin: r.origin,
   status: r.status, created_at: r.created_at.toISOString(),
 });
+
+/** The cursor of the job-role list is the last role NAME (roles have no id), not a record id. */
+function decodeNameCursor(cursor: unknown): string | null {
+  if (cursor === undefined || cursor === null) return null;
+  const text = typeof cursor === 'string' ? Buffer.from(cursor, 'base64url').toString('utf8') : '';
+  // a role name is 1-120 characters without control characters (a NUL would be refused by the database with an error);
+  // U+FFFD is what bytes that are not valid UTF-8 decode to. Written as escapes: a raw control byte makes git treat this file as binary.
+  if (text.length < 1 || text.length > 120 || /[\u0000-\u001f\u007f-\u009f\ufffd]/.test(text)) throw problems.badRequest([{ path: 'query/cursor', message: 'invalid cursor' }]);
+  return text;
+}
 
 async function mustTopic(tx: Tx, tenantId: string, id: string): Promise<TopicRow> {
   const { rows } = await tx.query<TopicRow>(
@@ -54,7 +68,7 @@ export function workflowRoutes(deps: GatewayDeps): RouteDef[] {
       listFilter: 'applied',
       policy: { resource: async ({ subject }) => collectionRef('interview', subject.tenant_id) },
       handler: async ({ tx, subject, query, ctx }) => {
-        const after = decodeCursor(query.cursor);
+        const after = decodeIdCursor(query.cursor);
         const filter = await authorizer.filter(tx, subject, 'interview:read', INTERVIEW_DESCRIPTOR, ctx, 4);
         const { rows } = await tx.query<InterviewRow>(
           // eslint-disable-next-line no-restricted-syntax -- filter.sql is built by the policy module from code constants; all values are bound
@@ -105,7 +119,7 @@ export function workflowRoutes(deps: GatewayDeps): RouteDef[] {
       listFilter: 'applied',
       policy: { resource: async ({ subject }) => collectionRef('topic', subject.tenant_id) },
       handler: async ({ tx, subject, query, ctx }) => {
-        const after = decodeCursor(query.cursor);
+        const after = decodeIdCursor(query.cursor);
         const filter = await authorizer.filter(tx, subject, 'topic:read', TOPIC_DESCRIPTOR, ctx, 4);
         const { rows } = await tx.query<TopicRow>(
           // eslint-disable-next-line no-restricted-syntax -- filter.sql is built by the policy module from code constants; all values are bound
@@ -170,6 +184,61 @@ export function workflowRoutes(deps: GatewayDeps): RouteDef[] {
             return { body: toApiTopic(after) };
           },
         };
+      },
+    },
+    // Job roles are names, not records: the list is what the topic maps hold. A role appears only through topics the
+    // caller may read, so a narrower grant sees fewer roles (and smaller counts), never another department's.
+    {
+      operationId: 'listJobRoles',
+      kind: 'session',
+      listFilter: 'applied',
+      policy: { resource: async ({ subject }) => collectionRef('topic', subject.tenant_id) },
+      handler: async ({ tx, subject, query, ctx }) => {
+        const after = decodeNameCursor(query.cursor);
+        const filter = await authorizer.filter(tx, subject, 'topic:read', TOPIC_DESCRIPTOR, ctx, 3);
+        const { rows } = await tx.query<{ job_role: string; topic_count: number }>(
+          // eslint-disable-next-line no-restricted-syntax -- filter.sql is built by the policy module from code constants; all values are bound
+          `SELECT m.job_role, count(*)::int AS topic_count
+             FROM role_topic_maps m JOIN topics ON topics.tenant_id = m.tenant_id AND topics.id = m.topic_id
+            WHERE topics.status <> 'retired' AND ($1::text IS NULL OR m.job_role > $1) AND ${filter.sql}
+            GROUP BY m.job_role ORDER BY m.job_role LIMIT $2`,
+          [after, query.limit + 1, ...filter.params]);
+        const page = rows.slice(0, query.limit);
+        const last = page[page.length - 1];
+        return { body: { items: page, next_cursor: rows.length > query.limit && last ? Buffer.from(last.job_role, 'utf8').toString('base64url') : null } };
+      },
+    },
+    {
+      operationId: 'getRoleTopics',
+      kind: 'session',
+      listFilter: 'applied',
+      policy: { resource: async ({ subject }) => collectionRef('topic', subject.tenant_id) },
+      handler: async ({ tx, subject, params, ctx }) => {
+        const filter = await authorizer.filter(tx, subject, 'topic:read', TOPIC_DESCRIPTOR, ctx, 2);
+        const { rows } = await tx.query<{ topic_id: string; required: boolean; importance: number }>(
+          // eslint-disable-next-line no-restricted-syntax -- filter.sql is built by the policy module from code constants; all values are bound
+          `SELECT m.topic_id, m.required, m.importance
+             FROM role_topic_maps m JOIN topics ON topics.tenant_id = m.tenant_id AND topics.id = m.topic_id
+            WHERE m.job_role = $1 AND ${filter.sql} ORDER BY m.importance DESC, m.topic_id`,
+          [params.job_role, ...filter.params]);
+        return { body: { job_role: params.job_role, topics: rows } };
+      },
+    },
+    // Who holds a job role and who is to follow them is part of the gap picture, so it is read with gap:read.
+    {
+      operationId: 'getRolePeople',
+      kind: 'session',
+      listFilter: 'applied',
+      policy: { resource: async ({ subject }) => collectionRef('gap', subject.tenant_id) },
+      handler: async ({ tx, subject, params, ctx }) => {
+        const filter = await authorizer.filter(tx, subject, 'gap:read', ROLE_PERSON_DESCRIPTOR, ctx, 2);
+        const { rows } = await tx.query<{ person_id: string; relation: string }>(
+          // eslint-disable-next-line no-restricted-syntax -- filter.sql is built by the policy module from code constants; all values are bound
+          `SELECT j.person_id, j.relation
+             FROM person_job_roles j JOIN people p ON p.tenant_id = j.tenant_id AND p.id = j.person_id
+            WHERE j.job_role = $1 AND ${filter.sql} ORDER BY j.relation, j.person_id`,
+          [params.job_role, ...filter.params]);
+        return { body: { job_role: params.job_role, people: rows } };
       },
     },
     {
@@ -242,10 +311,10 @@ export function workflowRoutes(deps: GatewayDeps): RouteDef[] {
       async ({ subject }) => collectionRef('expert_question', subject.tenant_id),
       async ({ query }) => ({
         path: '/internal/expert-questions/list', action: 'expert_question.list', filterAction: 'expert_question:read',
-        json: { box: query.box ?? 'all', limit: query.limit },
+        json: { box: query.box ?? 'all', limit: query.limit, after: decodeIdCursor(query.cursor) },
         map: (r) => ({
           items: (r.items ?? []).map((q: any) => pick(q, ['id', 'question', 'expert_person_id', 'status', 'decline_reason', 'answer_item_id', 'created_at', 'answered_at', 'expires_at'])),
-          next_cursor: null,
+          next_cursor: r.next_cursor ? encodeCursor(r.next_cursor) : null,
         }),
       }))),
     gatewayRoute(deps, 'replyExpertQuestion',
@@ -283,7 +352,7 @@ export function workflowRoutes(deps: GatewayDeps): RouteDef[] {
       async ({ subject }) => collectionRef('quiz_item', subject.tenant_id),
       async ({ query }) => ({
         path: '/internal/readiness/questions/list', action: 'quiz.list', filterAction: 'quiz:read',
-        json: { status: query.status ?? null, limit: query.limit, after: decodeCursor(query.cursor) },
+        json: { status: query.status ?? null, limit: query.limit, after: decodeIdCursor(query.cursor) },
         map: (r) => ({
           items: (r.items ?? []).map((q: any) => pick(q, ['id', 'topic_id', 'knowledge_item_id', 'kind', 'stem', 'options', 'correct_option', 'rubric', 'status', 'approved_at', 'created_at'])),
           next_cursor: r.next_cursor ? encodeCursor(r.next_cursor) : null,
@@ -322,6 +391,38 @@ export function workflowRoutes(deps: GatewayDeps): RouteDef[] {
           }),
         };
       }),
+    // The tests taken: labels and times only (never questions, answers or scores). A learner's grant is "own", so the
+    // filter leaves it only its own attempts; Owner and Admin see the company's.
+    {
+      operationId: 'listReadinessAttempts',
+      kind: 'session',
+      listFilter: 'applied',
+      policy: { resource: async ({ subject }) => collectionRef('quiz_attempt', subject.tenant_id) },
+      handler: async ({ tx, subject, query, ctx }) => {
+        const before = decodeIdCursor(query.cursor);
+        const filter = await authorizer.filter(tx, subject, 'quiz:read_results', ATTEMPT_DESCRIPTOR, ctx, 4);
+        const { rows } = await tx.query<{
+          id: string; learner_person_id: string; job_role: string; status: string; started_at: Date; expires_at: Date; submitted_at: Date | null; graded_at: Date | null;
+        }>(
+          // eslint-disable-next-line no-restricted-syntax -- filter.sql is built by the policy module from code constants; all values are bound
+          `SELECT a.id, a.learner_person_id, a.job_role, a.status, a.started_at, a.expires_at, a.submitted_at, a.graded_at
+             FROM quiz_attempts a
+            WHERE ($1::uuid IS NULL OR a.learner_person_id = $1::uuid) AND ($2::uuid IS NULL OR a.id < $2::uuid) AND ${filter.sql}
+            ORDER BY a.id DESC LIMIT $3`,
+          [query.learner_person_id ?? null, before, query.limit + 1, ...filter.params]);
+        const page = rows.slice(0, query.limit);
+        const last = page[page.length - 1];
+        return {
+          body: {
+            items: page.map((a) => ({
+              id: a.id, learner_person_id: a.learner_person_id, job_role: a.job_role, status: a.status, started_at: a.started_at.toISOString(),
+              expires_at: a.expires_at.toISOString(), submitted_at: a.submitted_at?.toISOString() ?? null, graded_at: a.graded_at?.toISOString() ?? null,
+            })),
+            next_cursor: rows.length > query.limit && last ? encodeCursor(last.id) : null,
+          },
+        };
+      },
+    },
     gatewayRoute(deps, 'getReadinessAttempt',
       ({ tx, subject, params }) => attemptRef(tx, subject.tenant_id, params.attempt_id),
       async ({ params }) => ({

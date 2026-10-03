@@ -308,7 +308,7 @@ Output: the topic list for the role with one of these labels each, sorted by imp
 
 **Where AI is used, and only there:** *suggesting* topics from a document through the `topic_extract` prompt, from a sample of that one document (headings and opening passages, within the input limit — not the whole document). Suggestions arrive as `proposed`, carry the document's access labels, and count for nothing until an Admin accepts them. With the fake provider in tests, suggestions are scripted.
 
-**Linking items to topics** uses vector similarity (code), so it is repeatable; a reviewer can add or remove a link, and manual links win.
+**Linking items to topics** uses vector similarity (code), so it is repeatable; a reviewer can add or remove a link, and manual links win. (The reviewer's operation, `PUT /v1/knowledge/items/{id}/topics` with `knowledge:label`, was added after Phase 3b: decision D24.)
 
 **What it is not:** it does not know what an expert knows that nobody listed as a topic. It measures coverage of **the list you gave it**. It does not detect contradictions (feature 23, later). The report says both things on its face.
 

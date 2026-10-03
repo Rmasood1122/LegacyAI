@@ -3,14 +3,17 @@
 // audit log. Synthetic company and people only. Rows are found by their place, not by a title that
 // redaction could change. Runs after core-loop.spec.ts (one worker, files in name order).
 import { expect, test } from '@playwright/test';
-import { checkScreen, credentials, keepPageTextOnFailure, seedReadiness, signIn } from './support.ts';
+import { checkScreen, credentials, keepPageTextOnFailure, SEED_TOPIC, seedReadiness, signIn } from './support.ts';
 
 test.describe.configure({ mode: 'serial' });
 test.afterEach(async ({ page }, info) => keepPageTextOnFailure(page, info));
 
 let jobRole = '';
+let seededItem = '';
 test.beforeAll(async () => {
-  jobRole = (await seedReadiness()).job_role;
+  const seed = await seedReadiness();
+  jobRole = seed.job_role;
+  seededItem = seed.item_id;
 });
 
 const manage = (page: import('@playwright/test').Page, name: string) => page.getByRole('navigation', { name: 'Manage' }).getByRole('link', { name, exact: true });
@@ -64,6 +67,18 @@ test('interview: the owner invites an expert, who gives consent, starts it and a
   await checkScreen(page, '24-interview-paused');
 });
 
+test('a reviewer links a verified item to its topic through the screen (no database step)', async ({ page }) => {
+  await signIn(page, 'reviewer');
+  await page.goto(`/knowledge/${seededItem}`);                                                    // by its address: a title could be changed by redaction
+  await expect(page.getByText(/Not linked to a topic/)).toBeVisible();
+  await page.getByRole('button', { name: 'Change the topics' }).click();
+  await page.getByRole('checkbox', { name: SEED_TOPIC, exact: true }).check();
+  await page.getByRole('button', { name: 'Save the topics' }).click();
+  await expect(page.getByText('Set by a reviewer')).toBeVisible();
+  await expect(page.getByText(/Not linked to a topic/)).toHaveCount(0);
+  await checkScreen(page, '24b-item-topics');
+});
+
 test('readiness: one reviewer writes and edits a question, a second approves it', async ({ page }) => {
   await signIn(page, 'reviewer');
   await manage(page, 'Test questions').click();
@@ -91,7 +106,8 @@ test('readiness: the learner takes the test, hands it in and reads the report', 
   await signIn(page, 'learner');
   await main(page, 'Readiness test').click();
   await checkScreen(page, '26-readiness-start');
-  await page.getByLabel('For which job role?').fill(jobRole);
+  await page.getByRole('button', { name: jobRole, exact: true }).click();                         // the job role is offered; nothing to remember
+  await expect(page.getByLabel('For which job role?')).toHaveValue(jobRole);
   await page.getByRole('button', { name: 'Start the test' }).click();
   await expect(page.getByRole('heading', { name: /Question 1 of/ })).toBeVisible();
   // While the test runs the page must not say which option is right.
@@ -106,6 +122,12 @@ test('readiness: the learner takes the test, hands it in and reads the report', 
   await expect(page.getByText(/not a certificate/)).toBeVisible();
   await expect(page.getByRole('table', { name: 'Scores by topic' }).getByRole('row')).toHaveCount(2);
   await checkScreen(page, '28-readiness-report');
+  // the test is now in the learner's list of tests taken, with a way back to its report
+  await main(page, 'Readiness test').click();
+  const taken = page.getByRole('table', { name: 'Tests taken' });
+  await expect(taken.getByRole('row')).toHaveCount(2);
+  await expect(taken.getByRole('link', { name: 'Report' })).toBeVisible();
+  await checkScreen(page, '28b-tests-taken');
 });
 
 test('an administrator adds a person, issues a card (secrets shown once) and suspends it', async ({ page }) => {

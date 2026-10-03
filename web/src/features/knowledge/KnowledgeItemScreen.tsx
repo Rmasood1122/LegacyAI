@@ -6,6 +6,7 @@ import { useParams } from 'react-router';
 import { ScreenLink } from '../../navigation/ScreenLink.tsx';
 import { useSession } from '../../session/session.tsx';
 import { Badge, Banner, Button, Card, DataTable, ErrorNote, formatDate, humanize, Loading, Page, sensitivityLabel, TextArea } from '../../ui/index.tsx';
+import { ItemTopics } from './ItemTopics.tsx';
 import { ITEM_STATUS_TEXT, itemTone, useCorrectItem, useKnowledgeItem, useRejectItem, useReopenItem, useSubmitItem, useVerifyItem } from './hooks.ts';
 
 export function KnowledgeItemScreen() {
@@ -77,6 +78,7 @@ export function KnowledgeItemScreen() {
               </form>
             </Card>
           )}
+          <ItemTopics itemId={itemId} topics={i.topics} />
           <Card title="Where it comes from">
             {i.provenance.length === 0 ? <p className="muted">Written directly; no document is linked.</p> : (
               <ul>

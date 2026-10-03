@@ -109,3 +109,13 @@ def test_a_token_is_accepted_once() -> None:
     guard.check(jti, exp, time.time())
     with pytest.raises(TokenError):
         guard.check(jti, exp, time.time())
+
+
+def test_the_topic_filter_travels_in_the_token_and_must_be_an_object() -> None:
+    """Operations that show or link topics carry a second filter, for the permission topic:read."""
+    spec = {"v": 1, "tenant_id": T, "action": "topic:read", "nothing": False, "only_verified": False,
+            "any_of": [{"scope": "tenant", "max_sensitivity": 0}]}
+    assert verify_service_token(good(topic_filter=spec), TEST_KEY, "knowledge.answer").topic_filter == spec
+    assert verify_service_token(good(), TEST_KEY, "knowledge.answer").topic_filter is None
+    with pytest.raises(TokenError):
+        verify_service_token(good(topic_filter="tenant"), TEST_KEY, "knowledge.answer")

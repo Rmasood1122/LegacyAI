@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   decide, usageKey, type Grant, type Matrix, type PermissionDef, type PolicyContext, type Restriction,
 } from '../../src/modules/identity-access/index.ts';
+import { forTopicChange } from '../../src/modules/knowledge-gateway/internal/resources.ts';
 import type { ResourceRef, RoleKey, Subject, SubjectRole } from '../../src/shared/policy-types.ts';
 
 const T1 = '11111111-1111-4111-8111-111111111111';
@@ -133,6 +134,14 @@ const rows: Row[] = [
   { name: 'four eyes: switched off, self-verification is allowed', s: subject([role('reviewer')]), action: 'knowledge:verify', r: item({ owner_person_id: PERSON }), c: ctx({ settings: { ...allRoles(), second_reviewer_required: false } }), effect: 'allow', reason: 'ALLOW' },
   { name: 'four eyes: the contributor cannot release their own item to learners', s: subject([role('reviewer')]), action: 'knowledge:label', r: item({ owner_person_id: PERSON, releases_to_learners: true }), c: ctx({ settings: allRoles() }), effect: 'deny', reason: 'DENY_SELF_REVIEW' },
   { name: 'four eyes: other label changes by the contributor are allowed', s: subject([role('reviewer')]), action: 'knowledge:label', r: item({ owner_person_id: PERSON }), c: ctx({ settings: allRoles() }), effect: 'allow', reason: 'ALLOW' },
+  // Topics of a released item (decision D24): they decide what learners are tested on, so the same two people are excluded.
+  { name: 'four eyes: the contributor cannot change the topics of their own verified item', s: subject([role('reviewer')]), action: 'knowledge:label', r: forTopicChange({ ...item({ owner_person_id: PERSON }), status: 'verified' }), c: ctx({ settings: allRoles() }), effect: 'deny', reason: 'DENY_SELF_REVIEW' },
+  { name: 'four eyes: the author of the current version cannot change the topics of a corrected item', s: subject([role('reviewer')]), action: 'knowledge:label', r: forTopicChange({ ...item({ author_person_id: PERSON }), status: 'corrected' }), c: ctx({ settings: allRoles() }), effect: 'deny', reason: 'DENY_SELF_REVIEW' },
+  { name: 'four eyes: nor of a stale item (it was verified and is still counted)', s: subject([role('reviewer')]), action: 'knowledge:label', r: forTopicChange({ ...item({ owner_person_id: PERSON }), status: 'stale' }), c: ctx({ settings: allRoles() }), effect: 'deny', reason: 'DENY_SELF_REVIEW' },
+  { name: 'four eyes: someone else may change the topics of a verified item', s: subject([role('reviewer')]), action: 'knowledge:label', r: forTopicChange({ ...item(), status: 'verified' }), c: ctx({ settings: allRoles() }), effect: 'allow', reason: 'ALLOW' },
+  { name: 'four eyes: the contributor may sort their own item into topics while it is not verified', s: subject([role('reviewer')]), action: 'knowledge:label', r: forTopicChange({ ...item({ owner_person_id: PERSON }), status: 'in_review' }), c: ctx({ settings: allRoles() }), effect: 'allow', reason: 'ALLOW' },
+  { name: 'four eyes: a verified item described without contributor and author cannot have its topics changed', s: subject([role('reviewer')]), action: 'knowledge:label', r: forTopicChange({ ...res({ type: 'knowledge_item', owner_card_id: null, target_rank: undefined, sensitivity: 1 }), status: 'verified' }), c: ctx({ settings: allRoles() }), effect: 'deny', reason: 'DENY_SELF_REVIEW' },
+  { name: 'four eyes: switched off, the contributor may change the topics of their verified item', s: subject([role('reviewer')]), action: 'knowledge:label', r: forTopicChange({ ...item({ owner_person_id: PERSON }), status: 'verified' }), c: ctx({ settings: { ...allRoles(), second_reviewer_required: false } }), effect: 'allow', reason: 'ALLOW' },
   // Verified only (docs/phase2/03): a reader limited to released material sees verified knowledge only.
   { name: 'verified only: a learner is refused unverified material', s: subject([role('successor')]), action: 'knowledge:read', r: item({ sensitivity: 0, verification_status: 'unverified' }), effect: 'deny', reason: 'DENY_UNVERIFIED' },
   { name: 'verified only: a learner may read verified material', s: subject([role('successor')]), action: 'knowledge:read', r: item({ sensitivity: 0, verification_status: 'verified' }), effect: 'allow', reason: 'ALLOW' },

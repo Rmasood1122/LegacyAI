@@ -65,6 +65,8 @@ export interface ResourceRef {
   author_person_id?: string | null;
   /** True when a label change would release the item to learners (sensitivity 0). */
   releases_to_learners?: boolean;
+  /** True when a label change alters how an already verified item is used (its topics: what learners are tested on, what the gap report counts). */
+  changes_released_knowledge?: boolean;
 }
 
 export type Obligation =

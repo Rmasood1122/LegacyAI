@@ -48,7 +48,9 @@ export async function sessionPermissions(page: Page): Promise<string[]> {
 }
 
 /** Makes the readiness material (a released verified item, a topic, a job role) once; returns the job role to type. */
-export const seedReadiness = () => control<{ job_role: string }>('/seed-readiness');
+export const seedReadiness = () => control<{ job_role: string; item_id: string }>('/seed-readiness');
+/** The name of the topic the seed creates (topic names are not redacted). */
+export const SEED_TOPIC = 'Relief valves';
 
 /** On a failure, keeps what the page showed as text: CI publishes it, so the cause can be read without the screenshot. */
 export async function keepPageTextOnFailure(page: Page, info: TestInfo): Promise<void> {

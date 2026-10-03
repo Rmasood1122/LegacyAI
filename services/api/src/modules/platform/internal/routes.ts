@@ -31,6 +31,14 @@ export function decodeCursor(cursor: unknown): string | null {
   return text;
 }
 
+const UUID_CURSOR = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** The cursor of a list ordered by record id. Anything that is not such an id is a 400 here, never an error from the database's uuid cast. */
+export function decodeIdCursor(cursor: unknown): string | null {
+  const value = decodeCursor(cursor);
+  if (value !== null && !UUID_CURSOR.test(value)) throw problems.badRequest([{ path: 'query/cursor', message: 'invalid cursor' }]);
+  return value;
+}
+
 export function platformRoutes(deps: { config: Config; db: Database; exports: ExportRegistry }): RouteDef[] {
   const { config, db } = deps;
   return [

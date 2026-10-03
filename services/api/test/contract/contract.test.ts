@@ -27,9 +27,9 @@ afterAll(async () => t.close());
 const PHASE2_PATH = /^\/v1\/(sources|knowledge|interviews|gaps|topics|job-roles|expert-questions|readiness|consents|review|redaction|ai|me\/(consents|contributions)|people\/\{person_id\}\/consent-withdrawals|tenants\/\{tenant_id\}\/ai-budget|platform\/(ai|storage))(\/|$)/;
 
 describe('the contract file', () => {
-  it('is OpenAPI 3.1 with 119 operations (46 from Phase 1, 73 from Phase 2), all under /v1, each with a unique operationId', () => {
+  it('is OpenAPI 3.1 with 124 operations (46 from Phase 1, 78 from Phase 2), all under /v1, each with a unique operationId', () => {
     const c = loadContract(CONTRACT_PATH);
-    expect(c.operations.size).toBe(119);
+    expect(c.operations.size).toBe(124);
     for (const op of c.operations.values()) {
       expect(op.path.startsWith('/v1/')).toBe(true);
       expect(op.responses.size).toBeGreaterThanOrEqual(2);
@@ -46,7 +46,7 @@ describe('the contract file', () => {
     expect(count('$ref: "#/components/parameters/Limit"')).toBe(5);
     expect(count('$ref: "#/components/parameters/Cursor"')).toBe(13);
     expect(count('$ref: "#/components/parameters/IdempotencyKey"')).toBe(70);
-    expect(count('$ref: "#/components/responses/TooManyRequests"')).toBe(119);
+    expect(count('$ref: "#/components/responses/TooManyRequests"')).toBe(124);
     expect(yaml).toContain('openapi: 3.1.0');
   });
 });
@@ -282,7 +282,7 @@ describe('every one of the 47 operations returns a contract-conforming success',
     const all = [...t.app.http.contract.operations.values()].filter((op) => !PHASE2_PATH.test(op.path)).map((op) => op.operationId).sort();
     expect([...hit].sort()).toEqual(all);
     expect(hit.size).toBe(46);
-    expect(t.app.http.contract.operations.size).toBe(46 + 73);
+    expect(t.app.http.contract.operations.size).toBe(46 + 78);
   });
 });
 

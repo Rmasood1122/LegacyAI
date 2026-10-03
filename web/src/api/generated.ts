@@ -142,6 +142,20 @@ export interface KItemDetail {
     page_from: number | null;
     page_to: number | null;
   }>;
+  topics: Array<{
+    topic_id: string;
+    name: string;
+    link_source: "similarity" | "reviewer";
+  }>;
+}
+
+export interface KItemTopics {
+  id: string;
+  topics: Array<{
+    topic_id: string;
+    name: string;
+    link_source: "similarity" | "reviewer";
+  }>;
 }
 
 export interface KVersionCreated {
@@ -300,6 +314,17 @@ export interface KAttemptStarted {
     stem: string;
     options: string[] | null;
   }>;
+}
+
+export interface KAttemptSummary {
+  id: string;
+  learner_person_id: string;
+  job_role: string;
+  status: "in_progress" | "submitted" | "graded" | "expired";
+  started_at: string;
+  expires_at: string;
+  submitted_at: string | null;
+  graded_at: string | null;
 }
 
 export interface KAttempt {
@@ -921,6 +946,7 @@ export const operations = {
   reopenKnowledgeItem: { method: "POST", path: "/v1/knowledge/items/{item_id}/reopen", status: 200, idempotent: true, public: false, permission: "knowledge:verify", contentTypes: ["application/json"] },
   retireKnowledgeItem: { method: "POST", path: "/v1/knowledge/items/{item_id}/retire", status: 200, idempotent: true, public: false, permission: "knowledge:verify", contentTypes: [] },
   setItemLabels: { method: "PATCH", path: "/v1/knowledge/items/{item_id}/labels", status: 200, idempotent: true, public: false, permission: "knowledge:label", contentTypes: ["application/json"] },
+  setItemTopics: { method: "PUT", path: "/v1/knowledge/items/{item_id}/topics", status: 200, idempotent: true, public: false, permission: "knowledge:label", contentTypes: ["application/json"] },
   revertVerifications: { method: "POST", path: "/v1/knowledge/verifications/revert", status: 200, idempotent: true, public: false, permission: "knowledge:revert", contentTypes: ["application/json"] },
   listMyContributions: { method: "GET", path: "/v1/me/contributions", status: 200, idempotent: false, public: false, permission: "knowledge:read", contentTypes: [] },
   restrictContribution: { method: "POST", path: "/v1/me/contributions/{item_id}/restrict", status: 200, idempotent: true, public: false, permission: "contribution:restrict", contentTypes: ["application/json"] },
@@ -936,7 +962,10 @@ export const operations = {
   listTopics: { method: "GET", path: "/v1/topics", status: 200, idempotent: false, public: false, permission: "topic:read", contentTypes: [] },
   createTopic: { method: "POST", path: "/v1/topics", status: 201, idempotent: true, public: false, permission: "topic:manage", contentTypes: ["application/json"] },
   updateTopic: { method: "PATCH", path: "/v1/topics/{topic_id}", status: 200, idempotent: true, public: false, permission: "topic:manage", contentTypes: ["application/json"] },
+  listJobRoles: { method: "GET", path: "/v1/job-roles", status: 200, idempotent: false, public: false, permission: "topic:read", contentTypes: [] },
+  getRoleTopics: { method: "GET", path: "/v1/job-roles/{job_role}/topics", status: 200, idempotent: false, public: false, permission: "topic:read", contentTypes: [] },
   setRoleTopics: { method: "PUT", path: "/v1/job-roles/{job_role}/topics", status: 200, idempotent: true, public: false, permission: "topic:manage", contentTypes: ["application/json"] },
+  getRolePeople: { method: "GET", path: "/v1/job-roles/{job_role}/people", status: 200, idempotent: false, public: false, permission: "gap:read", contentTypes: [] },
   setRolePeople: { method: "PUT", path: "/v1/job-roles/{job_role}/people", status: 200, idempotent: true, public: false, permission: "topic:manage", contentTypes: ["application/json"] },
   suggestTopics: { method: "POST", path: "/v1/topics/suggest", status: 201, idempotent: true, public: false, permission: "topic:manage", contentTypes: ["application/json"] },
   createExpertQuestion: { method: "POST", path: "/v1/expert-questions", status: 201, idempotent: true, public: false, permission: "expert_question:create", contentTypes: ["application/json"] },
@@ -948,6 +977,7 @@ export const operations = {
   editQuizQuestion: { method: "PATCH", path: "/v1/readiness/questions/{question_id}", status: 200, idempotent: true, public: false, permission: "quiz:manage", contentTypes: ["application/json"] },
   approveQuizQuestion: { method: "POST", path: "/v1/readiness/questions/{question_id}/approve", status: 200, idempotent: true, public: false, permission: "quiz:manage", contentTypes: [] },
   retireQuizQuestion: { method: "POST", path: "/v1/readiness/questions/{question_id}/retire", status: 200, idempotent: true, public: false, permission: "quiz:manage", contentTypes: [] },
+  listReadinessAttempts: { method: "GET", path: "/v1/readiness/attempts", status: 200, idempotent: false, public: false, permission: "quiz:read_results", contentTypes: [] },
   startReadinessAttempt: { method: "POST", path: "/v1/readiness/attempts", status: 201, idempotent: true, public: false, permission: "quiz:take", contentTypes: ["application/json"] },
   getReadinessAttempt: { method: "GET", path: "/v1/readiness/attempts/{attempt_id}", status: 200, idempotent: false, public: false, permission: "quiz:read_results", contentTypes: [] },
   saveAttemptAnswer: { method: "POST", path: "/v1/readiness/attempts/{attempt_id}/answers", status: 200, idempotent: true, public: false, permission: "quiz:take", contentTypes: ["application/json"] },
@@ -1428,6 +1458,14 @@ export interface OperationTypes {
     };
     response: KLabelResult;
   };
+  setItemTopics: {
+    path: { item_id: string };
+    query: undefined;
+    body: {
+      topic_ids: string[];
+    };
+    response: KItemTopics;
+  };
   revertVerifications: {
     path: undefined;
     query: undefined;
@@ -1547,6 +1585,24 @@ export interface OperationTypes {
     };
     response: KTopic;
   };
+  listJobRoles: {
+    path: undefined;
+    query: { limit?: number; cursor?: string };
+    body: undefined;
+    response: {
+      items: {
+        job_role: string;
+        topic_count: number;
+      }[];
+      next_cursor: string | null;
+    };
+  };
+  getRoleTopics: {
+    path: { job_role: string };
+    query: undefined;
+    body: undefined;
+    response: KRoleTopics;
+  };
   setRoleTopics: {
     path: { job_role: string };
     query: undefined;
@@ -1558,6 +1614,12 @@ export interface OperationTypes {
       }[];
     };
     response: KRoleTopics;
+  };
+  getRolePeople: {
+    path: { job_role: string };
+    query: undefined;
+    body: undefined;
+    response: KRolePeople;
   };
   setRolePeople: {
     path: { job_role: string };
@@ -1591,7 +1653,7 @@ export interface OperationTypes {
   };
   listExpertQuestions: {
     path: undefined;
-    query: { box?: "asked" | "addressed" | "all"; limit?: number };
+    query: { box?: "asked" | "addressed" | "all"; limit?: number; cursor?: string };
     body: undefined;
     response: {
       items: KExpertQuestion[];
@@ -1655,6 +1717,15 @@ export interface OperationTypes {
     query: undefined;
     body: undefined;
     response: KStatus;
+  };
+  listReadinessAttempts: {
+    path: undefined;
+    query: { learner_person_id?: string; limit?: number; cursor?: string };
+    body: undefined;
+    response: {
+      items: KAttemptSummary[];
+      next_cursor: string | null;
+    };
   };
   startReadinessAttempt: {
     path: undefined;
@@ -1722,7 +1793,7 @@ export interface OperationTypes {
   };
   listMyConsents: {
     path: undefined;
-    query: undefined;
+    query: { limit?: number; cursor?: string };
     body: undefined;
     response: {
       items: KConsent[];

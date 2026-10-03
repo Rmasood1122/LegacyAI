@@ -37,7 +37,8 @@ allowed to see what.
 | 25 Documents | plain text, Markdown, text-layer PDF | OCR, voice, drawings |
 | AI cost control | reservation before every call, ledger, per-company and global caps, kill switch | billing customers |
 
-Size of the change: 73 new API operations (119 in total; the Phase 1 internal policy endpoint was removed), 8 new
+Size of the change: 73 new API operations (119 in total; the Phase 1 internal policy endpoint was removed; five more
+were added after Phase 3b, see decision D24: 124), 8 new
 migrations (9–15 plus the audit writer), a Python service with 44 internal operations, 29 new tables.
 
 ## Evidence

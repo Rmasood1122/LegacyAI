@@ -2414,6 +2414,59 @@ paths:
           $ref: "#/components/responses/TooManyRequests"
         "502":
           $ref: "#/components/responses/BadGateway"
+  /v1/knowledge/items/{item_id}/topics:
+    put:
+      operationId: "setItemTopics"
+      summary: "Say which topics an item belongs to. The list replaces the item's links to the topics the caller may read; links to other topics and the item's status do not change."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:label"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/ItemId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "topic_ids"
+              properties:
+                topic_ids:
+                  type: "array"
+                  items:
+                    type: "string"
+                    format: "uuid"
+                  maxItems: 20
+                  description: "Active topics of the company that the caller may read. An empty list removes every link."
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KItemTopics"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
   /v1/knowledge/verifications/revert:
     post:
       operationId: "revertVerifications"
@@ -3143,7 +3196,101 @@ paths:
           $ref: "#/components/responses/TooManyRequests"
         "502":
           $ref: "#/components/responses/BadGateway"
+  /v1/job-roles:
+    get:
+      operationId: "listJobRoles"
+      summary: "The job roles that have topics the caller may read, by name, with how many such topics each has."
+      tags:
+        - "knowledge"
+      x-permission: "topic:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 25
+          description: "Page size."
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "items"
+                  - "next_cursor"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      type: "object"
+                      additionalProperties: false
+                      required:
+                        - "job_role"
+                        - "topic_count"
+                      properties:
+                        job_role:
+                          type: "string"
+                        topic_count:
+                          type: "integer"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
   /v1/job-roles/{job_role}/topics:
+    get:
+      operationId: "getRoleTopics"
+      summary: "The topics a job role needs, limited to topics the caller may read."
+      tags:
+        - "knowledge"
+      x-permission: "topic:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/JobRole"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KRoleTopics"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
     put:
       operationId: "setRoleTopics"
       summary: "Set which topics a job role needs."
@@ -3206,6 +3353,37 @@ paths:
         "429":
           $ref: "#/components/responses/TooManyRequests"
   /v1/job-roles/{job_role}/people:
+    get:
+      operationId: "getRolePeople"
+      summary: "Who holds a job role and who is to follow them, limited to people the caller's gap report covers."
+      tags:
+        - "knowledge"
+      x-permission: "gap:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/JobRole"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KRolePeople"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
     put:
       operationId: "setRolePeople"
       summary: "Set who holds a job role and who is taking it over."
@@ -3406,6 +3584,7 @@ paths:
             maximum: 50
             default: 25
           description: "Page size."
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           description: "Success"
@@ -3814,6 +3993,65 @@ paths:
         "502":
           $ref: "#/components/responses/BadGateway"
   /v1/readiness/attempts:
+    get:
+      operationId: "listReadinessAttempts"
+      summary: "Readiness tests taken, newest first: a learner sees its own, Owner and Admin the company's. No questions, answers or scores."
+      tags:
+        - "readiness"
+      x-permission: "quiz:read_results"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "learner_person_id"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            format: "uuid"
+        - name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 25
+          description: "Page size."
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "items"
+                  - "next_cursor"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      $ref: "#/components/schemas/KAttemptSummary"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
     post:
       operationId: "startReadinessAttempt"
       summary: "Start a readiness test for a job role: the questions and their order are fixed now."
@@ -4207,6 +4445,17 @@ paths:
       x-permission: "consent:give"
       security:
         - sessionCookie: []
+      parameters:
+        - name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 25
+          description: "Page size."
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           description: "Success"
@@ -5861,6 +6110,7 @@ components:
         - "self_verified"
         - "versions"
         - "provenance"
+        - "topics"
       properties:
         id:
           type: "string"
@@ -5962,6 +6212,57 @@ components:
                 type:
                   - "integer"
                   - "null"
+        topics:
+          description: "The topics this item is linked to, limited to topics the reader may see."
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "topic_id"
+              - "name"
+              - "link_source"
+            properties:
+              topic_id:
+                type: "string"
+                format: "uuid"
+              name:
+                type: "string"
+              link_source:
+                type: "string"
+                enum:
+                  - "similarity"
+                  - "reviewer"
+    KItemTopics:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "topics"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        topics:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "topic_id"
+              - "name"
+              - "link_source"
+            properties:
+              topic_id:
+                type: "string"
+                format: "uuid"
+              name:
+                type: "string"
+              link_source:
+                type: "string"
+                enum:
+                  - "similarity"
+                  - "reviewer"
     KVersionCreated:
       type: "object"
       additionalProperties: false
@@ -6481,6 +6782,50 @@ components:
                   - "null"
                 items:
                   type: "string"
+    KAttemptSummary:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "learner_person_id"
+        - "job_role"
+        - "status"
+        - "started_at"
+        - "expires_at"
+        - "submitted_at"
+        - "graded_at"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        learner_person_id:
+          type: "string"
+          format: "uuid"
+        job_role:
+          type: "string"
+        status:
+          type: "string"
+          enum:
+            - "in_progress"
+            - "submitted"
+            - "graded"
+            - "expired"
+        started_at:
+          type: "string"
+          format: "date-time"
+        expires_at:
+          type: "string"
+          format: "date-time"
+        submitted_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        graded_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
     KAttempt:
       type: "object"
       additionalProperties: false

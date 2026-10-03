@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from app.capture.filters import DESCRIPTORS, condition
+from app.capture.filters import DESCRIPTORS, condition, topic_condition
 
 T = str(uuid.uuid4())
 D = str(uuid.uuid4())
@@ -78,4 +78,32 @@ def test_the_input_is_not_modified() -> None:
     s = spec()
     before = copy.deepcopy(s)
     condition(s, "chunks", T)
+    assert s == before
+
+
+def topic_spec(**over: Any) -> dict[str, Any]:
+    return spec(**{"action": "topic:read", "any_of": [{"scope": "tenant", "max_sensitivity": 0}], **over})
+
+
+def test_the_topic_filter_must_be_the_one_for_reading_topics() -> None:
+    sql, params = topic_condition(topic_spec(), T)
+    assert sql != "FALSE" and "tp.sensitivity <= %s" in sql and params == [T, 0]
+    # the filter of another permission says nothing about topics
+    assert topic_condition(spec(), T) == ("FALSE", [])
+    assert topic_condition(topic_spec(action="knowledge:read"), T) == ("FALSE", [])
+
+
+def test_verified_only_does_not_hide_topics_but_everything_else_stays_strict() -> None:
+    """A learner's filters carry "verified only"; topics are not verified or unverified, so they stay visible."""
+    assert topic_condition(topic_spec(only_verified=True), T) == topic_condition(topic_spec(), T)
+    assert topic_condition(topic_spec(only_verified="yes"), T) == ("FALSE", [])
+    for bad in (None, {}, {"v": 1}, "topic:read", topic_spec(nothing=True), topic_spec(tenant_id=str(uuid.uuid4())), topic_spec(any_of=[]),
+                topic_spec(v=2), {**topic_spec(), "extra": 1}):
+        assert topic_condition(bad, T) == ("FALSE", []), bad
+
+
+def test_the_topic_filter_does_not_modify_its_input() -> None:
+    s = topic_spec(only_verified=True)
+    before = copy.deepcopy(s)
+    topic_condition(s, T)
     assert s == before

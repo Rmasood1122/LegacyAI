@@ -20,6 +20,13 @@ export const useReopenItem = () => useApiMutation('reopenKnowledgeItem', REFRESH
 /** A correction is a new version of the item (the contract calls it proposeItemVersion). */
 export const useCorrectItem = () => useApiMutation('proposeItemVersion', REFRESH);
 
+/** Topics in use, to choose from when linking an item (a page at a time). */
+export const useTopicChoices = () => useApiList('listTopics', { query: { status: 'active', limit: 50 } });
+/** Replaces the item's topics. The gap report and the question bank depend on the links, so they are re-read too. */
+export const useSetItemTopics = () => useApiMutation('setItemTopics', [...REFRESH, 'getGapReport', 'listQuizQuestions']);
+/** The API's own limit (maxItems of topic_ids). */
+export const MAX_TOPICS_PER_ITEM = 20;
+
 /** What each state means to a reader: only "verified" and "corrected" have been checked by a person. */
 export const itemTone = (status: string): BadgeTone =>
   status === 'verified' || status === 'corrected' ? 'success' : status === 'rejected' ? 'danger' : status === 'withdrawn' || status === 'retired' ? 'neutral' : 'warning';

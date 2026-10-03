@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import { useSession } from '../../session/session.tsx';
 import { Badge, Banner, Button, Card, CheckboxField, ConfirmButton, DataTable, Empty, ErrorNote, Loading, Page, PartialListNote, SelectField, TextField } from '../../ui/index.tsx';
-import { GAP_TEXT, gapTone, useGapReport, useRolePeopleChoices, useSetRolePeople, useSetRoleTopics, useTopicList } from './hooks.ts';
+import { GAP_TEXT, gapTone, useGapReport, useJobRoles, useRolePeople, useRolePeopleChoices, useSetRolePeople, useSetRoleTopics, useTopicList } from './hooks.ts';
 
 const IMPORTANCE = ['', 'Nice to know', 'Important', 'Critical'] as const;
 
@@ -12,6 +12,8 @@ export function GapsScreen() {
   const [typed, setTyped] = useState('');
   const [jobRole, setJobRole] = useState('');
   const report = useGapReport(jobRole);
+  const roles = useJobRoles({ enabled: can('listJobRoles') });
+  const known = roles.items ?? [];
   const onSubmit = (e: FormEvent): void => {
     e.preventDefault();
     setJobRole(typed.trim());
@@ -21,10 +23,24 @@ export function GapsScreen() {
     <Page title="Job roles and gaps" intro="Pick a job role to see what it needs to know and where the knowledge is missing. The labels are rules, not a judgement by an AI.">
       <Card>
         <form onSubmit={onSubmit} noValidate>
-          <TextField label="Job role" hint="Type the name exactly as it was set up, for example “Boiler operator”. There is no list of job roles to choose from yet." maxLength={120}
+          <TextField label="Job role" hint="Type the name, for example “Boiler operator”. A name that is not listed below starts a new job role." maxLength={120}
             value={typed} onChange={(e) => setTyped(e.target.value)} />
           <Button type="submit" variant="primary" disabled={typed.trim() === ''}>Show</Button>
         </form>
+        <ErrorNote error={roles.error} />
+        {known.length > 0 && (
+          <div>
+            <p className="muted">Job roles that have topics:</p>
+            <div className="row">
+              {known.map((r) => (
+                <Button key={r.job_role} onClick={() => { setTyped(r.job_role); setJobRole(r.job_role); }}>
+                  {r.job_role} ({r.topic_count} {r.topic_count === 1 ? 'topic' : 'topics'})
+                </Button>
+              ))}
+            </div>
+            {roles.hasMore && <PartialListNote shown={known.length} noun="job roles" busy={roles.isLoadingMore} onLoadMore={roles.loadMore} />}
+          </div>
+        )}
       </Card>
       {jobRole !== '' && report.isPending && <Loading what="the gap report" />}
       <ErrorNote error={report.error} />
@@ -45,7 +61,7 @@ export function GapsScreen() {
             </DataTable>
           )}
           {can('setRoleTopics') && <RoleTopics key={`${jobRole}:${topics.map((t) => `${t.topic_id}${t.importance}`).join(',')}`} jobRole={jobRole} current={topics} />}
-          {can('setRolePeople') && can('listPeople') && <RolePeople key={jobRole} jobRole={jobRole} />}
+          {can('setRolePeople') && can('listPeople') && can('getRolePeople') && <RolePeople key={jobRole} jobRole={jobRole} />}
         </>
       )}
     </Page>
@@ -92,16 +108,31 @@ function RoleTopics({ jobRole, current }: { jobRole: string; current: ReadonlyAr
 
 type Relation = '' | 'holder' | 'successor';
 
-/** Who holds the job role and who is to follow. Saving replaces the whole list; the API cannot show the current one. */
+/** Who holds the job role and who is to follow. The form starts from the people set now; saving replaces the whole list. */
 function RolePeople({ jobRole }: { jobRole: string }) {
+  const current = useRolePeople(jobRole, { enabled: true });
+  if (current.data === undefined) {
+    return (
+      <Card title="People in this job role">
+        {current.isPending && <Loading what="the people in this job role" />}
+        <ErrorNote error={current.error} />
+      </Card>
+    );
+  }
+  // a fresh form whenever what is stored changes (after a save, or when someone else changed it)
+  return <RolePeopleForm key={current.data.people.map((p) => `${p.person_id}:${p.relation}`).join(',')} jobRole={jobRole} current={current.data.people} />;
+}
+
+function RolePeopleForm({ jobRole, current }: { jobRole: string; current: ReadonlyArray<{ person_id: string; relation: string }> }) {
   const people = useRolePeopleChoices({ enabled: true });
   const save = useSetRolePeople();
-  const [relations, setRelations] = useState<ReadonlyMap<string, Relation>>(new Map());
+  const [relations, setRelations] = useState<ReadonlyMap<string, Relation>>(
+    () => new Map(current.map((p) => [p.person_id, p.relation === 'holder' ? 'holder' : 'successor'])));
   const items = people.items ?? [];
   const chosen = [...relations].filter((entry): entry is [string, 'holder' | 'successor'] => entry[1] !== '');
   return (
     <Card title="People in this job role">
-      <Banner tone="warning" title="Saving replaces the whole list">The people currently set for this job role cannot be shown here (the service has no way to read them back yet). Set everyone who belongs to it, then save.</Banner>
+      <p className="muted">{current.length === 0 ? 'Nobody is set for this job role yet.' : `${current.length} ${current.length === 1 ? 'person is' : 'people are'} set now; they are shown below.`} Saving replaces the whole list.</p>
       {people.isPending && <Loading what="people" />}
       <ErrorNote error={people.error ?? save.error} />
       {items.map((p) => (

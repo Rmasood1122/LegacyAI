@@ -12,6 +12,11 @@ export const useSubmitAttempt = () => useApiMutation('submitReadinessAttempt', A
 export const useOverrideAnswer = () => useApiMutation('overrideQuizAnswer', ATTEMPT_CHANGED);
 export const useReport = (attemptId: string) => useApiQuery('getReadinessReport', { path: { attempt_id: attemptId } });
 
+/** Tests taken, newest first: a learner gets its own, people who may read results the company's. */
+export const useAttemptList = () => useApiList('listReadinessAttempts', { query: { limit: 25 } });
+/** Job roles that have topics the card may read, to choose from when starting a test. */
+export const useJobRoleChoices = ({ enabled }: { enabled: boolean }) => useApiList('listJobRoles', { query: { limit: 50 } }, { enabled });
+
 export type QuestionStatus = 'draft' | 'approved' | 'retired';
 export const useQuestionList = (status: QuestionStatus) => useApiList('listQuizQuestions', { query: { status, limit: 50 } });
 export const useGenerateQuestions = () => useApiMutation('generateQuizQuestions', BANK_CHANGED);

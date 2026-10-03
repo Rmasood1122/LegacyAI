@@ -410,3 +410,150 @@ describe('settings, AI budget and the operator controls', () => {
     void ownerPerson;
   });
 });
+
+describe('item topics, job roles and tests taken (the screens no longer need the database for these)', () => {
+  const role = `Synthetic operator ${randomUUID().slice(0, 8)}`;
+  const path = (suffix: string): string => `/v1/job-roles/${encodeURIComponent(role)}/${suffix}`;
+  let open: string;        // a topic everyone may read (sensitivity 0)
+  let restricted: string;  // a topic only the Owner may read (sensitivity 3)
+
+  beforeAll(async () => {
+    const o = tenant.owner;
+    const a = await o.post('/v1/topics', { name: `Open ${randomUUID().slice(0, 8)}`, description: 'synthetic', sensitivity: 0 });
+    const b = await o.post('/v1/topics', { name: `Restricted ${randomUUID().slice(0, 8)}`, description: 'synthetic', sensitivity: 3 });
+    expect([a.status, b.status]).toEqual([201, 201]);
+    open = a.body.id;
+    restricted = b.body.id;
+    expect((await o.put(path('topics'), { topics: [{ topic_id: open, importance: 3 }, { topic_id: restricted, importance: 1 }] })).status).toBe(200);
+    expect((await o.put(path('people'), { people: [{ person_id: learner.personId, relation: 'successor' }, { person_id: expert.personId, relation: 'holder' }] })).status).toBe(200);
+  });
+
+  it('setItemTopics: needs the label right on the item and topics the caller may read; refused before any AI call otherwise', async () => {
+    const it1 = await item(tenant, { verifierCard: expert.card.id });
+    const url = `/v1/knowledge/items/${it1}/topics`;
+    expect((await learner.client.put(url, { topic_ids: [open] })).status).toBe(403);                 // no knowledge:label
+    expect((await reviewer.client.put(url, { topic_ids: [randomUUID()] })).status).toBe(422);        // no such topic
+    expect((await reviewer.client.put(url, { topic_ids: [restricted] })).status).toBe(422);          // exists, but this card may not read it: same answer
+    const otherTopic = (await other.owner.post('/v1/topics', { name: `Theirs ${randomUUID().slice(0, 8)}` })).body.id as string;
+    expect((await tenant.owner.put(url, { topic_ids: [otherTopic] })).status).toBe(422);             // another company's topic
+    expect((await other.owner.put(url, { topic_ids: [otherTopic] })).status).toBe(404);              // another company's item
+    expect(stub.ofAction('item.topics')).toHaveLength(0);
+
+    const res = await reviewer.client.put(url, { topic_ids: [open, open] });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ id: it1, topics: [{ topic_id: open, name: 'Synthetic topic', link_source: 'reviewer' }] });
+    const call = stub.ofAction('item.topics');
+    expect(call).toHaveLength(1);
+    expect(call[0]!.body).toEqual({ topic_ids: [open] });
+    expect(call[0]!.claims.subject).toBe(it1);
+    // the token carries the card's topic:read filter as its own claim, and no knowledge filter
+    expect(call[0]!.claims.topic_filter).toMatchObject({ v: 1, action: 'topic:read', nothing: false, tenant_id: tenant.tenantId });
+    expect(call[0]!.claims.filter).toBeNull();
+    expect((await tenant.owner.put(url, { topic_ids: [open, restricted] })).status).toBe(200);       // the Owner may read both
+    expect((await tenant.owner.put(url, { topic_ids: [] })).status).toBe(200);                       // an empty list removes every link
+  });
+
+  it('setItemTopics: the contributor and the author of the current version may not change the topics of a verified item', async () => {
+    const released = await item(tenant, { owner: expert, author: reviewer, verifierCard: tenant.ownerCard.id });
+    const url = `/v1/knowledge/items/${released}/topics`;
+    expect((await expert.client.put(url, { topic_ids: [open] })).status).toBe(403);                 // the contributor
+    expect((await reviewer.client.put(url, { topic_ids: [open] })).status).toBe(403);               // the author of the current version
+    expect((await expert.client.put(url, { topic_ids: [] })).status).toBe(403);                     // not even to remove links
+    expect(stub.ofAction('item.topics')).toHaveLength(0);
+    const denied = await su.query(
+      `SELECT count(*)::int AS n FROM audit_log WHERE tenant_id = $1 AND resource_id = $2 AND decision = 'deny' AND reason_code = 'DENY_SELF_REVIEW'`,
+      [tenant.tenantId, released]);
+    expect(denied.rows[0].n).toBe(3);                                                                // each refusal is in the audit log
+    expect((await tenant.owner.put(url, { topic_ids: [open] })).status).toBe(200);                  // a second person may
+
+    // while the item is still in review, its contributor may sort it into topics
+    const draft = await item(tenant, { owner: expert, author: expert });
+    expect((await expert.client.put(`/v1/knowledge/items/${draft}/topics`, { topic_ids: [open] })).status).toBe(200);
+  });
+
+  it('reading an item sends the topic:read filter next to the knowledge filter, each for its own permission', async () => {
+    const it2 = await item(tenant, { verifierCard: expert.card.id });
+    expect((await reviewer.client.get(`/v1/knowledge/items/${it2}`)).status).toBe(200);
+    const call = stub.ofAction('item.read');
+    expect(call).toHaveLength(1);
+    expect(call[0]!.claims.filter).toMatchObject({ action: 'knowledge:read', nothing: false });
+    expect(call[0]!.claims.topic_filter).toMatchObject({ action: 'topic:read', nothing: false });
+    // an operation that has nothing to do with topics carries no topic filter
+    expect((await reviewer.client.get('/v1/knowledge/items')).status).toBe(200);
+    expect(stub.ofAction('item.list')[0]!.claims.topic_filter).toBeNull();
+  });
+
+  it('a cursor that is not a record id is a 400, not a database error', async () => {
+    const notAnId = Buffer.from('1234', 'utf8').toString('base64url');      // well-formed for a numbered list, but these lists are ordered by id
+    for (const [who, url] of [
+      [learner.client, '/v1/me/consents'], [learner.client, '/v1/expert-questions'], [tenant.owner, '/v1/consents'], [tenant.owner, '/v1/topics'],
+      [tenant.owner, '/v1/readiness/attempts'], [tenant.owner, '/v1/knowledge/items'],
+    ] as const) {
+      expect((await who.get(`${url}?cursor=${notAnId}`)).status, url).toBe(400);
+    }
+  });
+
+  it('job roles: a role is listed through the topics the caller may read', async () => {
+    const mine = (r: { body: { items: Array<{ job_role: string; topic_count: number }> } }) => r.body.items.filter((x) => x.job_role === role);
+    const asLearner = await learner.client.get('/v1/job-roles?limit=50');
+    expect(asLearner.status).toBe(200);
+    expect(mine(asLearner)).toEqual([{ job_role: role, topic_count: 1 }]);                            // the restricted topic is not counted
+    expect(mine(await tenant.owner.get('/v1/job-roles?limit=50'))).toEqual([{ job_role: role, topic_count: 2 }]);
+    expect((await other.owner.get('/v1/job-roles?limit=50')).body.items.map((x: any) => x.job_role)).not.toContain(role);
+
+    const topicsAsLearner = await learner.client.get(path('topics'));
+    expect(topicsAsLearner.body).toEqual({ job_role: role, topics: [{ topic_id: open, required: true, importance: 3 }] });
+    expect((await tenant.owner.get(path('topics'))).body.topics.map((x: any) => x.topic_id)).toEqual([open, restricted]);
+    expect((await other.owner.get(path('topics'))).body.topics).toEqual([]);                          // same name, another company: nothing
+
+    // a role whose only topic the caller may not read does not exist for that caller
+    const hidden = `Hidden ${randomUUID().slice(0, 8)}`;
+    expect((await tenant.owner.put(`/v1/job-roles/${encodeURIComponent(hidden)}/topics`, { topics: [{ topic_id: restricted }] })).status).toBe(200);
+    expect((await learner.client.get('/v1/job-roles?limit=50')).body.items.map((x: any) => x.job_role)).not.toContain(hidden);
+  });
+
+  it('job roles are read a page at a time, by name', async () => {
+    const first = await tenant.owner.get('/v1/job-roles?limit=1');
+    expect(first.body.items).toHaveLength(1);
+    expect(typeof first.body.next_cursor).toBe('string');
+    const second = await tenant.owner.get(`/v1/job-roles?limit=1&cursor=${first.body.next_cursor}`);
+    expect(second.status).toBe(200);
+    expect(second.body.items[0].job_role > first.body.items[0].job_role).toBe(true);
+    expect((await tenant.owner.get(`/v1/job-roles?cursor=${'A'.repeat(180)}`)).status).toBe(400);
+  });
+
+  it('the people of a job role are part of the gap picture: Owner yes, Expert and Successor no', async () => {
+    const res = await tenant.owner.get(path('people'));
+    expect(res.status).toBe(200);
+    expect(res.body.people).toEqual(expect.arrayContaining([
+      { person_id: expert.personId, relation: 'holder' }, { person_id: learner.personId, relation: 'successor' },
+    ]));
+    expect(res.body.people).toHaveLength(2);
+    expect((await learner.client.get(path('people'))).status).toBe(403);
+    expect((await expert.client.get(path('people'))).status).toBe(403);
+    expect((await other.owner.get(path('people'))).body.people).toEqual([]);
+  });
+
+  it('tests taken: a learner sees only its own, the Owner the company\'s, an Expert none; no questions or scores', async () => {
+    const second = await addMember(t, tenant.owner, [{ role_key: 'successor' }]);
+    const ids = { mine: randomUUID(), theirs: randomUUID() };
+    await seed(tenant.tenantId, async (q) => {
+      for (const [id, who] of [[ids.mine, learner], [ids.theirs, second]] as const) {
+        await q(`INSERT INTO quiz_attempts (id, tenant_id, learner_card_id, learner_person_id, owner_person_id, job_role, expires_at)
+                 VALUES ($1, $2, $3, $4, $4, $5, now() + interval '1 hour')`, [id, tenant.tenantId, who.card.id, who.personId, role]);
+      }
+    });
+    const asLearner = await learner.client.get('/v1/readiness/attempts');
+    expect(asLearner.status).toBe(200);
+    expect(asLearner.body.items.map((a: any) => a.id)).toEqual([ids.mine]);
+    expect(Object.keys(asLearner.body.items[0]).sort()).toEqual(
+      ['expires_at', 'graded_at', 'id', 'job_role', 'learner_person_id', 'started_at', 'status', 'submitted_at']);
+    // asking for someone else by id does not widen what a learner sees
+    expect((await learner.client.get(`/v1/readiness/attempts?learner_person_id=${second.personId}`)).body.items).toEqual([]);
+    const asOwner = await tenant.owner.get('/v1/readiness/attempts?limit=50');
+    expect(asOwner.body.items.map((a: any) => a.id)).toEqual(expect.arrayContaining([ids.mine, ids.theirs]));
+    expect((await tenant.owner.get(`/v1/readiness/attempts?learner_person_id=${second.personId}`)).body.items.map((a: any) => a.id)).toEqual([ids.theirs]);
+    expect((await expert.client.get('/v1/readiness/attempts')).status).toBe(403);
+    expect((await other.owner.get('/v1/readiness/attempts')).body.items).toEqual([]);
+  });
+});
