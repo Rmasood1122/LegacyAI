@@ -27,7 +27,8 @@ concurrency:
 
 env:
   NODE_VERSION: "24"
-  EVAL_CAP_USD: "5"
+  # The owner allowed $0.55 for this run on 2026-10-03 ($0.403 of the $2 limit was already used; see API_Test/SPEND.md).
+  EVAL_CAP_USD: "0.55"
   # Throwaway values for the CI database container only. Not secrets.
   DATABASE_URL_SUPERUSER: postgres://postgres:local-dev-only-not-a-secret@127.0.0.1:55432/legacyai_test
   DATABASE_URL_ADMIN: postgres://legacyai_migrator:local-test-migrator-password@127.0.0.1:55432/legacyai_test

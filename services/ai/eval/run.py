@@ -44,6 +44,8 @@ from eval.pdfs import make_pdf
 
 GOLDEN = Path(__file__).resolve().parent / "golden"
 LIMITS = {"max_input_tokens": 4000, "max_output_tokens": 600, "calls_per_hour": 10_000}
+# What a crashed run needs in order to still save every call it made (see the bottom of this file).
+STATE: dict[str, Any] = {}
 
 
 class RecordingProvider:
@@ -208,6 +210,7 @@ def main() -> None:
     embedder = make_embedder(args.embedder) if args.embedder == "local" else FakeEmbedder()
     gateway = Gateway(db, rec, load_prompts(), load_prices(), Logger("warn"))
     admin.execute("UPDATE ai_global SET monthly_cap_micro_usd = %s, kill_switch = false", (cap,))
+    STATE.update({"rec": rec, "admin": admin, "out": args.out, "provider": args.provider, "model": args.model})
 
     manifest = yaml.safe_load((GOLDEN / "manifest.yaml").read_text(encoding="utf-8"))
     qs = yaml.safe_load((GOLDEN / "questions.yaml").read_text(encoding="utf-8"))
@@ -444,7 +447,13 @@ def main() -> None:
                  "ledger_status": {r["status"]: r["n"] for r in statuses}},
         "latency_ms": {"ask_p50": pct([o["latency_ms"] for o in ans], 0.5), "ask_p95": pct([o["latency_ms"] for o in ans], 0.95),
                        "retrieval_p50": pct([o["retrieval_ms"] for o in ans], 0.5), "retrieval_p95": pct([o["retrieval_ms"] for o in ans], 0.95)},
-        "questions": {k: [{kk: vv for kk, vv in o.items() if kk not in ("raw",)} for o in v] for k, v in rows.items()},
+        # everything is kept: each question with the model's raw outputs, every raw output of the run in order, every ledger row
+        "questions": rows,
+        "all_raw_outputs": [{"n": i, "feature": feat, "raw": raw} for i, (feat, raw) in enumerate(rec.raw)],
+        "ledger_rows": [dict(x) for x in admin.execute(
+            """SELECT feature, model, prompt_version, attempt, status, input_tokens, output_tokens, reserved_micro_usd::bigint AS reserved,
+                      cost_micro_usd::bigint AS cost, latency_ms, created_at FROM ai_usage_ledger
+                WHERE tenant_id = ANY(%s::uuid[]) ORDER BY created_at, attempt""", ([north.tenant, harbour.tenant],)).fetchall()],
         "finished_at": datetime.now(UTC).isoformat(),
     })
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
@@ -473,4 +482,22 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except BaseException as exc:
+        # Nothing that was paid for may go unrecorded: save every raw output and every ledger row made so far.
+        if "rec" in STATE:
+            try:
+                ledger_rows = [dict(x) for x in STATE["admin"].execute(
+                    """SELECT tenant_id::text AS tenant, feature, model, prompt_version, attempt, status, input_tokens, output_tokens,
+                              cost_micro_usd::bigint AS cost, created_at FROM ai_usage_ledger ORDER BY created_at, attempt""").fetchall()]
+            except Exception:
+                ledger_rows = []
+            partial = {"provider": STATE["provider"], "model": STATE["model"], "crashed": True, "error": f"{type(exc).__name__}: {str(exc)[:500]}",
+                       "total_micro_usd_in_ledger": sum(int(x["cost"] or 0) for x in ledger_rows),
+                       "all_raw_outputs": [{"n": i, "feature": f, "raw": raw} for i, (f, raw) in enumerate(STATE["rec"].raw)],
+                       "ledger_rows": ledger_rows}
+            Path(STATE["out"]).parent.mkdir(parents=True, exist_ok=True)
+            Path(STATE["out"]).write_text(json.dumps(partial, indent=2, default=str), encoding="utf-8")
+            print(f"eval: CRASHED after {len(STATE['rec'].raw)} model calls - partial record saved ({partial['error'][:200]})")
+        raise
