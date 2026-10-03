@@ -267,6 +267,10 @@ jobs:
         run: |
           tail -n 80 e2e-server.log || true
           tail -n 80 ai-service.log || true
+          for f in web/e2e-artifacts/failures/*.txt; do
+            [ -f "$f" ] || continue
+            echo "::error title=page text at the failure - $(basename "$f")::$(head -c 2500 "$f" | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+          done
 
   dependency-audit:
     name: Dependency vulnerability audit (npm) and dependency record

@@ -1,12 +1,22 @@
 // The core loop in a real browser, against the real API and the AI service with the FAKE provider.
 // Synthetic company and people only. What a fake AI answers says nothing about a real model; these
 // tests check that the screens and the API work together.
+import { mkdir, writeFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import { checkScreen, codeFor, newCard, sessionPermissions, signIn } from './support.ts';
 
 const ITEM_TITLE = `Relief valve test ${Date.now().toString(36)}`;
 
 test.describe.configure({ mode: 'serial' });
+
+// On a failure, keep what the page showed as text: CI publishes it, so the cause can be read without the screenshot.
+test.afterEach(async ({ page }, info) => {
+  if (info.status === info.expectedStatus) return;
+  const text = await page.locator('body').innerText().catch(() => '(page text not available)');
+  await mkdir('e2e-artifacts/failures', { recursive: true });
+  await writeFile(`e2e-artifacts/failures/${info.title.replace(/[^a-z0-9]+/gi, '-').slice(0, 60)}.txt`, `${page.url()}
+${text}`);
+});
 
 test('the page is served with the strict browser policy and nothing is kept in browser storage', async ({ page }) => {
   const response = await page.goto('/');
