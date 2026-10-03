@@ -8,6 +8,7 @@ Choices that would take more than about an hour to reverse. Three lines each. Ev
 | D13–D17 | 2026-10-02 | Made during the build; listed in `REPORT.md` under Deviations for the founder to confirm |
 | D18 | 2026-10-03 | Founder decision during verification |
 | D19–D21 | 2026-10-03 | Phase 1.1: two founder decisions (D19, D20) and how they were built (D21) |
+| D22 | 2026-10-03 | Phase 2 Gate 1 approval |
 
 **D1 — Fastify 5, not NestJS.**
 CONTEXT: NestJS 12 is 5 weeks old and no official LTS statement was found; rejected NestJS 11 (labelled `legacy` on npm) and NestJS 12.
@@ -92,3 +93,7 @@ CONSEQUENCES: a locked-out Owner needs the platform operator (`docs/runbooks/own
 **D21 — Operator actions on a customer tenant run in the operator's own transaction, switched to the customer tenant for a moment.**
 CONTEXT: tenant creation used two transactions, so a failure could leave a half-created tenant. Rejected: a compensating "clean-up" step (can itself fail) and a `SECURITY DEFINER` function (filtered by forced row-level security, see D14).
 CONSEQUENCES: `Database.withinTenant` exists, works only in a transaction of the operator tenant, and must stay narrow (three callers); row-level security still checks every statement while switched.
+
+**D22 — Phase 2 design approved at Gate 1 (founder decision, 2026-10-03).**
+CONTEXT: the founder replied "approved" to the 11 documents in `docs/phase2/`, accepting all eight recommendations in `11-open-decisions.md` (two-model evaluation at Gate 2; local embeddings; no self-verification; learners see verified knowledge only; consent rules subject to legal review; AI service reachable with identity check; caps $5 / $1 / $20; free-database storage rules).
+CONSEQUENCES: Phase 2 is built to that design; no paid AI call before Gate 2.

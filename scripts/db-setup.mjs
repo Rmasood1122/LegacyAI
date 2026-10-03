@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Prepares a database for LegacyAI: (optionally) creates it, creates the three roles,
+// Prepares a database for LegacyAI: (optionally) creates it, creates the four roles,
 // then applies or rolls back migrations with dbmate.
 //
 // Usage (from services/api, so that `pg` and `dbmate` resolve):
@@ -60,9 +60,10 @@ async function roles() {
     await c.query('SELECT set_config($1, $2, false)', ['legacyai.migrator_password', passwordOf('DATABASE_URL_ADMIN')]);
     await c.query('SELECT set_config($1, $2, false)', ['legacyai.app_password', passwordOf('DATABASE_URL')]);
     await c.query('SELECT set_config($1, $2, false)', ['legacyai.backup_password', passwordOf('DATABASE_URL_BACKUP')]);
+    await c.query('SELECT set_config($1, $2, false)', ['legacyai.ai_password', passwordOf('DATABASE_URL_AI')]);
     await c.query(sql);
   });
-  console.log('db-setup: roles ready (legacyai_migrator, legacyai_app, legacyai_backup)');
+  console.log('db-setup: roles ready (legacyai_migrator, legacyai_app, legacyai_backup, legacyai_ai) and the vector extension');
 }
 
 // ---------------------------------------------------------------------------

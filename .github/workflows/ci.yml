@@ -21,6 +21,7 @@ env:
   DATABASE_URL_ADMIN: postgres://legacyai_migrator:local-test-migrator-password@127.0.0.1:55432/legacyai_test
   DATABASE_URL: postgres://legacyai_app:local-test-app-password@127.0.0.1:55432/legacyai_test
   DATABASE_URL_BACKUP: postgres://legacyai_backup:local-test-backup-password@127.0.0.1:55432/legacyai_test
+  DATABASE_URL_AI: postgres://legacyai_ai:local-test-ai-svc-password@127.0.0.1:55432/legacyai_test
 
 jobs:
   api:

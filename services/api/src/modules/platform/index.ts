@@ -8,6 +8,7 @@ export {
   Database, EXPECTED_SCHEMA_VERSION, PLATFORM_TENANT_ID, UnsafeDatabaseRoleError, type QueryResult, type Tx,
 } from './internal/db.ts';
 export {
+  ALLOWED_DETAIL_KEYS,
   canonicalDetails, computeRowHash, countAuditRows, queryAudit, recordAnchor, toApiAuditEvent,
   verifyAgainstExternalAnchors, verifyChain, writeAudit, type AuditEntry, type AuditRow, type VerifyResult,
 } from './internal/audit.ts';

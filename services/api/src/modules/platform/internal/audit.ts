@@ -25,11 +25,15 @@ export interface AuditEntry {
 
 // Only these keys may appear in `details`. Anything else is a programming error and is
 // rejected, so a secret or a name cannot be written to the audit log by accident.
-const ALLOWED_DETAIL_KEYS: ReadonlySet<string> = new Set([
+export const ALLOWED_DETAIL_KEYS: ReadonlySet<string> = new Set([
   'outcome', 'status', 'state_from', 'state_to', 'role_key', 'reason', 'scope', 'resource_type', 'operation',
   'factor_type', 'credential_id', 'new_card_id', 'old_card_id', 'person_id', 'export_id', 'rows', 'idempotent_replay',
   'restriction_type', 'limit_key', 'changed', 'target_tenant_id', 'session_reason', 'count', 'anchor_seq', 'obligations',
   'verification_ref', 'target_card_id',
+  // Phase 2 (the same list is held in the database table audit_detail_keys; a test keeps them equal)
+  'source_id', 'chunk_count', 'redactions', 'item_id', 'version_no', 'feature', 'model', 'cost_micro_usd', 'task_id',
+  'consent_id', 'attempt_id', 'candidates', 'approved', 'policy_disagreements', 'sensitivity_from', 'sensitivity_to',
+  'department_from', 'department_to', 'interview_id', 'topic_id',
 ]);
 
 const FORBIDDEN_VALUE = /\b\d{16}\b/;
@@ -48,11 +52,15 @@ export function canonicalDetails(details: Record<string, AuditDetailValue> | und
   return JSON.stringify(out);
 }
 
+/**
+ * Every audit row - from this API and from the Python service - is written through the one
+ * database function `audit_write()`, which enforces the detail-key allow-list in the database
+ * and leaves sequence numbers and hashes to the chain trigger. The checks here run first so a
+ * programming error is caught with a clear message before it reaches the database.
+ */
 export async function writeAudit(tx: Tx, entry: AuditEntry): Promise<void> {
   await tx.query(
-    `INSERT INTO audit_log (tenant_id, seq, occurred_at, actor_card_id, actor_kind, action, resource_type, resource_id,
-                            decision, reason_code, request_id, ip, details, prev_hash, row_hash)
-     VALUES ($1, 0, now(), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, ''::bytea, ''::bytea)`,
+    'SELECT audit_write($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)',
     [
       entry.tenantId, entry.actorCardId ?? null, entry.actorKind, entry.action, entry.resourceType ?? null,
       entry.resourceId ?? null, entry.decision, entry.reasonCode, entry.requestId ?? null, entry.ip ?? null,

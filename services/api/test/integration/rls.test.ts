@@ -38,7 +38,7 @@ async function asTenant<T>(tenantId: string | null, fn: () => Promise<T>): Promi
 }
 
 const GLOBAL_TABLES = [
-  'auth_transactions', 'card_directory', 'login_attempts', 'permissions', 'plan_limits', 'rate_limit_buckets',
+  'audit_detail_keys', 'auth_transactions', 'card_directory', 'login_attempts', 'permissions', 'plan_limits', 'rate_limit_buckets',
   'role_permissions', 'roles', 'schema_migrations',
 ];
 

@@ -15,6 +15,7 @@ export default function setup(): void {
       DATABASE_URL_ADMIN: DB_URLS.admin,
       DATABASE_URL: DB_URLS.app,
       DATABASE_URL_BACKUP: DB_URLS.backup,
+      DATABASE_URL_AI: DB_URLS.ai,
     },
   });
   if (res.status !== 0) throw new Error('could not prepare the test database (is `docker compose up -d` running?)');

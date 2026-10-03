@@ -13,7 +13,8 @@ db="$(node -e "console.log(new URL(process.env.DATABASE_URL_ADMIN).pathname.slic
 leftovers() {
   $pg psql -U postgres -d "$db" -At -c "
     SELECT (SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'schema_migrations')
-         + (SELECT count(*) FROM pg_proc WHERE pronamespace = 'public'::regnamespace)
+         + (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+              AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e'))  -- extension functions (pgvector) are not ours
          + (SELECT count(*) FROM schema_migrations)"
 }
 schema() { $pg pg_dump -U postgres -d "$db" --schema-only --no-owner --no-comments | grep -v '^\\\(un\)\{0,1\}restrict' ; }

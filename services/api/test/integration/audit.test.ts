@@ -88,8 +88,24 @@ describe('append-only enforcement', () => {
     await expect(su.query(`DELETE FROM audit_log WHERE tenant_id = $1`, [tenant.tenantId])).rejects.toThrow(/append-only/);
   });
 
-  it('the app cannot choose its own sequence number or hashes', async () => {
+  it('the app cannot insert into the audit log directly (Phase 2: only through audit_write)', async () => {
     const app = await appRoleClient();
+    try {
+      await app.query('BEGIN');
+      await app.query(`SELECT set_config('app.tenant_id', $1, true)`, [tenant.tenantId]);
+      await expect(app.query(
+        `INSERT INTO audit_log (tenant_id, seq, occurred_at, actor_kind, action, decision, reason_code, prev_hash, row_hash)
+         VALUES ($1, 1, now(), 'system', 'x:y', 'event', 'FORGED', ''::bytea, ''::bytea)`, [tenant.tenantId]))
+        .rejects.toMatchObject({ code: '42501' });
+      await app.query('ROLLBACK');
+    } finally {
+      await app.end();
+    }
+  });
+
+  it('even the table owner cannot choose its own sequence number, time or hashes: the trigger assigns them', async () => {
+    const app = new pg.Client({ connectionString: DB_URLS.admin });
+    await app.connect();
     try {
       await app.query('BEGIN');
       await app.query(`SELECT set_config('app.tenant_id', $1, true)`, [tenant.tenantId]);

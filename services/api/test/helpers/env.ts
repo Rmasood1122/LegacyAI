@@ -16,6 +16,7 @@ export const DB_URLS = {
   admin: `postgres://legacyai_migrator:local-test-migrator-password@${host}:${port}/${TEST_DB}`,
   app: `postgres://legacyai_app:local-test-app-password@${host}:${port}/${TEST_DB}`,
   backup: `postgres://legacyai_backup:local-test-backup-password@${host}:${port}/${TEST_DB}`,
+  ai: `postgres://legacyai_ai:local-test-ai-svc-password@${host}:${port}/${TEST_DB}`,
 };
 
 export const PEPPER_V1 = fakeKey('pepper-one-');
