@@ -55,4 +55,9 @@ export default tseslint.config(
     { group: ['@tanstack/*'], message: 'Features read and change data through useApiQuery, useApiList, useApiMutation and useRefresh (src/api/context.tsx).' },
     { regex: '(^|/)api/context(\\.tsx)?$', importNames: ['useApi', 'ApiProvider'], message: 'Features do not use the API client directly; use the hooks of src/api/context.tsx.' },
   ),
+  // The rule above reads "../x" as "another feature", which is only true while a feature has no sub-folders.
+  {
+    files: ['src/features/*/*/**/*.{ts,tsx}'],
+    rules: { 'no-restricted-syntax': ['error', { selector: 'Program', message: 'A feature folder is one level deep: no sub-folders (the feature-isolation rule depends on it).' }] },
+  },
 );

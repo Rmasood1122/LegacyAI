@@ -52,24 +52,36 @@ export function useAddDocument(): { state: AddDocumentState; add(doc: NewDocumen
   const refresh = useRefresh();
   const [state, setState] = useState<AddDocumentState>({ step: 'idle' });
   const add = async (doc: NewDocument): Promise<void> => {
-    let sourceId: string | null = null;
+    // A document that was created but whose file did not arrive is reused: trying again sends the file to the SAME
+    // document instead of creating a second one.
+    let sourceId: string | null = state.step === 'failed' ? state.sourceId : null;
+    const retrying = sourceId !== null;
     try {
-      setState({ step: 'creating' });
-      const created = await create.mutateAsync({
-        body: doc.contributorPersonId === null
-          ? { title: doc.title, sensitivity: doc.sensitivity, company_document: true }
-          : { title: doc.title, sensitivity: doc.sensitivity, contributor_person_id: doc.contributorPersonId },
-      });
-      sourceId = created.id;
-      if (created.status !== 'awaiting_content') {
-        setState({ step: 'awaiting_confirmation', sourceId });
-        return;
+      if (sourceId === null) {
+        setState({ step: 'creating' });
+        const created = await create.mutateAsync({
+          body: doc.contributorPersonId === null
+            ? { title: doc.title, sensitivity: doc.sensitivity, company_document: true }
+            : { title: doc.title, sensitivity: doc.sensitivity, contributor_person_id: doc.contributorPersonId },
+        });
+        sourceId = created.id;
+        if (created.status === 'awaiting_confirmation') {
+          setState({ step: 'awaiting_confirmation', sourceId });
+          return;
+        }
+        if (created.status !== 'awaiting_content') {
+          setState({ step: 'failed', error: new ApiError('unavailable', 0, `The document is in an unexpected state (${created.status}). Open it from the list.`), sourceId: null });
+          return;
+        }
       }
       setState({ step: 'uploading' });
-      const result = await upload.mutateAsync({ path: { source_id: created.id }, body: doc.file, contentType: contentTypeForFileName(doc.file.name) ?? '' });
+      const result = await upload.mutateAsync({ path: { source_id: sourceId }, body: doc.file, contentType: contentTypeForFileName(doc.file.name) ?? '' });
       setState({ step: 'done', sourceId, result });
     } catch (err) {
-      setState({ step: 'failed', error: asApiError(err), sourceId });
+      const error = asApiError(err);
+      // If the kept document no longer takes a file (gone, or already has one), the next try starts a new one.
+      const keep = !(retrying && (error.status === 404 || error.status === 409));
+      setState({ step: 'failed', error, sourceId: keep ? sourceId : null });
     } finally {
       await refresh(CHANGED);
     }

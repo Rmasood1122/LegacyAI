@@ -233,3 +233,12 @@ def test_hard_negatives(capsys: pytest.CaptureFixture[str]) -> None:
     with capsys.disabled():
         print(f"redaction-golden: hard negatives redacted {len(flagged)}/40 (design proposed at most 4)")
     assert len(flagged) <= HARD_NEGATIVE_CEILING
+
+
+def test_equipment_words_are_not_taken_for_names() -> None:
+    """Found on a screen: a document titled "Boiler manual (synthetic)" was stored as "[PERSON_1] manual (synthetic)"."""
+    assert redact("Boiler manual (synthetic)").text == "Boiler manual (synthetic)"
+    assert "Valve V-9" in redact("Valve V-9 releases the stored air.").text
+    # a real name next to an equipment word is still redacted
+    out = redact("Ask Jane Boiler about the pump.")
+    assert "Jane" not in out.text

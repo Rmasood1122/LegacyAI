@@ -131,6 +131,29 @@ describe('documents', () => {
     expect(api.callsTo('createSource')[0]?.body).toEqual({ title: 'Their notes', sensitivity: 1, contributor_person_id: ID(7) });
   });
 
+  it('when sending the file fails, trying again sends it to the SAME document instead of creating a second one', async () => {
+    const user = userEvent.setup();
+    let uploads = 0;
+    const api = new FakeApi({
+      listSources: () => page<KSource>([]),
+      createSource: () => ({ id: ID(25), status: 'awaiting_content', title: 'Pump notes' }),
+      uploadSourceContent: () => {
+        uploads += 1;
+        if (uploads === 1) throw problem(503, 'The service is busy', 'unavailable');
+        return { status: 'ready', failure_code: null, chunk_count: 2, pending_chunks: 0, duplicate_of: null };
+      },
+    });
+    renderScreen(<DocumentsScreen />, { api, session: as('listSources', 'createSource', 'uploadSourceContent') });
+    await user.type(await screen.findByLabelText('Title'), 'Pump notes');
+    await user.upload(screen.getByLabelText('File'), new File(['Synthetic pump notes.'], 'pump.txt', { type: 'text/plain' }));
+    await user.click(screen.getByRole('button', { name: 'Add document' }));
+    expect(await screen.findByText('The service is busy')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Add document' }));
+    expect(await screen.findByText('The document is ready')).toBeTruthy();
+    expect(api.callsTo('createSource')).toHaveLength(1);
+    expect(api.callsTo('uploadSourceContent').map((c) => c.path?.source_id)).toEqual([ID(25), ID(25)]);
+  });
+
   it('refuses a file type before sending anything, and explains a failed upload', async () => {
     const user = userEvent.setup({ applyAccept: false });
     const api = new FakeApi({
@@ -360,6 +383,14 @@ describe('home', () => {
     expect(screen.getByRole('link', { name: 'Ask' })).toBeTruthy();
     expect(screen.queryByText('Documents')).toBeNull();
     expect(screen.queryByText('Knowledge')).toBeNull();
+  });
+
+  it('does not present a cut-short count of waiting questions as exact', async () => {
+    const api = new FakeApi({
+      listExpertQuestions: () => ({ items: [{ id: ID(51), status: 'open' }, { id: ID(52), status: 'open' }], next_cursor: 'more' }) as never,
+    });
+    renderScreen(<HomeScreen />, { api, session: as('listExpertQuestions') });
+    expect(await screen.findByText(/At least 2 colleagues are waiting/)).toBeTruthy();
   });
 
   it('a card with no knowledge rights is told so, and nothing is requested for it', () => {

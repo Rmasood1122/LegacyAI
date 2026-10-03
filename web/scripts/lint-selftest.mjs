@@ -24,6 +24,7 @@ const cases = [
   ['the session importing the screen list', 'src/session/bad3.ts', 'import { SCREENS } from "../screens.tsx";\nexport const t = SCREENS;\n', true],
   ['navigation importing a feature', 'src/navigation/bad.ts', 'import { failureText } from "../features/documents/hooks.ts";\nexport const t = failureText;\n', true],
   ['the design system reaching for data', 'src/ui/bad3.ts', 'import { useApi } from "../api/context.tsx";\nexport const u = useApi;\n', true],
+  ['a file in a sub-folder of a feature (the isolation rule cannot see through it)', 'src/features/ask/components/Fine.tsx', 'export const X = () => <p>x</p>;\n', true],
   ['a clean presentational component', 'src/ui/Good.tsx', 'export const X = ({ text }: { text: string }) => <p className="muted">{text}</p>;\n', false],
   ['a feature using the data hooks, the session, navigation and its own files', 'src/features/ask/good.ts',
     'import { useApiQuery } from "../../api/context.tsx";\nimport { useSession } from "../../session/session.tsx";\nimport { screenPath } from "../../navigation/routes.ts";\nimport { x } from "./own.ts";\nexport const t = [useApiQuery, useSession, screenPath, x];\n', false],

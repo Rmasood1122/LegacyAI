@@ -94,12 +94,33 @@ def _overlaps(a: Finding, b: Finding) -> bool:
     return a.start < b.end and b.start < a.end
 
 
+# Plant and equipment words the language model sometimes reads as a person's or a place's name ("Boiler manual" was
+# stored as "[PERSON_1] manual"). A name finding is dropped only when EVERY word of it is on this list (short codes
+# such as "V-9" are ignored), so "Boiler" and "Valve V-9" are kept as text while "Jane Boiler" is still redacted.
+# This is a narrow built-in list, not a general cure: other ordinary words can still be redacted, and the company
+# allow-list remains the way to fix those. Words that are also common surnames (Miller, Cooper, Turner) are left out.
+_EQUIPMENT_WORDS = frozenset([
+    "boiler", "valve", "pump", "filler", "capper", "rinser", "labeler", "labeller", "conveyor", "compressor",
+    "palletiser", "palletizer", "gearbox", "bearing", "sensor", "drive", "tank", "nozzle", "chiller", "mixer",
+    "dryer", "heater", "motor", "gauge", "filter", "hopper", "sealer", "wrapper", "manual", "checklist", "cabinet",
+    "regulator", "actuator", "burner", "blower", "exchanger", "separator", "agitator",
+])
+_WORD = re.compile(r"[A-Za-z]{3,}")
+
+
+def _only_equipment_words(span: str) -> bool:
+    words = _WORD.findall(span)
+    return bool(words) and all(w.lower() in _EQUIPMENT_WORDS for w in words)
+
+
 def detect(text: str, allowlist: frozenset[str] = frozenset()) -> list[Finding]:
     results = _analyzer().analyze(text=text, language="en", entities=_ENTITIES, score_threshold=LOW_THRESHOLD)
     found: list[Finding] = []
     for r in results:
         span = text[r.start:r.end]
         if span.strip().lower() in allowlist:
+            continue
+        if r.entity_type in ("PERSON", "LOCATION") and _only_equipment_words(span):
             continue
         found.append(Finding(entity_type=_TYPE.get(r.entity_type, "OTHER"), detector=_DETECTOR.get(r.entity_type, "pattern"),
                              confidence=float(r.score), start=r.start, end=r.end))

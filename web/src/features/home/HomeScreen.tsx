@@ -32,9 +32,9 @@ export function HomeScreen() {
             <p><ScreenLink screen={key}>{route.home?.linkText}</ScreenLink></p>
           </Card>
         ))}
-        {can('listExpertQuestions') && waitingQuestions > 0 && (
+        {can('listExpertQuestions') && (waitingQuestions > 0 || Boolean(questions.data?.next_cursor)) && (
           <Card title="Questions for you">
-            <p>{waitingQuestions} {waitingQuestions === 1 ? 'colleague is' : 'colleagues are'} waiting for your answer.</p>
+            <p>{questions.data?.next_cursor ? `At least ${waitingQuestions}` : waitingQuestions} {waitingQuestions === 1 && !questions.data?.next_cursor ? 'colleague is' : 'colleagues are'} waiting for your answer.</p>
           </Card>
         )}
       </div>
