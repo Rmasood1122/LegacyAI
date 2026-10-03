@@ -1,10 +1,11 @@
 // Helpers for the browser tests: signing in through the real sign-in screen, and the two checks
 // every screen gets (an automated accessibility scan and a saved screenshot).
 import AxeBuilder from '@axe-core/playwright';
-import { expect, type Page } from '@playwright/test';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { expect, type Page, type TestInfo } from '@playwright/test';
 
 const CONTROL = process.env.E2E_CONTROL_URL ?? 'http://127.0.0.1:8788';
-export type Persona = 'owner' | 'author' | 'reviewer' | 'learner';
+export type Persona = 'owner' | 'author' | 'reviewer' | 'reviewer2' | 'learner' | 'admin';
 
 async function control<T>(path: string): Promise<T> {
   const res = await fetch(`${CONTROL}${path}`);
@@ -44,4 +45,16 @@ export async function sessionPermissions(page: Page): Promise<string[]> {
   const res = await page.request.get('/v1/auth/session');
   expect(res.status()).toBe(200);
   return ((await res.json()) as { permissions: string[] }).permissions;
+}
+
+/** Makes the readiness material (a released verified item, a topic, a job role) once; returns the job role to type. */
+export const seedReadiness = () => control<{ job_role: string }>('/seed-readiness');
+
+/** On a failure, keeps what the page showed as text: CI publishes it, so the cause can be read without the screenshot. */
+export async function keepPageTextOnFailure(page: Page, info: TestInfo): Promise<void> {
+  if (info.status === info.expectedStatus) return;
+  const text = await page.locator('body').innerText().catch(() => '(page text not available)');
+  await mkdir('e2e-artifacts/failures', { recursive: true });
+  await writeFile(`e2e-artifacts/failures/${info.title.replace(/[^a-z0-9]+/gi, '-').slice(0, 60)}.txt`, `${page.url()}
+${text}`);
 }

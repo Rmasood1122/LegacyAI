@@ -12,6 +12,8 @@ export interface RouteDef {
   requiredOperation?: OperationId;
   /** The card shown on the home page for this screen. */
   home?: { title: string; text: string; linkText: string };
+  /** 'manage' = listed in the second menu (running the company), not among the everyday screens. */
+  menu?: 'manage';
 }
 
 export const ROUTES = {
@@ -38,11 +40,36 @@ export const ROUTES = {
     path: '/consent', label: 'My consent', requiredOperation: 'listMyConsents',
     home: { title: 'My consent', text: 'See what you agreed to share, and withdraw it at any time.', linkText: 'Open my consent' },
   },
+  expertQuestions: {
+    path: '/questions', label: 'Questions', requiredOperation: 'listExpertQuestions',
+    home: { title: 'Questions between colleagues', text: 'Questions sent to you as an expert, and the ones you asked.', linkText: 'Open questions' },
+  },
+  interviews: {
+    path: '/interviews', label: 'Interviews', requiredOperation: 'listInterviews',
+    home: { title: 'Interviews', text: 'Answer a few questions about your work, at your own pace.', linkText: 'Open interviews' },
+  },
+  interview: { path: '/interviews/:interviewId', requiredOperation: 'getInterview' },
+  readiness: {
+    path: '/readiness', label: 'Readiness test', requiredOperation: 'startReadinessAttempt',
+    home: { title: 'Readiness test', text: 'Check what you have learned for a job role.', linkText: 'Take a test' },
+  },
+  attempt: { path: '/readiness/attempts/:attemptId', requiredOperation: 'getReadinessAttempt' },
+  report: { path: '/readiness/reports/:attemptId', requiredOperation: 'getReadinessReport' },
+  questionBank: { path: '/readiness/questions', label: 'Test questions', requiredOperation: 'listQuizQuestions', menu: 'manage' },
+  topics: { path: '/topics', label: 'Topics', requiredOperation: 'createTopic', menu: 'manage' },
+  gaps: { path: '/gaps', label: 'Job roles and gaps', requiredOperation: 'getGapReport', menu: 'manage' },
+  people: { path: '/people', label: 'People', requiredOperation: 'createPerson', menu: 'manage' },
+  cards: { path: '/cards', label: 'Cards', requiredOperation: 'issueCard', menu: 'manage' },
+  card: { path: '/cards/:cardId', requiredOperation: 'getCard' },
+  consentAdmin: { path: '/consents', label: 'Consents', requiredOperation: 'listConsents', menu: 'manage' },
+  settings: { path: '/settings', label: 'Settings', requiredOperation: 'getTenantSettings', menu: 'manage' },
+  audit: { path: '/audit', label: 'Audit log', requiredOperation: 'listAuditEvents', menu: 'manage' },
+  operator: { path: '/operator', label: 'Operator console', requiredOperation: 'listTenants', menu: 'manage' },
 } as const satisfies Record<string, RouteDef>;
 
 export type ScreenKey = keyof typeof ROUTES;
 /** Screens that show one thing and so need its id. */
-export type DetailScreenKey = 'document' | 'knowledgeItem';
+export type DetailScreenKey = 'document' | 'knowledgeItem' | 'interview' | 'attempt' | 'report' | 'card';
 export type PlainScreenKey = Exclude<ScreenKey, DetailScreenKey>;
 /** A screen to go to: a plain one, or a detail screen together with the id of what it shows. */
 export type ScreenTarget = { screen: PlainScreenKey } | { screen: DetailScreenKey; id: string };

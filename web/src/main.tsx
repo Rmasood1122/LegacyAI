@@ -11,8 +11,9 @@ import './styles/base.css';
 
 const sessionLost = new SessionLostSignal();
 const api = new ApiClient({ fetch: (input, init) => window.fetch(input, init), onSessionLost: () => sessionLost.emit() });
-// Data is never kept after the tab closes, and a failed request is not silently repeated.
-const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false, staleTime: 10_000 }, mutations: { retry: false } } });
+// Data is never kept after the tab closes, and a failed request is not silently repeated. The answer
+// of a change (it can hold one-time card secrets) is dropped as soon as no screen shows it (gcTime 0).
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false, staleTime: 10_000 }, mutations: { retry: false, gcTime: 0 } } });
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('index.html has no #root element');

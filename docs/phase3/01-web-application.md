@@ -119,3 +119,58 @@ left to the platform in front of the service.
   is unchanged. Deployment remains a separate, later decision.
 - Step 3b (interview, topics and gaps, readiness test, people and cards, settings, operator console) is not started.
 - No brand design; English only.
+
+## Step 3b: the remaining screens (written 2026-10-03)
+
+> State when this was written: the code is in place and passes the local checks (types, lint, 79 unit tests, build).
+> The browser tests for these screens (`web/e2e/more-screens.spec.ts`) have NOT run yet; they run only in CI.
+
+| Screen | Address | Shown to a card that may | Folder |
+|---|---|---|---|
+| Questions between colleagues (inbox and "asked by me") | `/questions` | read expert questions | `features/ask` |
+| Interviews, and one interview | `/interviews`, `/interviews/:id` | read interviews | `features/interviews` |
+| Readiness test: start, take, report | `/readiness`, `/readiness/attempts/:id`, `/readiness/reports/:id` | take a test / read results | `features/readiness` |
+| Test questions (question bank) | `/readiness/questions` | read the bank | `features/readiness` |
+| Topics | `/topics` | manage topics | `features/topics` |
+| Job roles and gaps | `/gaps` | read the gap report | `features/topics` |
+| People, Cards, one card | `/people`, `/cards`, `/cards/:id` | create people / issue cards / read a card | `features/people` |
+| Consents (of the company's people) | `/consents` | read consents | `features/admin` |
+| Settings (company, cards and sign-in, knowledge rules, AI budget, redaction allow-list) | `/settings` | read company settings | `features/admin` |
+| Audit log (list, chain check, export) | `/audit` | read the audit log | `features/admin` |
+| Operator console | `/operator` | list companies (the platform operator only) | `features/operator` |
+
+How they fit the existing design:
+
+- Every screen is one entry in `navigation/routes.ts` and one line in `screens.tsx`. A route can be marked
+  `menu: 'manage'`; those appear in a second menu ("Manage") so the everyday menu stays short.
+- New pieces of the design system (`ui/`): `ConfirmButton` (a two-step button for anything that cannot be undone or
+  costs money), `OneTimeSecrets`, `CheckboxField`, `Facts`.
+- **One-time secrets** (a card's 3-digit code, a set-up token) are held in the state of the screen that received
+  them and nowhere else: they disappear when the person presses "I have written these down" or leaves the screen.
+  The data layer drops the answer of a change as soon as no screen shows it (`gcTime: 0` for mutations in `main.tsx`).
+- **A learner is never shown the answer key while a test runs.** The running-test view draws only the question and
+  its options, whatever the API sends (unit test with a deliberately "leaky" answer).
+- **Buttons follow the state rules of the database**: for example a card that was only issued can be revoked but
+  not suspended or replaced, so those buttons are not offered for it.
+- Two-step confirmation is used for: finishing an interview, handing in a test, retiring a topic or question,
+  marking a person as left, revoking / replacing / renewing / unlocking a card, a new set-up token, taking a role
+  away, recording a withdrawal for a person, lifting a legal hold, removing an allow-list word, and every action on
+  the operator console (creating a company, the spending limit, renewing the company card, owner recovery, the AI
+  stop switch).
+
+What the API does not offer, and what the screens do about it (no contract change was made):
+
+- **No list of job roles.** Job roles are typed by name on the gap, interview and readiness screens.
+- **No way to read the people set for a job role.** The "People in this job role" form can only replace the whole
+  list and says so.
+- **No list of readiness tests taken.** A test or report is opened from the link shown after handing in, or by
+  typing its reference.
+- **No link from a knowledge item to a topic through the API.** Without it a generated question has no topic and
+  cannot appear in a test; the question bank marks such questions. (The browser test server sets the link directly
+  in the test database, as the existing both-services test does.)
+- **Listing expert questions and my consents has no "next page".** The screens say when the list is cut short.
+- Card restrictions other than "read-only" (usage caps, time windows, network lists) are shown but not editable.
+- The redaction allow-list sits on the Settings screen, which needs the right to read company settings; an expert
+  who may manage the list but not read settings cannot reach it here.
+- The operator console has unit tests only: the browser tests have no platform-operator sign-in with an
+  authenticator app.

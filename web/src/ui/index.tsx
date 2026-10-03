@@ -1,6 +1,6 @@
 // The small design system: presentational pieces only. No data access here (enforced by lint).
 // Every control has a visible label and a visible keyboard focus (styles/base.css).
-import { useId, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
+import { Fragment, useId, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 
 export function Page({ title, intro, actions, children }: { title: string; intro?: ReactNode; actions?: ReactNode; children: ReactNode }) {
   return (
@@ -163,4 +163,68 @@ export function sensitivityLabel(level: number): string {
 export function humanize(code: string): string {
   const text = code.replace(/[_-]+/g, ' ').trim().toLowerCase();
   return text === '' ? '—' : text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** A tick box with its label beside it. */
+export function CheckboxField({ label, checked, onChange, disabled }: { label: string; checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean }) {
+  return (
+    <label className="choice">
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
+      <span>{label}</span>
+    </label>
+  );
+}
+
+/** Label and value pairs. */
+export function Facts({ items }: { items: ReadonlyArray<readonly [label: string, value: ReactNode]> }) {
+  return (
+    <dl className="facts">
+      {items.map(([label, value]) => <Fragment key={label}><dt>{label}</dt><dd>{value}</dd></Fragment>)}
+    </dl>
+  );
+}
+
+/**
+ * A button for something that cannot be undone or that costs money: the first click only asks,
+ * the second (on a differently worded button) does it.
+ */
+export function ConfirmButton({ label, confirmLabel, onConfirm, busy = false, disabled = false, variant = 'danger' }: {
+  label: string; confirmLabel: string; onConfirm: () => void; busy?: boolean; disabled?: boolean; variant?: 'danger' | 'primary';
+}) {
+  const [asking, setAsking] = useState(false);
+  if (!asking) return <Button variant={variant === 'danger' ? 'danger' : 'secondary'} busy={busy} disabled={disabled} onClick={() => setAsking(true)}>{label}…</Button>;
+  const confirm = (): void => {
+    setAsking(false);
+    onConfirm();
+  };
+  return (
+    <span className="row">
+      <Button variant={variant} onClick={confirm}>{confirmLabel}</Button>
+      <Button onClick={() => setAsking(false)}>Cancel</Button>
+    </span>
+  );
+}
+
+/**
+ * Secrets the API returns exactly once (a card's 3-digit code, a set-up token). They are shown until
+ * the person says they wrote them down; the caller then forgets them (they live in screen state only,
+ * so leaving the screen removes them too).
+ */
+export function OneTimeSecrets({ title, cardNumber, sc, enrollmentToken, tokenExpiresAt, onDone }: {
+  title: string; cardNumber?: string; sc?: string; enrollmentToken?: string; tokenExpiresAt?: string; onDone: () => void;
+}) {
+  return (
+    <div className="secrets" role="alert">
+      <h3>{title}</h3>
+      <p><strong>These are shown only once.</strong> Write them down or hand them over now; they cannot be shown again. Leaving this screen removes them.</p>
+      <dl className="facts">
+        {cardNumber !== undefined && <><dt>Card number</dt><dd data-testid="secret-card-number">{cardNumber}</dd></>}
+        {sc !== undefined && <><dt>3-digit code</dt><dd data-testid="secret-sc">{sc}</dd></>}
+        {enrollmentToken !== undefined && <><dt>Set-up token</dt><dd data-testid="secret-token">{enrollmentToken}</dd></>}
+        {tokenExpiresAt !== undefined && <><dt>Token valid until</dt><dd>{formatDate(tokenExpiresAt)}</dd></>}
+      </dl>
+      {sc === undefined && enrollmentToken === undefined && <p>No new secret was issued; the existing ones stay valid.</p>}
+      <Button variant="primary" onClick={onDone}>I have written these down</Button>
+    </div>
+  );
 }

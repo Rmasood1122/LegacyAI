@@ -37,9 +37,11 @@ export function DocumentsScreen() {
 }
 
 function AddDocument() {
-  const { can } = useSession();
+  const { state: sessionState, can } = useSession();
   const { state, add, reset } = useAddDocument();
   const mayNamePeople = can('listPeople');
+  // A card that cannot read the people list can still add its own notes: the session says whose card it is.
+  const myPerson = sessionState.status === 'signed_in' ? sessionState.session.person_id : null;
   const people = useContributorChoices({ enabled: mayNamePeople });
   const [title, setTitle] = useState('');
   const [sensitivity, setSensitivity] = useState(1);
@@ -95,6 +97,12 @@ function AddDocument() {
             <SelectField label="Whose material is it?" hint="A person’s own notes need that person’s consent. Company documents do not." value={contributor} onChange={(e) => setContributor(e.target.value)}>
               <option value="">The company’s (not one person’s own notes)</option>
               {(people.items ?? []).map((p) => <option key={p.id} value={p.id}>{p.display_name}</option>)}
+            </SelectField>
+          )}
+          {!mayNamePeople && myPerson !== null && (
+            <SelectField label="Whose material is it?" hint="Your own notes need your consent for “My own documents”. Company documents do not." value={contributor} onChange={(e) => setContributor(e.target.value)}>
+              <option value="">The company’s (not my own notes)</option>
+              <option value={myPerson}>Mine (my own notes)</option>
             </SelectField>
           )}
           {mayNamePeople && people.hasMore && <PartialListNote shown={people.items?.length ?? 0} noun="people" busy={people.isLoadingMore} onLoadMore={people.loadMore} />}

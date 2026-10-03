@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { generate as totpGenerate } from 'otplib';
 import { TEST_ORIGIN } from '../helpers/env.ts';
-import { Client, enrollTotp, fromSecrets, login, platformOperator, startApp, type IssuedCard, type TestApp } from '../helpers/harness.ts';
+import { addMember, Client, enrollTotp, fromSecrets, login, platformOperator, startApp, superuser, type IssuedCard, type Res, type TestApp } from '../helpers/harness.ts';
 
 const PORT = Number(process.env.E2E_PORT ?? '8787');
 const CONTROL_PORT = Number(process.env.E2E_CONTROL_PORT ?? '8788');
@@ -20,6 +20,16 @@ const WEB_ORIGIN = `http://localhost:${PORT}`;
 interface Persona {
   card: IssuedCard;
   totpSecret: string;
+  /** null for the owner (not needed there). */
+  personId: string | null;
+}
+
+/** The job role the seeded readiness material belongs to (web/e2e/more-screens.spec.ts types it). */
+const SEED_JOB_ROLE = 'Boiler operator';
+
+function must(what: string, res: Res, status: number): Res {
+  if (res.status !== status) throw new Error(`${what} failed: ${res.status} ${res.raw.slice(0, 300)}`);
+  return res;
 }
 
 async function freshCode(t: TestApp, secret: string): Promise<string> {
@@ -27,12 +37,12 @@ async function freshCode(t: TestApp, secret: string): Promise<string> {
   return totpGenerate({ secret, epoch: Math.floor(t.clock.now().getTime() / 1000) });
 }
 
-async function issue(owner: Client, name: string, roles: string[]): Promise<IssuedCard> {
+async function issue(owner: Client, name: string, roles: string[]): Promise<{ card: IssuedCard; personId: string }> {
   const person = await owner.post('/v1/people', { display_name: name, department_id: null });
   if (person.status !== 201) throw new Error(`create person failed: ${person.status} ${person.raw}`);
   const issued = await owner.post('/v1/cards', { person_id: person.body.id, roles: roles.map((role_key) => ({ role_key })) });
   if (issued.status !== 201) throw new Error(`issue card failed: ${issued.status} ${issued.raw}`);
-  return fromSecrets(issued.body);
+  return { card: fromSecrets(issued.body), personId: person.body.id as string };
 }
 
 async function main(): Promise<void> {
@@ -48,13 +58,51 @@ async function main(): Promise<void> {
   const ownerCard = fromSecrets(created.body.owner_card);
   const personas = new Map<string, Persona>();
   const ownerSecret = await enrollTotp(t, ownerCard);
-  personas.set('owner', { card: ownerCard, totpSecret: ownerSecret });
+  personas.set('owner', { card: ownerCard, totpSecret: ownerSecret, personId: null });
+  const tenantId = created.body.tenant.id as string;
   t.clock.advance(31_000);
   const owner = await login(t, ownerCard, { totp: ownerSecret });
-  for (const [name, roles] of [['author', ['expert']], ['reviewer', ['expert']], ['learner', ['successor']]] as const) {
-    const card = await issue(owner, `Synthetic ${name}`, [...roles]);
-    personas.set(name, { card, totpSecret: await enrollTotp(t, card) });
+  const cast = [['author', ['expert']], ['reviewer', ['expert']], ['reviewer2', ['expert']], ['learner', ['successor']], ['admin', ['admin']]] as const;
+  for (const [name, roles] of cast) {
+    const { card, personId } = await issue(owner, `Synthetic ${name}`, [...roles]);
+    personas.set(name, { card, totpSecret: await enrollTotp(t, card), personId });
   }
+
+  // Material for the readiness and gap screens, made through the API the way the both-services walk
+  // does it (services/api/test/contract/phase2-walk.test.ts): a verified item released to learners,
+  // a topic, and a job role that needs the topic. One step has no API yet - linking an item to a
+  // topic - and is done directly in the test database, exactly as that walk does.
+  let seeded: Promise<{ job_role: string }> | null = null;
+  const seedReadiness = async (): Promise<{ job_role: string }> => {
+    t.clock.advance(31_000);
+    const o = await login(t, ownerCard, { totp: ownerSecret });
+    const writer = await addMember(t, o, [{ role_key: 'expert' }]);
+    const checker = await addMember(t, o, [{ role_key: 'expert' }]);
+    must('consent', await writer.client.post('/v1/consents', { scope: 'own_words', purpose: 'Synthetic browser test', policy_version: 'e2e-1' }), 201);
+    const item = must('create item', await writer.client.post('/v1/knowledge/items', {
+      title: 'Relief valve check', body: 'Lift each relief valve lever monthly until steam escapes, then release it slowly.', sensitivity: 1,
+      contributor_person_id: writer.personId,
+    }), 201).body.id as string;
+    must('submit item', await writer.client.post(`/v1/knowledge/items/${item}/submit`), 200);
+    must('verify item', await checker.client.post(`/v1/knowledge/items/${item}/verify`), 200);
+    must('release item', await o.patch(`/v1/knowledge/items/${item}/labels`, { department_id: null, sensitivity: 0 }), 200);
+    const topic = must('create topic', await o.post('/v1/topics', { name: 'Relief valves', description: 'monthly relief valve testing on the boiler' }), 201).body.id as string;
+    const role = encodeURIComponent(SEED_JOB_ROLE);
+    must('role topics', await o.put(`/v1/job-roles/${role}/topics`, { topics: [{ topic_id: topic, importance: 3 }] }), 200);
+    const learner = personas.get('learner')?.personId;
+    must('role people', await o.put(`/v1/job-roles/${role}/people`, { people: [{ person_id: learner, relation: 'successor' }] }), 200);
+    must('test settings', await o.patch('/v1/knowledge/settings', { quiz_min_questions_per_topic: 1 }), 200);
+    const su = await superuser();
+    try {
+      await su.query('BEGIN');
+      await su.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+      await su.query("INSERT INTO knowledge_item_topics (tenant_id, item_id, topic_id, link_source) VALUES ($1, $2, $3, 'reviewer')", [tenantId, item, topic]);
+      await su.query('COMMIT');
+    } finally {
+      await su.end();
+    }
+    return { job_role: SEED_JOB_ROLE };
+  };
 
   await t.app.identity.hasher.warmUp();
   await t.app.http.app.listen({ port: PORT, host: '127.0.0.1' });
@@ -73,11 +121,15 @@ async function main(): Promise<void> {
         if (!persona) return reply(404, { error: 'unknown persona' });
         return reply(200, { card_number: persona.card.number, sc: persona.card.sc, code: await freshCode(t, persona.totpSecret) });
       }
+      if (url.pathname === '/seed-readiness') {
+        seeded ??= seedReadiness();
+        return reply(200, await seeded);
+      }
       if (url.pathname === '/code') return reply(200, { code: await freshCode(t, url.searchParams.get('secret') ?? '') });
       if (url.pathname === '/new-card') {
         t.clock.advance(31_000); // the owner's previous code must not be reused
         const again = await login(t, ownerCard, { totp: ownerSecret });
-        const card = await issue(again, `Synthetic newcomer ${randomUUID().slice(0, 8)}`, ['successor']);
+        const { card } = await issue(again, `Synthetic newcomer ${randomUUID().slice(0, 8)}`, ['successor']);
         return reply(200, { card_number: card.number, sc: card.sc, enrollment_token: card.enrollmentToken });
       }
       return reply(404, { error: 'not found' });

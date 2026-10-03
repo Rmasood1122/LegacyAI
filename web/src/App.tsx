@@ -30,13 +30,14 @@ function SignedIn() {
   const { state, can, signOut } = useSession();
   if (state.status !== 'signed_in') return null;
   const allowed = SCREENS.filter((s) => s.requiredOperation === undefined || can(s.requiredOperation));
+  const manage = allowed.filter((s) => s.label !== undefined && s.menu === 'manage');
   return (
     <div className="shell">
       <a className="skip-link" href="#main">Skip to the content</a>
       <header className="topbar">
         <NavLink to="/" className="brand">LegacyAI</NavLink>
         <nav className="nav" aria-label="Main">
-          {allowed.filter((s) => s.label !== undefined).map((s) => (
+          {allowed.filter((s) => s.label !== undefined && s.menu === undefined).map((s) => (
             <NavLink key={s.path} to={s.path} end={s.path === '/'}>{s.label}</NavLink>
           ))}
         </nav>
@@ -45,6 +46,11 @@ function SignedIn() {
           <Button onClick={() => void signOut()}>Sign out</Button>
         </div>
       </header>
+      {manage.length > 0 && (
+        <nav className="nav subnav" aria-label="Manage">
+          {manage.map((s) => <NavLink key={s.path} to={s.path}>{s.label}</NavLink>)}
+        </nav>
+      )}
       <main id="main" tabIndex={-1}>
         {state.session.read_only && (
           <Banner tone="warning" title="This card is read-only">
