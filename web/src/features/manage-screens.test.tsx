@@ -239,7 +239,7 @@ describe('consents of the company’s people', () => {
     await user.type(screen.getByLabelText('Your reference for their request'), 'REQ-2026-0001');
     await user.click(screen.getByRole('button', { name: 'Record the withdrawal…' }));
     expect(api.callsTo('recordWithdrawalForPerson')).toEqual([]);
-    await user.click(screen.getByRole('button', { name: 'Yes, withdraw and erase their material' }));
+    await user.click(screen.getByRole('button', { name: /^Yes, withdraw and erase for Synthetic Expert: / }));
     await waitFor(() => expect(api.callsTo('recordWithdrawalForPerson')[0]).toMatchObject({ path: { person_id: ID(7) }, body: { reference: 'REQ-2026-0001' } }));
   });
 
@@ -274,7 +274,7 @@ describe('operator console', () => {
     await user.type(screen.getByLabelText('Name of the first owner'), 'Synthetic Owner');
     await user.click(screen.getByRole('button', { name: 'Create the company…' }));
     expect(api.callsTo('createTenant')).toEqual([]);
-    await user.click(screen.getByRole('button', { name: 'Yes, create “Synthetic Two”' }));
+    await user.click(screen.getByRole('button', { name: 'Yes, create “Synthetic Two” (synthetic-two) with owner Synthetic Owner' }));
     expect((await screen.findByTestId('secret-sc')).textContent).toBe('111');
     await user.click(screen.getByRole('button', { name: 'I have written these down' }));
     expect(screen.getByTestId('secret-sc').textContent).toBe('222');
@@ -282,6 +282,29 @@ describe('operator console', () => {
     await user.click(screen.getByRole('button', { name: 'I have written these down' }));
     expect(screen.queryByTestId('secret-sc')).toBeNull();
     expect(api.callsTo('createTenant')[0]?.body).toEqual({ name: 'Synthetic Two', slug: 'synthetic-two', owner_display_name: 'Synthetic Owner' });
+  });
+
+  it('owner recovery: changing the card number after the first click means asking again, and the second step names the card', async () => {
+    const user = userEvent.setup();
+    const api = new FakeApi({
+      listTenants: () => page([tenant]),
+      recoverOwnerCard: () => ({ card: card({ card_number: 'LGY-0000-0000-0000-0052' }), sc: '333', enrollment_token: 'recovery-token-synthetic', secret_already_shown: false, notified_owner_count: 1 }) as never,
+    });
+    renderScreen(<OperatorScreen />, { api, session: as('listTenants', 'recoverOwnerCard') });
+    await screen.findByRole('option', { name: 'Synthetic Co' });
+    await user.selectOptions(screen.getByLabelText('Work on one company'), ID(40));
+    const number = await screen.findByLabelText('The owner’s card number');
+    await user.type(number, 'LGY-0000-0000-0000-0051');
+    await user.type(screen.getByLabelText('Reference of your identity check'), 'CASE-0001');
+    await user.click(screen.getByRole('button', { name: 'Recover the owner’s card…' }));
+    expect(screen.getByRole('button', { name: 'Yes, I checked their identity; reset card LGY-0000-0000-0000-0051' })).toBeTruthy();
+    await user.clear(number);
+    await user.type(number, 'LGY-0000-0000-0000-0052');                              // another valid card, after the first click
+    expect(screen.queryByRole('button', { name: /Yes, I checked their identity/ })).toBeNull();
+    expect(api.callsTo('recoverOwnerCard')).toEqual([]);
+    await user.click(screen.getByRole('button', { name: 'Recover the owner’s card…' }));
+    await user.click(screen.getByRole('button', { name: 'Yes, I checked their identity; reset card LGY-0000-0000-0000-0052' }));
+    await waitFor(() => expect(api.callsTo('recoverOwnerCard')[0]?.body).toEqual({ card_number: 'LGY-0000-0000-0000-0052', verification_reference: 'CASE-0001' }));
   });
 
   it('a spending limit and the AI stop switch each need a second, explicit click', async () => {

@@ -2,7 +2,7 @@
 import { problems } from '../../../shared/errors.ts';
 import type { ResourceRef } from '../../../shared/policy-types.ts';
 import { decodeCursor, encodeCursor, writeAudit, type RouteDef, type Tx } from '../../platform/index.ts';
-import { baseClaims, gatewayRoute, pick, uuidOrNull, type GatewayDeps } from './common.ts';
+import { baseClaims, gatewayRoute, pick, uuidOrNull, withListFilter, type GatewayDeps } from './common.ts';
 import {
   attemptRef, collectionRef, expertQuestionRef, interviewRef, itemRef, newRef, quizItemRef, sourceRef, topicRef,
 } from './resources.ts';
@@ -51,6 +51,7 @@ export function workflowRoutes(deps: GatewayDeps): RouteDef[] {
     {
       operationId: 'listInterviews',
       kind: 'session',
+      listFilter: 'applied',
       policy: { resource: async ({ subject }) => collectionRef('interview', subject.tenant_id) },
       handler: async ({ tx, subject, query, ctx }) => {
         const after = decodeCursor(query.cursor);
@@ -87,19 +88,21 @@ export function workflowRoutes(deps: GatewayDeps): RouteDef[] {
       }))),
 
     // ------------------------------------------------------------------ gaps and topics
-    gatewayRoute(deps, 'getGapReport',
+    withListFilter('delegated', gatewayRoute(deps, 'getGapReport',
       async ({ subject }) => collectionRef('gap', subject.tenant_id),
       async ({ query }) => ({
-        // Counted with what THIS viewer may read: the report is computed for whoever looks at it.
+        // Counted with what THIS viewer may read: the report is computed for whoever looks at it. The AI service applies
+        // the viewer's knowledge:read filter to BOTH the topics and the items it counts (services/ai/app/capture/gaps.py).
         path: '/internal/gaps', action: 'gap.report', filterAction: 'knowledge:read', json: { job_role: query.job_role },
         map: (r) => ({
           job_role: r.job_role,
           topics: (r.topics ?? []).map((g: any) => pick(g, ['topic_id', 'name', 'required', 'importance', 'label', 'verified_items', 'contributors'])),
         }),
-      })),
+      }))),
     {
       operationId: 'listTopics',
       kind: 'session',
+      listFilter: 'applied',
       policy: { resource: async ({ subject }) => collectionRef('topic', subject.tenant_id) },
       handler: async ({ tx, subject, query, ctx }) => {
         const after = decodeCursor(query.cursor);
@@ -235,7 +238,7 @@ export function workflowRoutes(deps: GatewayDeps): RouteDef[] {
         json: { expert_person_id: body.expert_person_id, question: body.question, department_id: body.department_id ?? null, sensitivity: body.sensitivity ?? 1 },
         map: (r) => pick(r, ['id', 'status', 'expires_at']),
       })),
-    gatewayRoute(deps, 'listExpertQuestions',
+    withListFilter('delegated', gatewayRoute(deps, 'listExpertQuestions',
       async ({ subject }) => collectionRef('expert_question', subject.tenant_id),
       async ({ query }) => ({
         path: '/internal/expert-questions/list', action: 'expert_question.list', filterAction: 'expert_question:read',
@@ -244,7 +247,7 @@ export function workflowRoutes(deps: GatewayDeps): RouteDef[] {
           items: (r.items ?? []).map((q: any) => pick(q, ['id', 'question', 'expert_person_id', 'status', 'decline_reason', 'answer_item_id', 'created_at', 'answered_at', 'expires_at'])),
           next_cursor: null,
         }),
-      })),
+      }))),
     gatewayRoute(deps, 'replyExpertQuestion',
       ({ tx, subject, params }) => expertQuestionRef(tx, subject.tenant_id, params.question_id),
       async ({ params, body }) => ({
@@ -276,7 +279,7 @@ export function workflowRoutes(deps: GatewayDeps): RouteDef[] {
           map: (r) => ({ created: r.created ?? [], refused: (r.refused ?? []).map((x: any) => pick(x, ['item_id', 'reason'])) }),
         };
       }),
-    gatewayRoute(deps, 'listQuizQuestions',
+    withListFilter('delegated', gatewayRoute(deps, 'listQuizQuestions',
       async ({ subject }) => collectionRef('quiz_item', subject.tenant_id),
       async ({ query }) => ({
         path: '/internal/readiness/questions/list', action: 'quiz.list', filterAction: 'quiz:read',
@@ -285,7 +288,7 @@ export function workflowRoutes(deps: GatewayDeps): RouteDef[] {
           items: (r.items ?? []).map((q: any) => pick(q, ['id', 'topic_id', 'knowledge_item_id', 'kind', 'stem', 'options', 'correct_option', 'rubric', 'status', 'approved_at', 'created_at'])),
           next_cursor: r.next_cursor ? encodeCursor(r.next_cursor) : null,
         }),
-      })),
+      }))),
     gatewayRoute(deps, 'editQuizQuestion',
       ({ tx, subject, params }) => quizItemRef(tx, subject.tenant_id, params.question_id),
       async ({ params, body }) => ({

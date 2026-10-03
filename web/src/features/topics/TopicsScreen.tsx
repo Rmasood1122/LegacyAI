@@ -36,7 +36,7 @@ export function TopicsScreen() {
                   {t.status !== 'retired' && <Button onClick={() => setEditing(t)}>Rename</Button>}
                   {t.status === 'proposed' && <Button variant="primary" busy={update.isPending} onClick={() => update.mutate({ path: { topic_id: t.id }, body: { status: 'active' } })}>Accept</Button>}
                   {t.status !== 'retired' && (
-                    <ConfirmButton label="Retire" confirmLabel="Yes, retire this topic" busy={update.isPending} onConfirm={() => update.mutate({ path: { topic_id: t.id }, body: { status: 'retired' } })} />
+                    <ConfirmButton resetKey={null} label="Retire" confirmLabel="Yes, retire this topic" busy={update.isPending} onConfirm={() => update.mutate({ path: { topic_id: t.id }, body: { status: 'retired' } })} />
                   )}
                 </div>
               </td>

@@ -88,7 +88,8 @@ function NewCompany() {
         <TextField label="Name of the first owner" maxLength={200} autoComplete="off" value={owner} onChange={(e) => setOwner(e.target.value)} />
         <ErrorNote error={create.error} />
         <p className="muted">Two cards are issued: the owner’s and the company card. Their secrets are shown once each, right after this step.</p>
-        <ConfirmButton variant="primary" label="Create the company" confirmLabel={`Yes, create “${name.trim()}”`} busy={create.isPending} disabled={!valid} onConfirm={send} />
+        <ConfirmButton variant="primary" label="Create the company" confirmLabel={`Yes, create “${name.trim()}” (${slug}) with owner ${owner.trim()}`} busy={create.isPending} disabled={!valid}
+          resetKey={`${name}|${slug}|${owner}`} onConfirm={send} />
       </form>
     </Card>
   );
@@ -116,7 +117,7 @@ function CompanyActions({ tenant }: { tenant: Tenant }) {
           <h3>AI spending limit</h3>
           <TextField label="Monthly limit in US dollars" hint="AI stops for this company when the limit is reached. 0 switches AI off for it." type="number" min={0} step="0.01" value={dollars} onChange={(e) => setDollars(e.target.value)} />
           {budget.data !== undefined && <Banner tone="success" title={`The monthly limit is now $${(budget.data.monthly_cap_micro_usd / 1_000_000).toFixed(2)}`} />}
-          <ConfirmButton variant="primary" label="Set the limit" confirmLabel={`Yes, allow up to $${amountValid ? amount.toFixed(2) : '?'} a month`} busy={budget.isPending} disabled={!amountValid}
+          <ConfirmButton variant="primary" label="Set the limit" confirmLabel={`Yes, allow up to $${amountValid ? amount.toFixed(2) : '?'} a month`} busy={budget.isPending} disabled={!amountValid} resetKey={dollars}
             onConfirm={() => budget.mutate({ path, body: { monthly_cap_micro_usd: Math.round(amount * 1_000_000) } })} />
         </>
       )}
@@ -124,7 +125,7 @@ function CompanyActions({ tenant }: { tenant: Tenant }) {
         <>
           <h3>Company card</h3>
           <p>Renews the company’s card of last resort. Its new secrets are shown once.</p>
-          <ConfirmButton variant="primary" label="Renew the company card" confirmLabel="Yes, renew it" busy={renew.isPending}
+          <ConfirmButton variant="primary" label="Renew the company card" confirmLabel={`Yes, renew the company card of ${tenant.name}`} busy={renew.isPending} resetKey={null}
             onConfirm={() => renew.mutate({ path, body: {} }, { onSuccess: (r) => { renew.reset(); setShown(secretsOf(`The company card of ${tenant.name}`, r)); } })} />
         </>
       )}
@@ -135,7 +136,8 @@ function CompanyActions({ tenant }: { tenant: Tenant }) {
           <TextField label="The owner’s card number" autoComplete="off" value={cardNumber} onChange={(e) => setCardNumber(e.target.value)} />
           <TextField label="Reference of your identity check" hint="A ticket or case number (6 to 64 letters, digits, dots, dashes). Never a name or phone number." value={reference}
             error={reference.trim() !== '' && !REFERENCE.test(reference.trim()) ? 'Use 6 to 64 letters, digits, dots, dashes or underscores.' : null} onChange={(e) => setReference(e.target.value)} />
-          <ConfirmButton label="Recover the owner’s card" confirmLabel="Yes, I checked their identity; reset this card" busy={recover.isPending} disabled={!recoveryValid}
+          <ConfirmButton label="Recover the owner’s card" confirmLabel={`Yes, I checked their identity; reset card ${cardNumber.trim()}`} busy={recover.isPending} disabled={!recoveryValid}
+            resetKey={`${cardNumber}|${reference}`}
             onConfirm={() => recover.mutate({ path, body: { card_number: cardNumber.trim(), verification_reference: reference.trim() } }, {
               onSuccess: (r) => {
                 recover.reset();
@@ -161,9 +163,9 @@ function KillSwitch() {
       {state !== undefined && <Banner tone={state.on ? 'warning' : 'success'} title={state.on ? 'AI is stopped for every company' : 'AI is running'}>{state.reason}</Banner>}
       <TextField label="Reason (when stopping)" maxLength={200} value={reason} onChange={(e) => setReason(e.target.value)} />
       <div className="row">
-        <ConfirmButton label="Stop AI" confirmLabel="Yes, stop AI for every company" busy={flip.isPending} disabled={reason.trim() === ''}
+        <ConfirmButton label="Stop AI" confirmLabel="Yes, stop AI for every company" busy={flip.isPending} disabled={reason.trim() === ''} resetKey={reason}
           onConfirm={() => flip.mutate({ body: { on: true, reason: reason.trim() } })} />
-        <ConfirmButton variant="primary" label="Start AI again" confirmLabel="Yes, start AI again (this allows spending)" busy={flip.isPending} onConfirm={() => flip.mutate({ body: { on: false } })} />
+        <ConfirmButton variant="primary" label="Start AI again" confirmLabel="Yes, start AI again (this allows spending)" busy={flip.isPending} resetKey={null} onConfirm={() => flip.mutate({ body: { on: false } })} />
       </div>
     </Card>
   );

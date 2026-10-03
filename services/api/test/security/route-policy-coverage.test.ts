@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CONTRACT_PATH } from '../../src/app.ts';
 import {
   createHttpServer, createLogger, loadConfig, PLATFORM_TENANT_ID, PostgresIdempotencyStore,
-  type AuthPort, type HttpServer, type RouteDef,
+  honoursFilter, type AuthPort, type HttpServer, type ListFilter, type RouteDef,
 } from '../../src/modules/platform/index.ts';
 import { systemClock } from '../../src/shared/clock.ts';
 import type { Decision, Obligation, Subject } from '../../src/shared/policy-types.ts';
@@ -179,6 +179,116 @@ describe('the handler never runs unless the policy decision point said allow', (
     expect(res.statusCode).toBe(500);
     expect(ran).toBe(0);
     await s2.app.close();
+  });
+});
+
+describe('a read of a whole collection must say how it is narrowed to what the caller may see', () => {
+  const FILTER: Obligation[] = [{ type: 'filter' }];
+  const rolesRoute = (listFilter: ListFilter | undefined, onRun: () => void): RouteDef => ({
+    operationId: 'listRoles', kind: 'session', ...(listFilter === undefined ? {} : { listFilter }),
+    policy: { resource: async () => ({ type: 'role', tenant_id: PLATFORM_TENANT_ID, collection: true }) },
+    handler: async () => { onRun(); return { body: { items: [] } }; },
+  });
+  const get = (server: HttpServer) => server.app.inject({ method: 'GET', url: '/v1/roles', cookies: { '__Host-lai_session': FAKE_TOKEN } });
+
+  it.each([
+    ['declares nothing', undefined],
+    ['declares that it does not filter', { unfiltered: 'the same list for the whole company' }],
+  ] as const)('the policy asks for a filter and the route %s -> refused, handler not called, the denial is recorded', async (_name, declared) => {
+    const calls: string[] = [];
+    let ran = 0;
+    const server = await bareServer(allow(FILTER), calls);
+    server.defineRoutes([rolesRoute(declared, () => { ran += 1; })]);
+    expect((await get(server)).statusCode).toBe(403);
+    expect(ran).toBe(0);
+    expect(calls).toEqual(['role:read', 'recorded role:read deny']);
+    await server.app.close();
+  });
+
+  it.each(['applied', 'delegated'] as const)('the policy asks for a filter and the route declares "%s" -> the handler runs', async (declared) => {
+    let ran = 0;
+    const server = await bareServer(allow(FILTER));
+    server.defineRoutes([rolesRoute(declared, () => { ran += 1; })]);
+    await get(server);
+    expect(ran).toBe(1);
+    await server.app.close();
+  });
+
+  it('a list route that declares nothing is refused even when no filter was asked for (so it cannot be forgotten)', async () => {
+    const calls: string[] = [];
+    let ran = 0;
+    const server = await bareServer(allow(), calls);
+    server.defineRoutes([rolesRoute(undefined, () => { ran += 1; })]);
+    expect((await get(server)).statusCode).toBe(403);
+    expect(ran).toBe(0);
+    expect(calls).toEqual(['role:read', 'recorded role:read deny']);
+    await server.app.close();
+  });
+
+  it('a company-wide route called with a company-wide grant is not affected', async () => {
+    let ran = 0;
+    const server = await bareServer(allow());
+    server.defineRoutes([rolesRoute({ unfiltered: 'the same list for the whole company' }, () => { ran += 1; })]);
+    await get(server);
+    expect(ran).toBe(1);
+    await server.app.close();
+  });
+
+  it('the declarations of the real app are pinned: adding or changing one is a deliberate act', () => {
+    const declared = Object.fromEntries(t.app.http.registeredRoutes().filter((r) => r.listFilter !== null)
+      .map((r) => [r.operationId, typeof r.listFilter === 'string' ? r.listFilter : 'unfiltered']));
+    expect(declared).toEqual({
+      listCards: 'applied', listPeople: 'applied', listConsents: 'applied', listReviewTasks: 'applied', listSources: 'applied',
+      listInterviews: 'applied', listTopics: 'applied',
+      askKnowledge: 'delegated', listKnowledgeItems: 'delegated', getGapReport: 'delegated', listExpertQuestions: 'delegated',
+      listQuizQuestions: 'delegated',
+      listRoles: 'unfiltered', listDepartments: 'unfiltered', listTenants: 'unfiltered', listAuditEvents: 'unfiltered',
+      verifyAuditChain: 'unfiltered', listRedactionAllowlist: 'unfiltered', getKnowledgeSettings: 'unfiltered', getAiBudget: 'unfiltered',
+      getPlatformStorage: 'unfiltered',
+    });
+    for (const r of t.app.http.registeredRoutes()) {
+      if (r.listFilter !== null && typeof r.listFilter !== 'string') expect(r.listFilter.unfiltered.length, r.operationId).toBeGreaterThan(20);
+    }
+  });
+
+  it('table: for every seeded role, which company-wide routes refuse it because its grant is narrower than the company', async () => {
+    const su = await superuser();
+    // read permissions a role holds ONLY at a scope narrower than the company
+    const { rows } = await su.query<{ role_key: string; permission_key: string }>(
+      `SELECT rp.role_key, rp.permission_key FROM role_permissions rp JOIN permissions p USING (permission_key)
+        WHERE NOT p.is_write
+        GROUP BY rp.role_key, rp.permission_key HAVING bool_and(rp.scope <> 'tenant')`);
+    await su.end();
+    const narrow = new Map<string, string[]>();
+    for (const r of rows) narrow.set(r.permission_key, [...(narrow.get(r.permission_key) ?? []), r.role_key].sort());
+    const refused: Record<string, string[]> = {};
+    for (const r of t.app.http.registeredRoutes()) {
+      if (r.listFilter === null || honoursFilter(r.listFilter)) continue;
+      const roles = narrow.get(r.permission as string);
+      if (roles !== undefined) refused[r.operationId] = roles;
+    }
+    // Today exactly one: the redaction allow-list has no department, and the Department Manager's review:read is
+    // department-wide. A new narrower grant on a company-wide route shows up here before it reaches anyone.
+    expect(refused).toEqual({ listRedactionAllowlist: ['department_manager'] });
+  });
+
+  it('real app: a Department Manager is refused the company-wide allow-list but still gets its own review queue', async () => {
+    const owner = tenant.owner;
+    expect((await owner.patch('/v1/tenants/current/settings', {
+      enabled_roles: ['company_owner', 'admin', 'expert', 'successor', 'department_manager'],
+    })).status).toBe(200);
+    const dept = await owner.post('/v1/departments', { name: `Filter ${randomUUID().slice(0, 8)}` });
+    expect(dept.status).toBe(201);
+    const manager = await addMember(t, owner, [{ role_key: 'department_manager', department_id: dept.body.id }], { departmentId: dept.body.id });
+    expect((await manager.client.get('/v1/redaction/allowlist')).status).toBe(403);
+    expect((await manager.client.get('/v1/review/tasks')).status).toBe(200);
+    expect((await owner.get('/v1/redaction/allowlist')).status).toBe(200);
+    const su = await superuser();
+    const audit = await su.query(
+      `SELECT reason_code FROM audit_log WHERE tenant_id = $1 AND actor_card_id = $2 AND action = 'review:read' AND decision = 'deny'`,
+      [tenant.tenantId, manager.card.id]);
+    await su.end();
+    expect(audit.rows.map((r) => r.reason_code)).toEqual(['DENY_FILTER_NOT_SUPPORTED']);
   });
 });
 

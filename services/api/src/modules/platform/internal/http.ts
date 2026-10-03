@@ -73,6 +73,18 @@ export type PolicySpec =
       resource: (args: { tx: Tx; subject: Subject; params: any; body: any; query: any; ctx: RequestContext }) => Promise<ResourceRef | null>;
     };
 
+/**
+ * How a route that reads "the set of things of a type" meets the policy's `filter` obligation. The policy allows
+ * such a read to any holder of the permission and, when the holder's grant is narrower than the whole company,
+ * OBLIGES the route to return only what that grant covers. A route must say how it does that:
+ *   'applied'     - the handler adds authorizer.filter(...) to its own query;
+ *   'delegated'   - the access filter travels in the service token and the AI service applies it;
+ *   { unfiltered } - the answer is the same for the whole company (the reason says why). A card whose grant is
+ *                    narrower than the company is then REFUSED instead of being given the company-wide answer.
+ * A route that declares nothing is treated like `unfiltered`. See docs/decisions.md, D23.
+ */
+export type ListFilter = 'applied' | 'delegated' | { unfiltered: string };
+
 export interface GatewayCallArgs {
   ctx: RequestContext;
   subject: Subject;
@@ -86,9 +98,12 @@ export type GatewayPrepared = HandlerResult | { call: (a: GatewayCallArgs) => Pr
 
 export type RouteDef =
   | { kind: 'public'; operationId: string; policy: { public: true; reason: string }; handler: (a: PublicHandlerArgs) => Promise<HandlerResult> }
-  | { kind: 'session'; operationId: string; policy: Extract<PolicySpec, { resource: unknown }>; handler: (a: SessionHandlerArgs) => Promise<HandlerResult> }
   | {
-      kind: 'gateway'; operationId: string; policy: Extract<PolicySpec, { resource: unknown }>;
+      kind: 'session'; operationId: string; policy: Extract<PolicySpec, { resource: unknown }>; listFilter?: ListFilter;
+      handler: (a: SessionHandlerArgs) => Promise<HandlerResult>;
+    }
+  | {
+      kind: 'gateway'; operationId: string; policy: Extract<PolicySpec, { resource: unknown }>; listFilter?: ListFilter;
       /** Larger request bodies (file uploads). Defaults to the normal limit. */
       bodyLimit?: number;
       prepare: (a: SessionHandlerArgs) => Promise<GatewayPrepared>;
@@ -118,7 +133,12 @@ export interface RegisteredRoute {
   kind: 'public' | 'session' | 'gateway';
   permission: string | null;
   publicReason: string | null;
+  /** The route's declaration for collection reads; null when it declares none. */
+  listFilter: ListFilter | null;
 }
+
+/** True when the route itself (or the AI service on its behalf) narrows a list to what the caller's grant covers. */
+export const honoursFilter = (declared: ListFilter | null | undefined): boolean => declared === 'applied' || declared === 'delegated';
 
 export interface HttpServer {
   app: FastifyInstance;
@@ -327,6 +347,17 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
           await auth.recordDecision(tx, subject, action, loaded, { effect: 'deny', reason_code: 'DENY_UNKNOWN_OBLIGATION', obligations: [] }, ctx);
           return { problem: problems.forbidden() };
         }
+        // A read of a whole collection must say how it is narrowed (see ListFilter). Two refusals, both fail closed:
+        // the policy asked for a filter and the route does not provide one; or a list route declares nothing at all.
+        const mustFilter = decision.obligations.some((o) => o.type === 'filter');
+        const undeclaredList = loaded.collection === true && op.method === 'GET' && def.listFilter === undefined;
+        if ((mustFilter && !honoursFilter(def.listFilter)) || undeclaredList) {
+          if (undeclaredList) req.log.error({ operation: op.operationId }, 'a list route declares no listFilter; denying');
+          await auth.recordDecision(tx, subject, action, loaded, {
+            effect: 'deny', reason_code: undeclaredList ? 'DENY_LIST_FILTER_UNDECLARED' : 'DENY_FILTER_NOT_SUPPORTED', obligations: [],
+          }, ctx);
+          return { problem: problems.forbidden() };
+        }
         allowed = { subject, resource: loaded, decision };
         // The "allow" row is written at the END of the transaction (see below), together with the
         // work it allowed. Writing it first would hold the tenant's audit-chain lock for the whole
@@ -451,6 +482,7 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
       registry.push({
         operationId: op.operationId, method: op.method, path: op.path, kind, permission: op.permission,
         publicReason: def.kind === 'public' ? def.policy.reason : null,
+        listFilter: def.kind === 'public' ? null : def.listFilter ?? null,
       });
 
       app.route({

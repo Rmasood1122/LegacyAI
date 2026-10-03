@@ -19,7 +19,7 @@ describe('ConfirmButton', () => {
   it('does nothing on the first click; the second, differently worded button does it', async () => {
     const user = userEvent.setup();
     const done = vi.fn();
-    render(<ConfirmButton label="Delete" confirmLabel="Yes, delete" onConfirm={done} />);
+    render(<ConfirmButton label="Delete" confirmLabel="Yes, delete" resetKey={null} onConfirm={done} />);
     await user.click(screen.getByRole('button', { name: 'Delete…' }));
     expect(done).not.toHaveBeenCalled();
     // Cancel comes first, so a double click on the first button cannot land on the action

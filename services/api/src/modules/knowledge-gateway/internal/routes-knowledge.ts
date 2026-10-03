@@ -2,7 +2,7 @@
 import { problems } from '../../../shared/errors.ts';
 import type { ResourceRef } from '../../../shared/policy-types.ts';
 import { decodeCursor, encodeCursor, type RouteDef, type Tx } from '../../platform/index.ts';
-import { aiLimits, baseClaims, gatewayRoute, pick, uuidOrNull, type GatewayDeps } from './common.ts';
+import { aiLimits, baseClaims, gatewayRoute, pick, uuidOrNull, withListFilter, type GatewayDeps } from './common.ts';
 import { chunkRefs, collectionRef, itemRef, newRef, sourceRef } from './resources.ts';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -106,6 +106,7 @@ export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
     {
       operationId: 'listSources',
       kind: 'session',
+      listFilter: 'applied',
       policy: { resource: async ({ subject }) => collectionRef('source', subject.tenant_id) },
       handler: async ({ tx, subject, query, ctx }) => {
         const after = decodeCursor(query.cursor);
@@ -166,6 +167,7 @@ export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
     {
       operationId: 'askKnowledge',
       kind: 'gateway',
+      listFilter: 'delegated',
       policy: { resource: async ({ subject }) => collectionRef('knowledge', subject.tenant_id) },
       prepare: async ({ tx, subject, decision, ctx, body }) => {
         const expert = uuidOrNull(body.expert_person_id);
@@ -212,13 +214,13 @@ export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
     },
 
     // ------------------------------------------------------------------ knowledge items
-    gatewayRoute(deps, 'listKnowledgeItems',
+    withListFilter('delegated', gatewayRoute(deps, 'listKnowledgeItems',
       async ({ subject }) => collectionRef('knowledge_item', subject.tenant_id),
       async ({ query }) => ({
         path: '/internal/items/list', action: 'item.list', filterAction: 'knowledge:read',
         json: { status: query.status ?? null, owner_me: query.mine === true, limit: query.limit, after: decodeCursor(query.cursor) },
         map: (r) => ({ items: (r.items ?? []).map((i: any) => pick(i, ITEM_SUMMARY)), next_cursor: r.next_cursor ? encodeCursor(r.next_cursor) : null }),
-      })),
+      }))),
     gatewayRoute(deps, 'getKnowledgeItem',
       ({ tx, subject, params }) => itemRef(tx, subject.tenant_id, params.item_id),
       async ({ params }) => ({

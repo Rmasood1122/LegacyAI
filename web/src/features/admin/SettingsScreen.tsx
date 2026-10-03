@@ -217,7 +217,7 @@ function Allowlist() {
             <li key={t.id}>
               <span className="row">
                 <span>{t.term}</span>
-                {mayChange && <ConfirmButton label="Remove" confirmLabel={`Yes, remove “${t.term}”`} busy={remove.isPending} onConfirm={() => remove.mutate({ path: { term_id: t.id } })} />}
+                {mayChange && <ConfirmButton resetKey={null} label="Remove" confirmLabel={`Yes, remove “${t.term}”`} busy={remove.isPending} onConfirm={() => remove.mutate({ path: { term_id: t.id } })} />}
               </span>
             </li>
           ))}

@@ -100,6 +100,7 @@ export function adminRoutes(deps: GatewayDeps): RouteDef[] {
     {
       operationId: 'listConsents',
       kind: 'session',
+      listFilter: 'applied',
       policy: { resource: async ({ subject }) => collectionRef('consent', subject.tenant_id) },
       handler: async ({ tx, subject, query, ctx }) => {
         const after = decodeCursor(query.cursor);
@@ -248,6 +249,7 @@ export function adminRoutes(deps: GatewayDeps): RouteDef[] {
     {
       operationId: 'listReviewTasks',
       kind: 'session',
+      listFilter: 'applied',
       policy: { resource: async ({ subject }) => collectionRef('review_task', subject.tenant_id) },
       handler: async ({ tx, subject, query, ctx }) => {
         const after = decodeCursor(query.cursor);
@@ -316,6 +318,7 @@ export function adminRoutes(deps: GatewayDeps): RouteDef[] {
     {
       operationId: 'listRedactionAllowlist',
       kind: 'session',
+      listFilter: { unfiltered: 'the allow-list is one company-wide list with no department or owner; a card whose review:read grant is narrower (Department Manager) is refused' },
       policy: { resource: async ({ subject }) => collectionRef('redaction_allowlist', subject.tenant_id) },
       handler: async ({ tx, subject }) => {
         const { rows } = await tx.query<{ id: string; term: string; entity_type: string; created_at: Date }>(
@@ -363,6 +366,7 @@ export function adminRoutes(deps: GatewayDeps): RouteDef[] {
     {
       operationId: 'getKnowledgeSettings',
       kind: 'session',
+      listFilter: { unfiltered: 'one settings record per company' },
       policy: { resource: async ({ subject }) => collectionRef('knowledge_settings', subject.tenant_id) },
       handler: async ({ tx, subject }) => ({ body: await settingsOf(tx, subject.tenant_id) }),
     },
@@ -395,6 +399,7 @@ export function adminRoutes(deps: GatewayDeps): RouteDef[] {
     {
       operationId: 'getAiBudget',
       kind: 'session',
+      listFilter: { unfiltered: 'one budget record per company' },
       policy: { resource: async ({ subject }) => collectionRef('ai_budget', subject.tenant_id) },
       handler: async ({ tx, subject }) => {
         const limits = await aiLimits(tx, subject.tenant_id);
@@ -452,6 +457,7 @@ export function adminRoutes(deps: GatewayDeps): RouteDef[] {
     {
       operationId: 'getPlatformStorage',
       kind: 'session',
+      listFilter: { unfiltered: 'platform operator only; figures for the whole installation' },
       policy: { resource: async ({ subject }) => collectionRef('platform', subject.tenant_id) },
       handler: async ({ tx }) => {
         const size = await tx.query<{ bytes: string }>('SELECT pg_database_size(current_database())::text AS bytes');

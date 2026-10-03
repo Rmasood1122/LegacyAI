@@ -308,6 +308,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
     {
       operationId: 'listCards',
       kind: 'session',
+      listFilter: 'applied',
       policy: { resource: collection('card') },
       handler: async ({ tx, subject, query, ctx }) => {
         const after = uuidCursor(query.cursor);
@@ -464,6 +465,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
     {
       operationId: 'listRoles',
       kind: 'session',
+      listFilter: { unfiltered: 'the role list is the same for the whole company; every role holds role:read company-wide' },
       policy: { resource: collection('role') },
       handler: async ({ tx, subject }) => {
         const settings = await getSettings(tx, subject.tenant_id);
@@ -598,6 +600,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
     {
       operationId: 'listPeople',
       kind: 'session',
+      listFilter: 'applied',
       policy: { resource: collection('person') },
       handler: async ({ tx, subject, query, ctx }) => {
         const after = uuidCursor(query.cursor);
@@ -712,6 +715,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
     {
       operationId: 'listDepartments',
       kind: 'session',
+      listFilter: { unfiltered: 'the department list is the same for the whole company; every role holds department:read company-wide' },
       policy: { resource: collection('department') },
       handler: async ({ tx }) => {
         const { rows } = await tx.query<{ id: string; name: string; created_at: Date }>('SELECT id, name, created_at FROM departments ORDER BY name');
@@ -841,6 +845,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
     {
       operationId: 'listTenants',
       kind: 'session',
+      listFilter: { unfiltered: 'platform operator only; the list of companies has no narrower scope' },
       policy: { resource: collection('tenant') },
       handler: async ({ subject, query }) => {
         const after = uuidCursor(query.cursor);

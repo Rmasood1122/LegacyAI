@@ -65,7 +65,7 @@ export function ConsentAdminScreen() {
                 <td>
                   <div className="row">
                     {c.legal_hold && <Badge tone="warning">On hold</Badge>}
-                    {mayHold && c.legal_hold && <ConfirmButton label="Lift the hold" confirmLabel="Yes, lift it; withdrawn material is then erased" busy={release.isPending} onConfirm={() => release.mutate({ path: { consent_id: c.id } })} />}
+                    {mayHold && c.legal_hold && <ConfirmButton resetKey={null} label="Lift the hold" confirmLabel="Yes, lift it; withdrawn material is then erased" busy={release.isPending} onConfirm={() => release.mutate({ path: { consent_id: c.id } })} />}
                     {mayHold && !c.legal_hold && c.withdrawal_status !== 'completed' && <Button onClick={() => setHolding(c.id)}>Place a hold</Button>}
                   </div>
                 </td>
@@ -80,6 +80,10 @@ export function ConsentAdminScreen() {
 }
 
 type Scope = '' | 'own_words' | 'documents' | 'named_expert';
+/** What the second step names, so that the person confirming sees exactly what will be erased. */
+const SCOPE_WORDS: Readonly<Record<Scope, string>> = {
+  '': 'everything they agreed to', own_words: 'their own words', documents: 'their own documents', named_expert: 'being named as the expert',
+};
 
 /** A withdrawal the person made outside the application. Erasing cannot be undone, hence the second step. */
 function RecordWithdrawal({ personId, name }: { personId: string; name: string }) {
@@ -105,7 +109,8 @@ function RecordWithdrawal({ personId, name }: { personId: string; name: string }
             The material is hidden now and is being erased, unless a legal hold applies.
           </Banner>
         )}
-        <ConfirmButton label="Record the withdrawal" confirmLabel="Yes, withdraw and erase their material" busy={record.isPending} disabled={!valid}
+        <ConfirmButton label="Record the withdrawal" busy={record.isPending} disabled={!valid} resetKey={`${personId}|${reference}|${scope}`}
+          confirmLabel={`Yes, withdraw and erase for ${name}: ${SCOPE_WORDS[scope]}`}
           onConfirm={() => record.mutate({ path: { person_id: personId }, body: { reference: reference.trim(), ...(scope === '' ? {} : { scope }) } }, { onSuccess: () => setReference('') })} />
       </form>
     </Card>

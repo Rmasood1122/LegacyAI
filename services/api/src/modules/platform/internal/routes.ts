@@ -70,6 +70,7 @@ export function platformRoutes(deps: { config: Config; db: Database; exports: Ex
     {
       operationId: 'listAuditEvents',
       kind: 'session',
+      listFilter: { unfiltered: 'the audit log is one chain per company; it is read whole or not at all' },
       policy: { resource: collection('audit') },
       handler: async ({ tx, subject, query }) => {
         const before = decodeCursor(query.cursor);
@@ -88,6 +89,7 @@ export function platformRoutes(deps: { config: Config; db: Database; exports: Ex
     {
       operationId: 'verifyAuditChain',
       kind: 'session',
+      listFilter: { unfiltered: 'the audit chain is verified as a whole' },
       policy: { resource: collection('audit') },
       handler: async ({ tx, subject, body }) => ({
         body: await verifyChain(tx, subject.tenant_id, body.from_seq ?? 1, body.to_seq, VERIFY_ROWS_PER_REQUEST),

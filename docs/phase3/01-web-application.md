@@ -191,3 +191,17 @@ What the API does not offer, and what the screens do about it (no contract chang
 - **Lint:** dynamic `import()` and `sendBeacon` are refused. **API:** a dependency rule states that `src` never imports `test`.
 - **Type generator:** "one of these properties is required" becomes a union of object types; a settings PATCH body is
   typed against the request type.
+
+## Changes after the second design review of step 3b (2026-10-03)
+
+- **Two-step buttons.** `ConfirmButton` now REQUIRES `resetKey`: the inputs the action depends on, joined into one
+  text (`null` only when there are none). Changing any of them after the first click withdraws the question. The
+  second step names its target where there is one (the card number in owner recovery, the person and scope of a
+  recorded withdrawal, the company's short name and owner when creating a company).
+- **Readiness test, unsaved answers.** Each question alone decides whether its answer is saved and reports it to the
+  screen from one effect. An empty field is never "unsaved": the answer saved earlier is kept and can be shown again,
+  so clearing a field cannot block handing in. Text typed while a save is under way stays unsaved. A multiple-choice
+  option counts as saved only when the API confirmed that very option; a failed or pending save blocks handing in.
+- **API side (not a screen):** routes that read a whole collection declare how the list is narrowed
+  (`docs/decisions.md`, D23). No change to the HTTP contract.
+- Not done: one `requires` list instead of `requiredOperation` + `alsoRequires` (review suggestion API-030).

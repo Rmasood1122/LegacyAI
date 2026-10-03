@@ -74,7 +74,7 @@ export function InterviewScreen() {
               )}
               <div className="row">
                 <Button busy={busy} onClick={() => pause.mutate({ path })}>Pause</Button>
-                <ConfirmButton variant="primary" label="Finish the interview" confirmLabel="Yes, finish it" busy={busy} onConfirm={() => complete.mutate({ path })} />
+                <ConfirmButton resetKey={null} variant="primary" label="Finish the interview" confirmLabel="Yes, finish it" busy={busy} onConfirm={() => complete.mutate({ path })} />
               </div>
             </Card>
           )}

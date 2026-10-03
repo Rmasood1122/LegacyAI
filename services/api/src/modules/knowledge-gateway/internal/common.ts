@@ -2,7 +2,7 @@
 import { problems } from '../../../shared/errors.ts';
 import type { Decision, RequestContext, ResourceRef, Subject } from '../../../shared/policy-types.ts';
 import type { Authorizer } from '../../identity-access/index.ts';
-import type { Database, GatewayPrepared, Notifier, RouteDef, SessionHandlerArgs, Tx } from '../../platform/index.ts';
+import type { Database, GatewayPrepared, ListFilter, Notifier, RouteDef, SessionHandlerArgs, Tx } from '../../platform/index.ts';
 import type { AiCall, AiServiceClient, TokenClaims } from './client.ts';
 
 export interface GatewayDeps {
@@ -54,6 +54,9 @@ export interface CallPlan extends Omit<AiCall, 'claims'> {
 }
 
 /** A gateway route: decide and commit, then call the AI service with nothing held open. */
+/** Adds the collection-read declaration (see ListFilter in the platform module) to a route built by gatewayRoute. */
+export const withListFilter = (listFilter: ListFilter, route: RouteDef): RouteDef => (route.kind === 'public' ? route : { ...route, listFilter });
+
 export function gatewayRoute(
   deps: GatewayDeps, operationId: string, load: Loader,
   plan: (a: SessionHandlerArgs) => Promise<CallPlan | { result: { status?: number; body?: unknown } }>,

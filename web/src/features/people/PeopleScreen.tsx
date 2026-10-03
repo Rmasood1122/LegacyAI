@@ -41,7 +41,7 @@ export function PeopleScreen() {
                   <div className="row">
                     <Button onClick={() => setEditing(p)}>Edit</Button>
                     {p.status === 'active'
-                      ? <ConfirmButton label="Mark as left" confirmLabel={`Yes, ${p.display_name} has left`} busy={update.isPending} onConfirm={() => update.mutate({ path: { person_id: p.id }, body: { status: 'departed' } })} />
+                      ? <ConfirmButton resetKey={null} label="Mark as left" confirmLabel={`Yes, ${p.display_name} has left`} busy={update.isPending} onConfirm={() => update.mutate({ path: { person_id: p.id }, body: { status: 'departed' } })} />
                       : <Button busy={update.isPending} onClick={() => update.mutate({ path: { person_id: p.id }, body: { status: 'active' } })}>Mark as working here</Button>}
                   </div>
                 )}

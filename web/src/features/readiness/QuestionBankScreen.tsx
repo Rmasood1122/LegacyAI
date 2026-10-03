@@ -46,7 +46,7 @@ export function QuestionBankScreen() {
             <div className="row">
               <Button onClick={() => setEditing(q.id)}>Edit</Button>
               {q.status === 'draft' && <Button variant="primary" busy={approve.isPending} onClick={() => approve.mutate({ path: { question_id: q.id } })}>Approve</Button>}
-              <ConfirmButton label="Retire" confirmLabel="Yes, retire this question" busy={retire.isPending} onConfirm={() => retire.mutate({ path: { question_id: q.id } })} />
+              <ConfirmButton resetKey={null} label="Retire" confirmLabel="Yes, retire this question" busy={retire.isPending} onConfirm={() => retire.mutate({ path: { question_id: q.id } })} />
             </div>
           )}
         </Card>

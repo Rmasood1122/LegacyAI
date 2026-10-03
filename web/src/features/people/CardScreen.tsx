@@ -89,19 +89,19 @@ function Actions({ card }: { card: CardRecord }) {
         {can('suspendCard') && canSuspend && <Button busy={busy} disabled={!hasReason} onClick={() => suspend.mutate({ path, body: { reason: reason.trim() } }, { onSuccess: () => setReason('') })}>Suspend</Button>}
         {can('reinstateCard') && card.state === 'suspended' && <Button variant="primary" busy={busy} onClick={() => reinstate.mutate({ path })}>Reinstate</Button>}
         {can('revokeCard') && canRevoke && (
-          <ConfirmButton label="Revoke for good" confirmLabel="Yes, revoke this card for good" busy={busy} disabled={!hasReason}
+          <ConfirmButton label="Revoke for good" confirmLabel="Yes, revoke this card for good" busy={busy} disabled={!hasReason} resetKey={reason}
             onConfirm={() => revoke.mutate({ path, body: { reason: reason.trim() } }, { onSuccess: () => setReason('') })} />
         )}
         {can('renewCard') && canRenew && (
-          <ConfirmButton variant="primary" label="Renew" confirmLabel="Yes, renew this card" busy={busy}
+          <ConfirmButton resetKey={null} variant="primary" label="Renew" confirmLabel="Yes, renew this card" busy={busy}
             onConfirm={() => renew.mutate({ path, body: {} }, { onSuccess: (r) => { renew.reset(); setShown(fromCard('The card was renewed', r)); } })} />
         )}
         {can('unlockCard') && card.locked && (
-          <ConfirmButton variant="primary" label="Unlock with a new 3-digit code" confirmLabel="Yes, unlock it" busy={busy}
+          <ConfirmButton resetKey={null} variant="primary" label="Unlock with a new 3-digit code" confirmLabel="Yes, unlock it" busy={busy}
             onConfirm={() => unlock.mutate({ path }, { onSuccess: (r) => { unlock.reset(); setShown(fromCard('The card was unlocked', r)); } })} />
         )}
         {can('issueEnrollmentToken') && live && (
-          <ConfirmButton variant="primary" label="New set-up token" confirmLabel="Yes, issue a new set-up token" busy={busy}
+          <ConfirmButton resetKey={null} variant="primary" label="New set-up token" confirmLabel="Yes, issue a new set-up token" busy={busy}
             onConfirm={() => token.mutate({ path, body: {} }, { onSuccess: (r) => { token.reset(); setShown(fromToken('A new set-up token', r)); } })} />
         )}
       </div>
@@ -112,7 +112,7 @@ function Actions({ card }: { card: CardRecord }) {
             <option value="damaged">damaged</option>
             <option value="compromised">seen or copied by someone else</option>
           </SelectField>
-          <ConfirmButton label="Replace with a new card" confirmLabel="Yes, replace it; the old card stops working" busy={busy}
+          <ConfirmButton label="Replace with a new card" confirmLabel="Yes, replace it; the old card stops working" busy={busy} resetKey={replaceReason}
             onConfirm={() => replace.mutate({ path, body: { reason: replaceReason } }, { onSuccess: (r) => { replace.reset(); setShown(fromCard('The replacement card', r)); } })} />
         </div>
       )}
@@ -139,7 +139,7 @@ function Roles({ card }: { card: CardRecord }) {
             <li key={`${r.role_key}:${r.department_id ?? ''}`}>
               <span className="row">
                 <span>{name(r.role_key)}</span>
-                {can('removeCardRole') && <ConfirmButton label="Take away" confirmLabel={`Yes, take away “${name(r.role_key)}”`} busy={remove.isPending} onConfirm={() => remove.mutate({ path: { card_id: card.id, role_key: r.role_key } })} />}
+                {can('removeCardRole') && <ConfirmButton resetKey={null} label="Take away" confirmLabel={`Yes, take away “${name(r.role_key)}”`} busy={remove.isPending} onConfirm={() => remove.mutate({ path: { card_id: card.id, role_key: r.role_key } })} />}
               </span>
             </li>
           ))}

@@ -187,12 +187,13 @@ export function Facts({ items }: { items: ReadonlyArray<readonly [label: string,
 /**
  * A button for something that cannot be undone or that costs money: the first click only asks,
  * the second (on a differently worded button, in a different place) does it.
- * The question is withdrawn whenever the button becomes disabled or busy, or `resetKey` changes -
- * pass the inputs the action depends on as `resetKey`, so that changing them after the first click
- * means asking again.
+ * The question is withdrawn whenever the button becomes disabled or busy, or `resetKey` changes.
+ * `resetKey` is REQUIRED so that it cannot be forgotten: pass the inputs the action depends on (joined into one
+ * string), so that changing any of them after the first click means asking again; pass `null` only when the action
+ * has no inputs at all. Name the target in `confirmLabel` where there is one.
  */
 export function ConfirmButton({ label, confirmLabel, onConfirm, busy = false, disabled = false, variant = 'danger', resetKey }: {
-  label: string; confirmLabel: string; onConfirm: () => void; busy?: boolean; disabled?: boolean; variant?: 'danger' | 'primary'; resetKey?: string | number | boolean | null;
+  label: string; confirmLabel: string; onConfirm: () => void; busy?: boolean; disabled?: boolean; variant?: 'danger' | 'primary'; resetKey: string | number | boolean | null;
 }) {
   const [asking, setAsking] = useState(false);
   useEffect(() => setAsking(false), [resetKey, disabled, busy]);

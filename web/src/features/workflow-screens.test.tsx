@@ -246,7 +246,7 @@ describe('readiness test', () => {
     renderScreen(<AttemptScreen />, { api, session: as('getReadinessAttempt', 'saveAttemptAnswer', 'submitReadinessAttempt'), ...at });
     const box = await screen.findByLabelText(OPEN.stem);
     await user.type(box, 'Stop the boiler.');
-    expect(screen.getByText('A typed answer is not saved yet')).toBeTruthy();
+    expect(screen.getByText('An answer is not saved yet')).toBeTruthy();
     expect((screen.getByRole('button', { name: /Hand in the test/ }) as HTMLButtonElement).disabled).toBe(true);
     await user.tab();                                                                // leaving the field saves
     await waitFor(() => expect(api.callsTo('saveAttemptAnswer')[0]?.body).toEqual({ position: OPEN.position, answer_text: 'Stop the boiler.' }));
@@ -254,6 +254,64 @@ describe('readiness test', () => {
     expect(screen.getByText('Saved.')).toBeTruthy();
     await user.type(box, ' Then call maintenance.');
     expect(screen.queryByText('Saved.')).toBeNull();                                 // "Saved." only while the text is the saved text
+  });
+
+  it('clearing a field that has a saved answer does not block handing in; the saved answer can be shown again', async () => {
+    const user = userEvent.setup();
+    const running = attempt({ questions: [{ ...OPEN, answer_text: 'Stop the boiler.' }] });
+    const api = new FakeApi({ getReadinessAttempt: () => running });
+    renderScreen(<AttemptScreen />, { api, session: as('getReadinessAttempt', 'saveAttemptAnswer', 'submitReadinessAttempt'), ...at });
+    const box = await screen.findByLabelText(OPEN.stem) as HTMLTextAreaElement;
+    await user.clear(box);
+    expect(screen.getByText(/The answer you saved earlier is kept/)).toBeTruthy();
+    expect(screen.queryByText('An answer is not saved yet')).toBeNull();
+    expect((screen.getByRole('button', { name: /Hand in the test/ }) as HTMLButtonElement).disabled).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'Show the saved answer again' }));
+    expect(box.value).toBe('Stop the boiler.');
+    expect(api.callsTo('saveAttemptAnswer')).toEqual([]);                           // nothing empty was ever sent
+  });
+
+  it('text typed while a save is under way stays unsaved when that save finishes', async () => {
+    const user = userEvent.setup();
+    const running = attempt({ questions: [{ ...OPEN }] });
+    let finish: () => void = () => undefined;
+    const api = new FakeApi({
+      getReadinessAttempt: () => running,
+      saveAttemptAnswer: () => new Promise((resolve) => { finish = () => resolve({ position: OPEN.position, saved: true }); }) as never,
+    });
+    renderScreen(<AttemptScreen />, { api, session: as('getReadinessAttempt', 'saveAttemptAnswer', 'submitReadinessAttempt'), ...at });
+    const box = await screen.findByLabelText(OPEN.stem);
+    await user.type(box, 'Stop');
+    await user.click(screen.getByRole('button', { name: 'Save this answer' }));
+    await waitFor(() => expect(api.callsTo('saveAttemptAnswer')).toHaveLength(1));
+    await user.type(box, ' the boiler.');                                           // typed while the first save is still running
+    finish();
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Save this answer' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.getByText('Not saved yet.')).toBeTruthy();
+    expect((screen.getByRole('button', { name: /Hand in the test/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(api.callsTo('saveAttemptAnswer')[0]?.body).toEqual({ position: OPEN.position, answer_text: 'Stop' });
+  });
+
+  it('a choice whose save failed is shown as not saved and blocks handing in until it is chosen again', async () => {
+    const user = userEvent.setup();
+    const running = attempt({ questions: [{ ...MCQ }] });
+    let tries = 0;
+    const api = new FakeApi({
+      getReadinessAttempt: () => running,
+      saveAttemptAnswer: () => {
+        tries += 1;
+        if (tries === 1) throw problem(503, 'The service is busy', 'unavailable');
+        return { position: MCQ.position, saved: true } as never;
+      },
+    });
+    renderScreen(<AttemptScreen />, { api, session: as('getReadinessAttempt', 'saveAttemptAnswer', 'submitReadinessAttempt'), ...at });
+    await user.click(await screen.findByRole('radio', { name: 'Yearly' }));
+    expect(await screen.findByText('Your choice was not saved. Choose it again.')).toBeTruthy();
+    expect(screen.queryByText('Saved.')).toBeNull();
+    expect((screen.getByRole('button', { name: /Hand in the test/ }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole('radio', { name: 'Monthly' }));
+    expect(await screen.findByText('Saved.')).toBeTruthy();
+    await waitFor(() => expect((screen.getByRole('button', { name: /Hand in the test/ }) as HTMLButtonElement).disabled).toBe(false));
   });
 
   it('the report repeats the service’s statement word for word and names the gaps in the material', async () => {
