@@ -37,6 +37,7 @@ const perms: PermissionDef[] = [
   { permission_key: 'tenant:create', is_write: true, platform_only: true },
   { permission_key: 'knowledge:read', is_write: false, platform_only: false },
   { permission_key: 'knowledge:verify', is_write: true, platform_only: false },
+  { permission_key: 'knowledge:label', is_write: true, platform_only: false },
 ];
 const g = (role_key: RoleKey, permission_key: string, scope: Grant['scope'], max_sensitivity = 0, grant_source: Grant['grant_source'] = 'base'): Grant =>
   ({ role_key, permission_key, scope, max_sensitivity, grant_source });
@@ -47,6 +48,8 @@ const grants: Grant[] = [
   g('department_manager', 'knowledge:read', 'department', 1),
   g('expert', 'card:read', 'own'), g('expert', 'card:list', 'own'), g('expert', 'knowledge:read', 'own', 1),
   g('reviewer', 'knowledge:verify', 'tenant', 1),
+  g('reviewer', 'knowledge:label', 'tenant', 1),
+  g('successor', 'knowledge:read', 'tenant', 0),
   g('admin', 'knowledge:verify', 'tenant', 1, 'pilot_reviewer'),
   g('expert', 'knowledge:verify', 'tenant', 1, 'pilot_reviewer'),
   ...(['company_owner', 'admin', 'department_manager', 'expert', 'reviewer', 'successor'] as RoleKey[]).flatMap((r) => [g(r, 'self:read', 'own'), g(r, 'self:logout', 'own')]),
@@ -75,6 +78,11 @@ function ctx(over: Partial<PolicyContext> = {}): PolicyContext {
 }
 // A normal target: somebody else's Expert card (rank 30).
 const res = (over: Partial<ResourceRef> = {}): ResourceRef => ({ type: 'card', id: OTHER_CARD, tenant_id: T1, owner_card_id: OTHER_CARD, target_rank: 30, card_kind: 'person', ...over });
+/** A knowledge item contributed and written by other people (so the second-reviewer rule is satisfied). */
+const item = (over: Partial<ResourceRef> = {}): ResourceRef => ({
+  type: 'knowledge_item', id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', tenant_id: T1, sensitivity: 1,
+  owner_person_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', author_person_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', ...over,
+});
 const companyCard = (over: Partial<ResourceRef> = {}): ResourceRef => res({ owner_person_id: null, card_kind: 'company', target_rank: 100, ...over });
 const allRoles = (): PolicyContext['settings'] => ({ enabled_roles: ['company_owner', 'admin', 'department_manager', 'expert', 'successor', 'reviewer'], pilot_reviewer_grant: true });
 
@@ -115,8 +123,22 @@ const rows: Row[] = [
   { name: 'same role once enabled', s: subject([role('department_manager', DEPT_A)]), action: 'card:read', r: res({ department_id: DEPT_A }), c: ctx({ settings: allRoles() }), effect: 'allow', reason: 'ALLOW' },
 
   // ---- pilot reviewer grant
-  { name: 'pilot: admin may verify knowledge', s: subject([role('admin')]), action: 'knowledge:verify', r: res({ type: 'knowledge', sensitivity: 1 }), effect: 'allow', reason: 'ALLOW' },
-  { name: 'pilot: expert may verify knowledge', s: subject([role('expert')]), action: 'knowledge:verify', r: res({ type: 'knowledge', sensitivity: 1 }), effect: 'allow', reason: 'ALLOW' },
+  { name: 'pilot: admin may verify knowledge', s: subject([role('admin')]), action: 'knowledge:verify', r: item(), effect: 'allow', reason: 'ALLOW' },
+  { name: 'pilot: expert may verify knowledge', s: subject([role('expert')]), action: 'knowledge:verify', r: item(), effect: 'allow', reason: 'ALLOW' },
+  // Second-reviewer rule (docs/phase2/06): neither the contributor nor the author of the current version, whatever the origin.
+  { name: 'four eyes: the contributor cannot verify', s: subject([role('reviewer')]), action: 'knowledge:verify', r: item({ owner_person_id: PERSON }), c: ctx({ settings: allRoles() }), effect: 'deny', reason: 'DENY_SELF_REVIEW' },
+  { name: 'four eyes: the author of a correction cannot confirm it', s: subject([role('reviewer')]), action: 'knowledge:verify', r: item({ author_person_id: PERSON }), c: ctx({ settings: allRoles() }), effect: 'deny', reason: 'DENY_SELF_REVIEW' },
+  { name: 'four eyes: someone else may verify', s: subject([role('reviewer')]), action: 'knowledge:verify', r: item(), c: ctx({ settings: allRoles() }), effect: 'allow', reason: 'ALLOW' },
+  { name: 'four eyes: an item described without contributor and author is refused', s: subject([role('reviewer')]), action: 'knowledge:verify', r: res({ type: 'knowledge_item', owner_card_id: null, target_rank: undefined, sensitivity: 1 }), c: ctx({ settings: allRoles() }), effect: 'deny', reason: 'DENY_SELF_REVIEW' },
+  { name: 'four eyes: switched off, self-verification is allowed', s: subject([role('reviewer')]), action: 'knowledge:verify', r: item({ owner_person_id: PERSON }), c: ctx({ settings: { ...allRoles(), second_reviewer_required: false } }), effect: 'allow', reason: 'ALLOW' },
+  { name: 'four eyes: the contributor cannot release their own item to learners', s: subject([role('reviewer')]), action: 'knowledge:label', r: item({ owner_person_id: PERSON, releases_to_learners: true }), c: ctx({ settings: allRoles() }), effect: 'deny', reason: 'DENY_SELF_REVIEW' },
+  { name: 'four eyes: other label changes by the contributor are allowed', s: subject([role('reviewer')]), action: 'knowledge:label', r: item({ owner_person_id: PERSON }), c: ctx({ settings: allRoles() }), effect: 'allow', reason: 'ALLOW' },
+  // Verified only (docs/phase2/03): a reader limited to released material sees verified knowledge only.
+  { name: 'verified only: a learner is refused unverified material', s: subject([role('successor')]), action: 'knowledge:read', r: item({ sensitivity: 0, verification_status: 'unverified' }), effect: 'deny', reason: 'DENY_UNVERIFIED' },
+  { name: 'verified only: a learner may read verified material', s: subject([role('successor')]), action: 'knowledge:read', r: item({ sensitivity: 0, verification_status: 'verified' }), effect: 'allow', reason: 'ALLOW' },
+  { name: 'verified only: switched off, the learner may read it', s: subject([role('successor')]), action: 'knowledge:read', r: item({ sensitivity: 0, verification_status: 'unverified' }), c: ctx({ settings: { enabled_roles: ['company_owner', 'admin', 'expert', 'successor'], pilot_reviewer_grant: true, learner_verified_only: false } }), effect: 'allow', reason: 'ALLOW' },
+  { name: 'verified only: does not apply to someone with an internal grant', s: subject([role('expert')]), action: 'knowledge:read', r: item({ owner_person_id: PERSON, verification_status: 'unverified' }), effect: 'allow', reason: 'ALLOW' },
+  { name: 'verified only: a malformed status is refused', s: subject([role('successor')]), action: 'knowledge:read', r: item({ sensitivity: 0, verification_status: 7 as unknown as string }), effect: 'deny', reason: 'DENY_PDP_ERROR' },
   { name: 'pilot grant switched off', s: subject([role('admin')]), action: 'knowledge:verify', r: res({ type: 'knowledge' }), c: ctx({ settings: { enabled_roles: ['admin'], pilot_reviewer_grant: false } }), effect: 'deny', reason: 'DENY_DEFAULT' },
 
   // ---- scope

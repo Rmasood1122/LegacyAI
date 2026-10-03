@@ -56,6 +56,8 @@ def _seed(admin: psycopg.Connection[dict[str, Any]], world: World, embedder: Fak
     for dept, sens, owned in itertools.product([world.dept_a, world.dept_b, None], range(4), [False, True]):
         marker = f"LEAKMARK-{uuid.uuid4().hex[:10]}"
         with admin.transaction():
+            # the guards run as the table owner, which row-level security binds too: say which company this is
+            admin.execute("SELECT set_config('app.tenant_id', %s, true)", (world.tenant_id,))
             src = admin.execute(
                 """INSERT INTO sources (tenant_id, kind, title, department_id, sensitivity, owner_person_id, consent_id,
                                         company_owned_attested_by_card_id, uploaded_by_card_id, status)

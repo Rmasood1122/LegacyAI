@@ -13,10 +13,17 @@ AS $$
 DECLARE
   item_ids uuid[];
   source_ids uuid[];
+  prev_tenant text;
 BEGIN
   IF NOT (OLD.withdrawn_at IS NULL AND NEW.withdrawn_at IS NOT NULL) THEN
     RETURN NEW;
   END IF;
+  -- This function runs as the table owner, which is itself bound by the forced row-level security.
+  -- The company is taken from the consent row (whoever records the withdrawal, from whatever
+  -- session), and the caller's setting is put back afterwards. Row-level security on consents
+  -- already ensured the caller could update this row at all.
+  prev_tenant := current_setting('app.tenant_id', true);
+  PERFORM set_config('app.tenant_id', NEW.tenant_id::text, true);
   IF NEW.scope IN ('documents', 'own_words') THEN
     SELECT array_agg(id) INTO source_ids FROM sources
      WHERE tenant_id = NEW.tenant_id AND consent_id = NEW.id AND status NOT IN ('withdrawn', 'failed');
@@ -48,6 +55,7 @@ BEGIN
     UPDATE expert_questions SET status = 'expired' WHERE tenant_id = NEW.tenant_id AND expert_person_id = NEW.person_id AND status = 'open';
   END IF;
   NEW.withdrawal_status := CASE WHEN NEW.legal_hold THEN 'held' ELSE 'hidden' END;
+  PERFORM set_config('app.tenant_id', COALESCE(prev_tenant, ''), true);
   RETURN NEW;
 END
 $$;

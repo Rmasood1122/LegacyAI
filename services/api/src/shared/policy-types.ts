@@ -59,6 +59,12 @@ export interface ResourceRef {
   role_rank?: number;
   /** True when the action would leave the tenant without an active Company Owner. */
   removes_last_owner?: boolean;
+  /** Knowledge: 'verified' | 'corrected' | 'unverified' | 'stale' (and item states). Drives the verified-only rule. */
+  verification_status?: string;
+  /** Knowledge item: the person who wrote its CURRENT version (null for an AI extraction). Drives the second-reviewer rule. */
+  author_person_id?: string | null;
+  /** True when a label change would release the item to learners (sensitivity 0). */
+  releases_to_learners?: boolean;
 }
 
 export type Obligation =

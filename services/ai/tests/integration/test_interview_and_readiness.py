@@ -62,7 +62,7 @@ def test_gap_labels_follow_the_rules(db: Database, world: World, embedder: FakeE
 def test_an_interview_needs_consent_and_turns_answers_into_candidates(db: Database, world: World, embedder: FakeEmbedder, gateway: Gateway,
                                                                        provider: FakeProvider,
                                                                        admin: psycopg.Connection[dict[str, Any]]) -> None:
-    first = topic(db, world, embedder, admin, "Start-up", "starting the boiler after maintenance", importance=5)
+    first = topic(db, world, embedder, admin, "Start-up", "starting the boiler after maintenance", importance=3)
     interview = interviews.invite(db, world.ctx("owner", "interview.invite"), world.people["expert"].id, ROLE)
     spec = tenant_filter(world.tenant_id)
     with pytest.raises(interviews.InterviewRefused) as exc:

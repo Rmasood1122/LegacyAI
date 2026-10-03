@@ -23,8 +23,9 @@ export {
   accessPhase, canTransition, CARD_STATES, computeDates, effectiveState, LEGAL_TRANSITIONS, TERMINAL_STATES,
 } from './internal/lifecycle.ts';
 export {
-  buildResourceFilter, decide, usageKey,
-  type Grant, type Matrix, type PermissionDef, type PolicyContext, type ResourceDescriptor, type ResourceFilter, type Restriction,
+  buildResourceFilter, buildResourceFilterSpec, decide, usageKey,
+  type FilterGrant, type FilterSpec, type Grant, type Matrix, type PermissionDef, type PolicyContext, type ResourceDescriptor,
+  type ResourceFilter, type Restriction,
 } from './internal/policy.ts';
 export { ScProof, SecretCodeHasher } from './internal/secret-code.ts';
 export { createSession, csrfTokenFor, tenantOfToken, VerifiedLogin } from './internal/sessions.ts';

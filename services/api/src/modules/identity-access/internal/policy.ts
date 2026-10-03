@@ -43,7 +43,17 @@ export interface PolicyContext {
   now: Date;
   ip: string;
   tenant: { status: string };
-  settings: { enabled_roles: readonly RoleKey[]; pilot_reviewer_grant: boolean };
+  settings: {
+    enabled_roles: readonly RoleKey[];
+    pilot_reviewer_grant: boolean;
+    /**
+     * Knowledge settings, passed in by the knowledge gateway (this module does not read that module's
+     * table). Missing means the safe default: learners see verified knowledge only, and a second
+     * person must verify.
+     */
+    learner_verified_only?: boolean;
+    second_reviewer_required?: boolean;
+  };
   matrix: Matrix;
   /** The tenant's live company card: its expiry puts the whole tenant into grace / lapsed. */
   companyCard: { state: CardState; expires_at: Date; grace_until: Date } | null;
@@ -93,6 +103,12 @@ const RANK_GUARDED: ReadonlySet<string> = new Set([
 ]);
 /** Card restrictions never stop someone from signing out. */
 const RESTRICTION_EXEMPT: ReadonlySet<string> = new Set(['self:logout']);
+/**
+ * Second-reviewer rule (docs/phase2/06): whoever verifies an item, or releases it to learners, must be
+ * neither its contributor nor the author of its current version. One rule, whatever the item's origin.
+ */
+const FOUR_EYES: ReadonlySet<string> = new Set(['knowledge:verify', 'knowledge:label']);
+const VERIFIED: ReadonlySet<string> = new Set(['verified', 'corrected']);
 
 export function usageKey(limitKey: string, windowSeconds: number): string {
   return `${limitKey}:${windowSeconds}`;
@@ -174,6 +190,16 @@ function evaluateSubject(subject: Subject, action: string, ctx: PolicyContext): 
 
   const subjectRank = roles.reduce((max, r) => (Number.isFinite(r.rank) && r.rank > max ? r.rank : max), 0);
   return { permission, grants, obligations, subjectRank, isOwner: roles.some((r) => r.role_key === 'company_owner') };
+}
+
+/**
+ * "Verified only" (docs/phase2/03): while the company setting is on, someone whose applicable grants
+ * reach only released (level 0) material sees verified knowledge only. decide() and the filter spec
+ * both use this, so the two locks agree.
+ */
+function onlyVerified(grants: SubjectEvaluation['grants'], ctx: PolicyContext): boolean {
+  if (ctx.settings.learner_verified_only === false) return false;
+  return grants.every((g) => g.max_sensitivity === 0);
 }
 
 // ---------------------------------------------------------------- card restrictions
@@ -325,6 +351,19 @@ function decideUnsafe(subject: Subject, action: string, resource: ResourceRef, c
     }
   }
   if (resource.removes_last_owner !== undefined && resource.removes_last_owner !== false) return deny('DENY_LAST_OWNER');
+  // Knowledge guards. They apply only to resources that carry the attribute; a knowledge resource
+  // loaded without it is described incompletely and is refused rather than waved through.
+  if (resource.verification_status !== undefined) {
+    if (typeof resource.verification_status !== 'string') return deny('DENY_PDP_ERROR');
+    // Judged on ALL applicable grants, exactly as buildResourceFilterSpec() does, so the two locks agree.
+    if (!VERIFIED.has(resource.verification_status) && onlyVerified(grants, ctx)) return deny('DENY_UNVERIFIED');
+  }
+  if (FOUR_EYES.has(action) && (action === 'knowledge:verify' || resource.releases_to_learners === true)) {
+    if (resource.owner_person_id === undefined || resource.author_person_id === undefined) return deny('DENY_SELF_REVIEW');
+    const me = subject.person_id;
+    const mine = me !== null && (resource.owner_person_id === me || resource.author_person_id === me);
+    if (mine && ctx.settings.second_reviewer_required !== false) return deny('DENY_SELF_REVIEW');
+  }
 
   // Plan limits (billing hook) and card-level restrictions (feature 5).
   if (ctx.planAllows !== true) return deny('DENY_PLAN_LIMIT');
@@ -356,6 +395,8 @@ export interface ResourceDescriptor {
   ownerPersonExpr?: string;
   departmentExpr?: string;
   sensitivityExpr?: string;
+  /** For tables that hold knowledge: the condition "verified or corrected", applied when the spec says only_verified. */
+  verifiedExpr?: string;
 }
 
 export interface ResourceFilter {
@@ -366,40 +407,89 @@ export interface ResourceFilter {
 
 const NOTHING = (): ResourceFilter => ({ sql: 'FALSE', params: [] });
 
+/** One way in which the subject may see rows. Data only: no SQL, no column names. */
+export type FilterGrant =
+  | { scope: 'tenant'; max_sensitivity: number }
+  | { scope: 'department'; department_id: string; max_sensitivity: number }
+  | { scope: 'own'; owner_person_id?: string; owner_card_id: string; max_sensitivity: number };
+
 /**
- * The retrieval-time hook (feature 17). Returns the predicate a query MUST apply so the
- * subject can only ever retrieve rows it is allowed to see. It runs the same rules as
- * decide(); a test asserts the two always agree. `firstParam` is the number of the first
- * free bind parameter ($n) in the caller's query.
+ * The access filter as DATA (docs/phase2/03, lock 2). It crosses the service boundary inside the
+ * signed service token; the AI service turns it into a query condition with its own fixed
+ * descriptors. `nothing: true` is what every denial becomes.
+ */
+export interface FilterSpec {
+  v: 1;
+  tenant_id: string;
+  action: string;
+  nothing: boolean;
+  only_verified: boolean;
+  any_of: FilterGrant[];
+}
+
+/** Builds the filter spec with the same subject evaluation as decide(). Any error means "nothing". */
+export function buildResourceFilterSpec(subject: Subject, action: string, ctx: PolicyContext): FilterSpec {
+  const nothing: FilterSpec = {
+    v: 1, tenant_id: typeof subject?.tenant_id === 'string' ? subject.tenant_id : '', action: String(action), nothing: true,
+    only_verified: true, any_of: [],
+  };
+  try {
+    const ev = evaluateSubject(subject, action, ctx);
+    if ('effect' in ev) return nothing;
+    if (ev.permission.is_write) return nothing; // filters are for reading
+    if (ctx.planAllows !== true) return nothing;
+    if (!Array.isArray(checkRestrictions(action, ev.permission, ctx))) return nothing;
+    const anyOf: FilterGrant[] = [];
+    for (const g of ev.grants) {
+      if (!Number.isInteger(g.max_sensitivity) || g.max_sensitivity < 0 || g.max_sensitivity > 3) return nothing;
+      if (g.scope === 'tenant') anyOf.push({ scope: 'tenant', max_sensitivity: g.max_sensitivity });
+      else if (g.scope === 'department') {
+        if (typeof g.role_department_id !== 'string') continue;
+        anyOf.push({ scope: 'department', department_id: g.role_department_id, max_sensitivity: g.max_sensitivity });
+      } else {
+        anyOf.push({
+          scope: 'own', owner_card_id: subject.card_id, max_sensitivity: g.max_sensitivity,
+          ...(subject.person_id !== null ? { owner_person_id: subject.person_id } : {}),
+        });
+      }
+    }
+    if (anyOf.length === 0) return nothing;
+    return { v: 1, tenant_id: subject.tenant_id, action, nothing: false, only_verified: onlyVerified(ev.grants, ctx), any_of: anyOf };
+  } catch {
+    return nothing;
+  }
+}
+
+/**
+ * The retrieval-time hook (feature 17) for the API's own list queries: the filter spec above,
+ * translated into the predicate a query MUST apply. One source of rules for both services; a test
+ * asserts it always agrees with decide(). `firstParam` is the number of the first free bind
+ * parameter ($n) in the caller's query.
  */
 export function buildResourceFilter(
   subject: Subject, action: string, descriptor: ResourceDescriptor, ctx: PolicyContext, firstParam = 1,
 ): ResourceFilter {
   try {
-    const ev = evaluateSubject(subject, action, ctx);
-    if ('effect' in ev) return NOTHING();
-    if (ev.permission.is_write) return NOTHING(); // filters are for reading
-    if (ctx.planAllows !== true) return NOTHING();
-    if (!Array.isArray(checkRestrictions(action, ev.permission, ctx))) return NOTHING();
-
+    const spec = buildResourceFilterSpec(subject, action, ctx);
+    if (spec.nothing) return NOTHING();
     const params: unknown[] = [];
     const bind = (value: unknown): string => {
       params.push(value);
       return `$${firstParam + params.length - 1}`;
     };
-    const tenantClause = `${descriptor.tenantExpr} = ${bind(subject.tenant_id)}`;
+    const tenantClause = `${descriptor.tenantExpr} = ${bind(spec.tenant_id)}`;
 
     const clauses: string[] = [];
-    for (const g of ev.grants) {
+    for (const g of spec.any_of) {
       const parts: string[] = [];
       if (g.scope === 'department') {
-        if (!descriptor.departmentExpr || typeof g.role_department_id !== 'string') continue;
-        parts.push(`${descriptor.departmentExpr} = ${bind(g.role_department_id)}`);
+        if (!descriptor.departmentExpr) continue;
+        parts.push(`${descriptor.departmentExpr} = ${bind(g.department_id)}`);
       } else if (g.scope === 'own') {
         const own: string[] = [];
-        if (descriptor.ownerCardExpr) own.push(`${descriptor.ownerCardExpr} = ${bind(subject.card_id)}`);
-        if (descriptor.ownerPersonExpr && subject.person_id !== null) {
-          own.push(`${descriptor.ownerPersonExpr} = ${bind(subject.person_id)}`);
+        if (descriptor.ownerCardExpr) own.push(`${descriptor.ownerCardExpr} = ${bind(g.owner_card_id)}`);
+        if (descriptor.ownerPersonExpr && g.owner_person_id !== undefined) {
+          own.push(`${descriptor.ownerPersonExpr} = ${bind(g.owner_person_id)}`);
         }
         if (own.length === 0) continue;
         parts.push(`(${own.join(' OR ')})`);
@@ -408,7 +498,9 @@ export function buildResourceFilter(
       clauses.push(parts.length === 0 ? 'TRUE' : `(${parts.join(' AND ')})`);
     }
     if (clauses.length === 0) return NOTHING();
-    return { sql: `(${tenantClause} AND (${clauses.join(' OR ')}))`, params };
+    let sql = `(${tenantClause} AND (${clauses.join(' OR ')}))`;
+    if (spec.only_verified && descriptor.verifiedExpr !== undefined) sql = `(${sql} AND ${descriptor.verifiedExpr})`;
+    return { sql, params };
   } catch {
     return NOTHING();
   }
