@@ -44,8 +44,8 @@ describe('the contract file', () => {
     const yaml = readFileSync(CONTRACT_PATH, 'utf8');
     const count = (needle: string): number => yaml.split(needle).length - 1;
     expect(count('$ref: "#/components/parameters/Limit"')).toBe(5);
-    expect(count('$ref: "#/components/parameters/Cursor"')).toBe(13);
-    expect(count('$ref: "#/components/parameters/IdempotencyKey"')).toBe(70);
+    expect(count('$ref: "#/components/parameters/Cursor"')).toBe(17);   // 13 + listJobRoles, listReadinessAttempts, listExpertQuestions, listMyConsents
+    expect(count('$ref: "#/components/parameters/IdempotencyKey"')).toBe(71);
     expect(count('$ref: "#/components/responses/TooManyRequests"')).toBe(124);
     expect(yaml).toContain('openapi: 3.1.0');
   });

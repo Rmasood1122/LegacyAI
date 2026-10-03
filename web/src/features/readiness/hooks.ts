@@ -2,10 +2,12 @@
 import { useApiList, useApiMutation, useApiQuery } from '../../api/context.tsx';
 import type { BadgeTone } from '../../ui/index.tsx';
 
-const ATTEMPT_CHANGED = ['getReadinessAttempt', 'getReadinessReport'] as const;
+// The list of tests taken changes with every start, hand-in and override (found by the browser test: the list still
+// said "no test has been taken" right after one was handed in).
+const ATTEMPT_CHANGED = ['getReadinessAttempt', 'getReadinessReport', 'listReadinessAttempts'] as const;
 const BANK_CHANGED = ['listQuizQuestions', 'listReviewTasks'] as const;
 
-export const useStartAttempt = () => useApiMutation('startReadinessAttempt');
+export const useStartAttempt = () => useApiMutation('startReadinessAttempt', ['listReadinessAttempts']);
 export const useAttempt = (attemptId: string) => useApiQuery('getReadinessAttempt', { path: { attempt_id: attemptId } });
 export const useSaveAnswer = () => useApiMutation('saveAttemptAnswer', ['getReadinessAttempt']);
 export const useSubmitAttempt = () => useApiMutation('submitReadinessAttempt', ATTEMPT_CHANGED);
