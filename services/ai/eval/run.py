@@ -427,7 +427,11 @@ def main() -> None:
         "citations": {"returned": checked, "valid_on_recheck": valid,
                       "removed_by_validator": sum(o["claims_rejected"] for g in rows.values() for o in g),
                       "fabricated_source_answers": sum(1 for g in rows.values() for o in g if o["fabricated"]),
-                      "cross_company_citations": cross},
+                      "cross_company_citations": cross,
+                      # the leak check on realistic data: no passage above the reader's level may be approved or cited
+                      "above_reader_level_approved_or_cited": sum(
+                          1 for g in rows.values() for o in g for cid in [*o["approved"], *o["citation_chunks"]]
+                          if cid in chunks and chunks[cid]["sensitivity"] > 1)},
         "correctness": {"answered": sum(1 for t in table if t["outcome"] == "answered"),
                         **{k: sum(1 for t in table if t["judge"] == k) for k in ("correct", "partly", "wrong", "unjudged")}, "table": table},
         "second_company": t2,
@@ -452,7 +456,8 @@ def main() -> None:
           f"answerable wrongly refused {a['answerable_wrongly_refused']['refused']}/{a['answerable_wrongly_refused']['n']}")
     ci = result["citations"]
     print(f"eval: citations valid on re-check {ci['valid_on_recheck']}/{ci['returned']}; removed by validator {ci['removed_by_validator']}; "
-          f"answers with a fabricated source {ci['fabricated_source_answers']}; cross-company citations {ci['cross_company_citations']}")
+          f"answers with a fabricated source {ci['fabricated_source_answers']}; cross-company citations {ci['cross_company_citations']}; "
+          f"confidential passages approved or cited {ci['above_reader_level_approved_or_cited']}")
     co = result["correctness"]
     print(f"eval: correctness (judge) of {co['answered']} answered: correct {co['correct']}, partly {co['partly']}, wrong {co['wrong']}, unjudged {co['unjudged']}")
     print(f"eval: interview {json.dumps(iv_result)}")
