@@ -30,7 +30,9 @@ export function testEnv(overrides: Record<string, string | undefined> = {}): Rec
     SC_PEPPER_KEYRING: JSON.stringify({ current: 'v1', keys: { v1: PEPPER_V1 } }),
     CREDENTIAL_ENC_KEYRING: JSON.stringify({ current: 'k1', keys: { k1: fakeKey('totp-enc-') } }),
     HMAC_INDEX_KEY: fakeKey('hmac-index-'),
-    INTERNAL_SERVICE_TOKEN: 'test-internal-service-token-0123456789',
+    SERVICE_TOKEN_KEY: 'test-service-token-key-0123456789abcdef',
+    // Nothing listens here; tests that need the AI service start a stand-in and override this.
+    AI_SERVICE_URL: 'http://127.0.0.1:9',
     WEBAUTHN_RP_ID: TEST_RP_ID,
     WEBAUTHN_RP_NAME: 'LegacyAI Test',
     ALLOWED_ORIGINS: TEST_ORIGIN,

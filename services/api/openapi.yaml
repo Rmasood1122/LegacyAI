@@ -7,7 +7,7 @@ info:
   title: LegacyAI API
   version: 0.1.0
   description: |-
-    Phase 1 - identity, cards, access and platform. This file is the source of truth: the server validates every request against it and the test suite validates every response against it.
+    Phase 1 - identity, cards, access and platform. Phase 2 - capture, knowledge, verification, readiness tests (through the knowledge gateway). This file is the source of truth: the server validates every request against it and the test suite validates every response against it.
 
     Conventions: JSON only; snake_case; ISO-8601 UTC times; errors are RFC 9457 problem details; list endpoints use `limit` + `cursor` and return `{ items, next_cursor }`; state-changing admin endpoints require `Idempotency-Key`; state-changing session requests require `X-CSRF-Token` and an allowed `Origin`.
 
@@ -23,7 +23,12 @@ tags:
   - name: tenants
   - name: audit
   - name: export
-  - name: internal
+  - name: capture
+  - name: knowledge
+  - name: review
+  - name: readiness
+  - name: consent
+  - name: ai
 paths:
   /v1/health:
     get:
@@ -1544,47 +1549,3664 @@ paths:
           $ref: "#/components/responses/NotFound"
         "429":
           $ref: "#/components/responses/TooManyRequests"
-  /v1/internal/policy/check:
+  /v1/sources:
     post:
-      operationId: internalPolicyCheck
-      summary: Service-to-service policy decision. The subject is re-loaded from the database.
+      operationId: "createSource"
+      summary: "Describe a document before its file is sent: title, labels, and either a contributor (with their consent) or a company-document declaration."
       tags:
-        - internal
-      x-service: true
-      x-permission: internal:policy_check
+        - "capture"
+      x-permission: "capture:upload"
       security:
-        - serviceBearer: []
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
-          application/json:
+          "application/json":
             schema:
-              $ref: "#/components/schemas/PolicyCheckRequest"
+              type: "object"
+              additionalProperties: false
+              required:
+                - "title"
+              properties:
+                title:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 200
+                department_id:
+                  type:
+                    - "string"
+                    - "null"
+                  format: "uuid"
+                sensitivity:
+                  type: "integer"
+                  minimum: 0
+                  maximum: 3
+                contributor_person_id:
+                  type:
+                    - "string"
+                    - "null"
+                  format: "uuid"
+                company_document:
+                  type: "boolean"
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KSourceCreated"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+    get:
+      operationId: "listSources"
+      summary: "Documents this card may see (labels, status, counts - no content)."
+      tags:
+        - "capture"
+      x-permission: "source:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "status"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            enum:
+              - "awaiting_confirmation"
+              - "awaiting_content"
+              - "processing"
+              - "ready"
+              - "failed"
+        - name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 25
+          description: "Page size."
+        - "$ref": "#/components/parameters/Cursor"
       responses:
         "200":
-          description: Success
+          description: "Success"
           content:
-            application/json:
+            "application/json":
               schema:
-                $ref: "#/components/schemas/PolicyDecision"
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "items"
+                  - "next_cursor"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/KSource"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          "$ref": "#/components/responses/BadRequest"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          "$ref": "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
         "429":
-          $ref: "#/components/responses/TooManyRequests"
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/sources/{source_id}/content:
+    put:
+      operationId: "uploadSourceContent"
+      summary: "Send the file (plain text, Markdown or a PDF with a text layer). It is parsed, redacted, split and embedded; the file itself is not kept."
+      tags:
+        - "capture"
+      x-permission: "capture:upload"
+      security:
+        - sessionCookie: []
+      parameters:
+        - "$ref": "#/components/parameters/SourceId"
+      requestBody:
+        required: true
+        content:
+          "text/plain":
+            schema:
+              type: "string"
+              format: "binary"
+          "text/markdown":
+            schema:
+              type: "string"
+              format: "binary"
+          "application/pdf":
+            schema:
+              type: "string"
+              format: "binary"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KUploadResult"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "413":
+          "$ref": "#/components/responses/PayloadTooLarge"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+        "503":
+          "$ref": "#/components/responses/AiUnavailable"
+        "507":
+          "$ref": "#/components/responses/StorageFull"
+  /v1/sources/{source_id}:
+    get:
+      operationId: "getSource"
+      summary: "One document with its redaction counts. A document still being embedded continues on this request."
+      tags:
+        - "capture"
+      x-permission: "source:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - "$ref": "#/components/parameters/SourceId"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KSourceDetail"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/sources/{source_id}/confirm:
+    post:
+      operationId: "confirmSource"
+      summary: "The named contributor confirms the document is theirs."
+      tags:
+        - "capture"
+      x-permission: "source:confirm"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/SourceId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStatus"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/sources/{source_id}/withdraw:
+    post:
+      operationId: "withdrawSource"
+      summary: "Remove a document: its passages are erased; items resting only on it are withdrawn, mixed ones go back to review."
+      tags:
+        - "capture"
+      x-permission: "source:withdraw"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/SourceId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KSourceWithdrawn"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/sources/{source_id}/labels:
+    patch:
+      operationId: "setSourceLabels"
+      summary: "Change a document's department and sensitivity; every copy moves with it."
+      tags:
+        - "capture"
+      x-permission: "knowledge:label"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/SourceId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "sensitivity"
+              properties:
+                department_id:
+                  type:
+                    - "string"
+                    - "null"
+                  format: "uuid"
+                sensitivity:
+                  type: "integer"
+                  minimum: 0
+                  maximum: 3
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KLabelResult"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/knowledge/ask:
+    post:
+      operationId: "askKnowledge"
+      summary: "Ask a question. The answer cites its sources, or says it does not know. Only passages the asker may read are used."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:ask"
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "question"
+              properties:
+                question:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 2000
+                expert_person_id:
+                  type:
+                    - "string"
+                    - "null"
+                  format: "uuid"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KAnswer"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/knowledge/items:
+    get:
+      operationId: "listKnowledgeItems"
+      summary: "Knowledge items this card may read."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "status"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            enum:
+              - "candidate"
+              - "in_review"
+              - "verified"
+              - "corrected"
+              - "rejected"
+              - "stale"
+        - name: "mine"
+          in: "query"
+          required: false
+          schema:
+            type: "boolean"
+        - name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 25
+          description: "Page size."
+        - "$ref": "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "items"
+                  - "next_cursor"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/KItemSummary"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+    post:
+      operationId: "createKnowledgeItem"
+      summary: "Write a candidate item by hand."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:contribute"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "title"
+                - "body"
+              properties:
+                title:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 200
+                body:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 2000
+                department_id:
+                  type:
+                    - "string"
+                    - "null"
+                  format: "uuid"
+                sensitivity:
+                  type: "integer"
+                  minimum: 0
+                  maximum: 3
+                contributor_person_id:
+                  type:
+                    - "string"
+                    - "null"
+                  format: "uuid"
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStatus"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/knowledge/items/{item_id}:
+    get:
+      operationId: "getKnowledgeItem"
+      summary: "One item with its text, its versions and the documents behind it that this card may read."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - "$ref": "#/components/parameters/ItemId"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KItemDetail"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/knowledge/items/{item_id}/versions:
+    post:
+      operationId: "proposeItemVersion"
+      summary: "Propose a corrected text. The item goes back to review; someone else must confirm it."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:verify"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/ItemId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "body"
+              properties:
+                body:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 2000
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KVersionCreated"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/knowledge/items/{item_id}/submit:
+    post:
+      operationId: "submitKnowledgeItem"
+      summary: "Send a candidate to review."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:contribute"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/ItemId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStatus"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/knowledge/items/{item_id}/verify:
+    post:
+      operationId: "verifyKnowledgeItem"
+      summary: "Verify (or confirm a correction). Not by the contributor or the author of the current version."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:verify"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/ItemId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStatus"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/knowledge/items/{item_id}/reject:
+    post:
+      operationId: "rejectKnowledgeItem"
+      summary: "Reject an item."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:verify"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/ItemId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStatus"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/knowledge/items/{item_id}/reopen:
+    post:
+      operationId: "reopenKnowledgeItem"
+      summary: "Reopen an item for review, optionally pointing it back at an earlier version."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:verify"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/ItemId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required: []
+              properties:
+                rollback_to_version:
+                  type: "integer"
+                  minimum: 1
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStatus"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/knowledge/items/{item_id}/retire:
+    post:
+      operationId: "retireKnowledgeItem"
+      summary: "Retire a stale item."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:verify"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/ItemId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStatus"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/knowledge/items/{item_id}/labels:
+    patch:
+      operationId: "setItemLabels"
+      summary: "Change an item's department and sensitivity. Releasing to learners (0) needs someone other than its contributor and author."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:label"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/ItemId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "sensitivity"
+              properties:
+                department_id:
+                  type:
+                    - "string"
+                    - "null"
+                  format: "uuid"
+                sensitivity:
+                  type: "integer"
+                  minimum: 0
+                  maximum: 3
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KLabelResult"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/knowledge/verifications/revert:
+    post:
+      operationId: "revertVerifications"
+      summary: "Reopen everything one card verified in a time window, rolling back its corrections."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:revert"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "card_id"
+                - "since"
+                - "until"
+              properties:
+                card_id:
+                  type: "string"
+                  format: "uuid"
+                since:
+                  type: "string"
+                  format: "date-time"
+                until:
+                  type: "string"
+                  format: "date-time"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KCount"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/me/contributions:
+    get:
+      operationId: "listMyContributions"
+      summary: "Items contributed by the signed-in person."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 25
+          description: "Page size."
+        - "$ref": "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "items"
+                  - "next_cursor"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/KItemSummary"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/me/contributions/{item_id}/restrict:
+    post:
+      operationId: "restrictContribution"
+      summary: "Make your own item less visible (a higher sensitivity). It cannot be made more visible this way."
+      tags:
+        - "knowledge"
+      x-permission: "contribution:restrict"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/ItemId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "sensitivity"
+              properties:
+                sensitivity:
+                  type: "integer"
+                  minimum: 0
+                  maximum: 3
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KRestricted"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/interviews:
+    post:
+      operationId: "createInterview"
+      summary: "Invite an expert to a text interview for a job role."
+      tags:
+        - "capture"
+      x-permission: "interview:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "expert_person_id"
+                - "job_role"
+              properties:
+                expert_person_id:
+                  type: "string"
+                  format: "uuid"
+                job_role:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 120
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStatus"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+    get:
+      operationId: "listInterviews"
+      summary: "Interviews (status only)."
+      tags:
+        - "capture"
+      x-permission: "interview:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "status"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            enum:
+              - "invited"
+              - "active"
+              - "paused"
+              - "stopped_budget"
+              - "completed"
+              - "abandoned"
+        - name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 25
+          description: "Page size."
+        - "$ref": "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "items"
+                  - "next_cursor"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/KInterview"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/interviews/{interview_id}:
+    get:
+      operationId: "getInterview"
+      summary: "An interview with its questions and answers."
+      tags:
+        - "capture"
+      x-permission: "interview:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - "$ref": "#/components/parameters/InterviewId"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KInterviewDetail"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/interviews/{interview_id}/accept:
+    post:
+      operationId: "acceptInterview"
+      summary: "The expert starts the interview (needs their consent) and gets the first question."
+      tags:
+        - "capture"
+      x-permission: "capture:interview"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/InterviewId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KTurn"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/interviews/{interview_id}/turns:
+    post:
+      operationId: "answerInterviewTurn"
+      summary: "Answer the current question; the answer is redacted before it is stored and becomes a candidate item."
+      tags:
+        - "capture"
+      x-permission: "capture:interview"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/InterviewId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "answer"
+              properties:
+                answer:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 8000
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KTurn"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/interviews/{interview_id}/pause:
+    post:
+      operationId: "pauseInterview"
+      summary: "Pause the interview."
+      tags:
+        - "capture"
+      x-permission: "capture:interview"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/InterviewId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStatus"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/interviews/{interview_id}/resume:
+    post:
+      operationId: "resumeInterview"
+      summary: "Resume a paused interview."
+      tags:
+        - "capture"
+      x-permission: "capture:interview"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/InterviewId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStatus"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/interviews/{interview_id}/complete:
+    post:
+      operationId: "completeInterview"
+      summary: "Finish the interview."
+      tags:
+        - "capture"
+      x-permission: "capture:interview"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/InterviewId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStatus"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/gaps:
+    get:
+      operationId: "getGapReport"
+      summary: "Topics of a job role labelled by how well they are covered, as visible to this card."
+      tags:
+        - "knowledge"
+      x-permission: "gap:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "job_role"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+            minLength: 1
+            maxLength: 120
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KGapReport"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/topics:
+    get:
+      operationId: "listTopics"
+      summary: "The company's topic list."
+      tags:
+        - "knowledge"
+      x-permission: "topic:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "status"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            enum:
+              - "active"
+              - "proposed"
+              - "retired"
+        - name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 25
+          description: "Page size."
+        - "$ref": "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "items"
+                  - "next_cursor"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/KTopic"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+    post:
+      operationId: "createTopic"
+      summary: "Add a topic."
+      tags:
+        - "knowledge"
+      x-permission: "topic:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "name"
+              properties:
+                name:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 120
+                description:
+                  type: "string"
+                  maxLength: 500
+                department_id:
+                  type:
+                    - "string"
+                    - "null"
+                  format: "uuid"
+                sensitivity:
+                  type: "integer"
+                  minimum: 0
+                  maximum: 3
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KTopic"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/topics/{topic_id}:
+    patch:
+      operationId: "updateTopic"
+      summary: "Rename a topic, accept a suggested one, or retire one."
+      tags:
+        - "knowledge"
+      x-permission: "topic:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/TopicId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required: []
+              properties:
+                name:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 120
+                description:
+                  type: "string"
+                  maxLength: 500
+                status:
+                  type: "string"
+                  enum:
+                    - "active"
+                    - "retired"
+              minProperties: 1
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KTopic"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/job-roles/{job_role}/topics:
+    put:
+      operationId: "setRoleTopics"
+      summary: "Set which topics a job role needs."
+      tags:
+        - "knowledge"
+      x-permission: "topic:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/JobRole"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "topics"
+              properties:
+                topics:
+                  type: "array"
+                  items:
+                    type: "object"
+                    additionalProperties: false
+                    required:
+                      - "topic_id"
+                    properties:
+                      topic_id:
+                        type: "string"
+                        format: "uuid"
+                      required:
+                        type: "boolean"
+                      importance:
+                        type: "integer"
+                        minimum: 1
+                        maximum: 3
+                  maxItems: 100
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KRoleTopics"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/job-roles/{job_role}/people:
+    put:
+      operationId: "setRolePeople"
+      summary: "Set who holds a job role and who is taking it over."
+      tags:
+        - "knowledge"
+      x-permission: "topic:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/JobRole"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "people"
+              properties:
+                people:
+                  type: "array"
+                  items:
+                    type: "object"
+                    additionalProperties: false
+                    required:
+                      - "person_id"
+                      - "relation"
+                    properties:
+                      person_id:
+                        type: "string"
+                        format: "uuid"
+                      relation:
+                        type: "string"
+                        enum:
+                          - "holder"
+                          - "successor"
+                  maxItems: 200
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KRolePeople"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/topics/suggest:
+    post:
+      operationId: "suggestTopics"
+      summary: "Suggest topics from a document this card may read. Suggestions count for nothing until accepted."
+      tags:
+        - "knowledge"
+      x-permission: "topic:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "source_id"
+              properties:
+                source_id:
+                  type: "string"
+                  format: "uuid"
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KProposed"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+        "503":
+          "$ref": "#/components/responses/AiUnavailable"
+  /v1/expert-questions:
+    post:
+      operationId: "createExpertQuestion"
+      summary: "Send a question to a named expert (who agreed to be named)."
+      tags:
+        - "knowledge"
+      x-permission: "expert_question:create"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "expert_person_id"
+                - "question"
+              properties:
+                expert_person_id:
+                  type: "string"
+                  format: "uuid"
+                question:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 2000
+                department_id:
+                  type:
+                    - "string"
+                    - "null"
+                  format: "uuid"
+                sensitivity:
+                  type: "integer"
+                  minimum: 0
+                  maximum: 3
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KExpertQuestionCreated"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+    get:
+      operationId: "listExpertQuestions"
+      summary: "Questions asked by or addressed to this card."
+      tags:
+        - "knowledge"
+      x-permission: "expert_question:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "box"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            enum:
+              - "asked"
+              - "addressed"
+              - "all"
+        - name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 25
+          description: "Page size."
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "items"
+                  - "next_cursor"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/KExpertQuestion"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/expert-questions/{question_id}/reply:
+    post:
+      operationId: "replyExpertQuestion"
+      summary: "Reply to a question; the reply becomes a candidate item verified by someone else."
+      tags:
+        - "knowledge"
+      x-permission: "expert_question:answer"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/QuestionId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "answer"
+              properties:
+                answer:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 2000
+                title:
+                  type: "string"
+                  maxLength: 200
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KExpertReply"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/expert-questions/{question_id}/decline:
+    post:
+      operationId: "declineExpertQuestion"
+      summary: "Decline a question."
+      tags:
+        - "knowledge"
+      x-permission: "expert_question:answer"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/QuestionId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "reason"
+              properties:
+                reason:
+                  type: "string"
+                  enum:
+                    - "not_my_area"
+                    - "not_allowed_to_share"
+                    - "unclear"
+                    - "other"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStatus"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/readiness/questions/generate:
+    post:
+      operationId: "generateQuizQuestions"
+      summary: "Draft questions from verified items released to learners. Each draft needs a reviewer's approval."
+      tags:
+        - "readiness"
+      x-permission: "quiz:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "kind"
+                - "item_ids"
+              properties:
+                kind:
+                  type: "string"
+                  enum:
+                    - "mcq"
+                    - "open"
+                item_ids:
+                  type: "array"
+                  items:
+                    type: "string"
+                    format: "uuid"
+                  maxItems: 20
+                  minItems: 1
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KGenerated"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+        "503":
+          "$ref": "#/components/responses/AiUnavailable"
+  /v1/readiness/questions:
+    get:
+      operationId: "listQuizQuestions"
+      summary: "The question bank."
+      tags:
+        - "readiness"
+      x-permission: "quiz:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "status"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            enum:
+              - "draft"
+              - "approved"
+              - "retired"
+        - name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 25
+          description: "Page size."
+        - "$ref": "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "items"
+                  - "next_cursor"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/KQuizItem"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/readiness/questions/{question_id}:
+    patch:
+      operationId: "editQuizQuestion"
+      summary: "Edit a question (an approved one goes back to draft)."
+      tags:
+        - "readiness"
+      x-permission: "quiz:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/QuestionId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "stem"
+              properties:
+                stem:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 2000
+                options:
+                  type: "array"
+                  items:
+                    type: "string"
+                    minLength: 1
+                    maxLength: 500
+                  maxItems: 4
+                correct_option:
+                  type: "integer"
+                  minimum: 0
+                  maximum: 3
+                rubric:
+                  type: "array"
+                  items:
+                    type: "string"
+                    minLength: 1
+                    maxLength: 500
+                  maxItems: 6
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStatus"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/readiness/questions/{question_id}/approve:
+    post:
+      operationId: "approveQuizQuestion"
+      summary: "Approve a draft question."
+      tags:
+        - "readiness"
+      x-permission: "quiz:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/QuestionId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStatus"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/readiness/questions/{question_id}/retire:
+    post:
+      operationId: "retireQuizQuestion"
+      summary: "Retire a question."
+      tags:
+        - "readiness"
+      x-permission: "quiz:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/QuestionId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStatus"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/readiness/attempts:
+    post:
+      operationId: "startReadinessAttempt"
+      summary: "Start a readiness test for a job role: the questions and their order are fixed now."
+      tags:
+        - "readiness"
+      x-permission: "quiz:take"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "job_role"
+              properties:
+                job_role:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 120
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KAttemptStarted"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/readiness/attempts/{attempt_id}:
+    get:
+      operationId: "getReadinessAttempt"
+      summary: "An attempt with its answers and, once graded, its scores."
+      tags:
+        - "readiness"
+      x-permission: "quiz:read_results"
+      security:
+        - sessionCookie: []
+      parameters:
+        - "$ref": "#/components/parameters/AttemptId"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KAttempt"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/readiness/attempts/{attempt_id}/answers:
+    post:
+      operationId: "saveAttemptAnswer"
+      summary: "Save one answer."
+      tags:
+        - "readiness"
+      x-permission: "quiz:take"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/AttemptId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "position"
+              properties:
+                position:
+                  type: "integer"
+                  minimum: 1
+                  maximum: 50
+                chosen_option:
+                  type:
+                    - "integer"
+                    - "null"
+                  minimum: 0
+                  maximum: 3
+                answer_text:
+                  type:
+                    - "string"
+                    - "null"
+                  maxLength: 4000
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KAnswerSaved"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/readiness/attempts/{attempt_id}/submit:
+    post:
+      operationId: "submitReadinessAttempt"
+      summary: "Submit an attempt (once)."
+      tags:
+        - "readiness"
+      x-permission: "quiz:take"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/AttemptId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStatus"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/readiness/answers/{answer_id}/override:
+    post:
+      operationId: "overrideQuizAnswer"
+      summary: "A reviewer sets the final score of one answer."
+      tags:
+        - "readiness"
+      x-permission: "quiz:grade"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/AnswerId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "score"
+              properties:
+                score:
+                  type: "number"
+                  minimum: 0
+                  maximum: 1
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStatus"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/readiness/reports/{attempt_id}:
+    get:
+      operationId: "getReadinessReport"
+      summary: "The proof report of an attempt. Counts only knowledge released to learners; not a certificate."
+      tags:
+        - "readiness"
+      x-permission: "quiz:read_results"
+      security:
+        - sessionCookie: []
+      parameters:
+        - "$ref": "#/components/parameters/AttemptId"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KReport"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/consents:
+    get:
+      operationId: "listConsents"
+      summary: "Consent records of the company."
+      tags:
+        - "consent"
+      x-permission: "consent:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "person_id"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            format: "uuid"
+        - name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 25
+          description: "Page size."
+        - "$ref": "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "items"
+                  - "next_cursor"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/KConsent"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+    post:
+      operationId: "giveConsent"
+      summary: "Give consent, with your own card. Replaces your live consent of the same scope."
+      tags:
+        - "consent"
+      x-permission: "consent:give"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "scope"
+                - "purpose"
+                - "policy_version"
+              properties:
+                scope:
+                  type: "string"
+                  enum:
+                    - "own_words"
+                    - "documents"
+                    - "named_expert"
+                purpose:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 500
+                policy_version:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 40
+                expires_at:
+                  type: "string"
+                  format: "date-time"
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KConsent"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/me/consents:
+    get:
+      operationId: "listMyConsents"
+      summary: "Your own consent records."
+      tags:
+        - "consent"
+      x-permission: "consent:give"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "items"
+                  - "next_cursor"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/KConsent"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/consents/{consent_id}/withdraw:
+    post:
+      operationId: "withdrawConsent"
+      summary: "Withdraw your consent: the material is hidden at once and erased in the same request (unless under a legal hold)."
+      tags:
+        - "consent"
+      x-permission: "consent:withdraw"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/ConsentId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KConsent"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/people/{person_id}/consent-withdrawals:
+    post:
+      operationId: "recordWithdrawalForPerson"
+      summary: "Record a withdrawal for someone who has left, with a reference to their request."
+      tags:
+        - "consent"
+      x-permission: "consent:hold"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/PersonId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "reference"
+              properties:
+                reference:
+                  type: "string"
+                  pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{5,63}$"
+                scope:
+                  type: "string"
+                  enum:
+                    - "own_words"
+                    - "documents"
+                    - "named_expert"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KWithdrawalsForPerson"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/consents/{consent_id}/hold:
+    post:
+      operationId: "holdConsent"
+      summary: "Place a legal hold: withdrawn material stays hidden but is not erased."
+      tags:
+        - "consent"
+      x-permission: "consent:hold"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/ConsentId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "reason"
+              properties:
+                reason:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 500
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KConsent"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/consents/{consent_id}/release-hold:
+    post:
+      operationId: "releaseConsentHold"
+      summary: "Release a legal hold; a waiting withdrawal then completes."
+      tags:
+        - "consent"
+      x-permission: "consent:hold"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/ConsentId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KConsent"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+        "502":
+          "$ref": "#/components/responses/BadGateway"
+  /v1/review/tasks:
+    get:
+      operationId: "listReviewTasks"
+      summary: "The review queue (highest priority first within a page)."
+      tags:
+        - "review"
+      x-permission: "review:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "status"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            enum:
+              - "open"
+              - "assigned"
+              - "resolved"
+              - "dismissed"
+        - name: "kind"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            enum:
+              - "verify_item"
+              - "redaction_review"
+              - "expert_question"
+              - "quiz_item_approval"
+              - "grading_override"
+              - "stale_item"
+        - name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 25
+          description: "Page size."
+        - "$ref": "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "items"
+                  - "next_cursor"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/KTask"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/review/tasks/{task_id}:
+    get:
+      operationId: "getReviewTask"
+      summary: "One task."
+      tags:
+        - "review"
+      x-permission: "review:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - "$ref": "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KTask"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/review/tasks/{task_id}/assign:
+    post:
+      operationId: "assignReviewTask"
+      summary: "Assign a task (to yourself unless a card is named)."
+      tags:
+        - "review"
+      x-permission: "review:resolve"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/TaskId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required: []
+              properties:
+                card_id:
+                  type: "string"
+                  format: "uuid"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KTask"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/review/tasks/{task_id}/unassign:
+    post:
+      operationId: "unassignReviewTask"
+      summary: "Put a task back in the queue."
+      tags:
+        - "review"
+      x-permission: "review:resolve"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/TaskId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KTask"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/review/tasks/{task_id}/dismiss:
+    post:
+      operationId: "dismissReviewTask"
+      summary: "Dismiss a task (not possible for tasks that end only by acting on their subject)."
+      tags:
+        - "review"
+      x-permission: "review:resolve"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/TaskId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KTask"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/review/tasks/bulk:
+    post:
+      operationId: "bulkReviewTasks"
+      summary: "Assign or dismiss up to 20 tasks; each is authorised and audited on its own."
+      tags:
+        - "review"
+      x-permission: "review:resolve"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "action"
+                - "task_ids"
+              properties:
+                action:
+                  type: "string"
+                  enum:
+                    - "assign"
+                    - "dismiss"
+                task_ids:
+                  type: "array"
+                  items:
+                    type: "string"
+                    format: "uuid"
+                  maxItems: 20
+                  minItems: 1
+                card_id:
+                  type: "string"
+                  format: "uuid"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KBulkResult"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/redaction/allowlist:
+    get:
+      operationId: "listRedactionAllowlist"
+      summary: "Terms redaction must leave alone (product names, place names that are not personal)."
+      tags:
+        - "review"
+      x-permission: "review:read"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "items"
+                  - "next_cursor"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/KAllowTerm"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+    post:
+      operationId: "addRedactionAllowlistTerm"
+      summary: "Add a term. Never an e-mail address or anything with a number."
+      tags:
+        - "review"
+      x-permission: "redaction:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "term"
+                - "entity_type"
+              properties:
+                term:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 80
+                entity_type:
+                  type: "string"
+                  enum:
+                    - "PERSON"
+                    - "LOCATION"
+                    - "ORGANIZATION"
+                    - "OTHER"
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KAllowTerm"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/redaction/allowlist/{term_id}:
+    delete:
+      operationId: "deleteRedactionAllowlistTerm"
+      summary: "Remove a term."
+      tags:
+        - "review"
+      x-permission: "redaction:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/TermId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: "Done"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/knowledge/settings:
+    get:
+      operationId: "getKnowledgeSettings"
+      summary: "The company's knowledge settings."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge_settings:read"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KSettings"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+    patch:
+      operationId: "updateKnowledgeSettings"
+      summary: "Change knowledge settings (Owner)."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge_settings:update"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required: []
+              properties:
+                chunk_quota:
+                  type: "integer"
+                  minimum: 0
+                  maximum: 50000
+                max_upload_bytes:
+                  type: "integer"
+                  minimum: 1024
+                  maximum: 10485760
+                max_pdf_pages:
+                  type: "integer"
+                  minimum: 1
+                  maximum: 200
+                second_reviewer_required:
+                  type: "boolean"
+                verifications_per_hour:
+                  type: "integer"
+                  minimum: 1
+                  maximum: 1000
+                verifications_per_day:
+                  type: "integer"
+                  minimum: 1
+                  maximum: 10000
+                learner_sources:
+                  type: "string"
+                  enum:
+                    - "verified_only"
+                    - "all_marked"
+                stale_after_days:
+                  type: "integer"
+                  minimum: 7
+                  maximum: 3650
+                review_sla_days:
+                  type: "integer"
+                  minimum: 1
+                  maximum: 90
+                answer_log_retention_days:
+                  type: "integer"
+                  minimum: 1
+                  maximum: 365
+                quiz_answer_retention_days:
+                  type: "integer"
+                  minimum: 30
+                  maximum: 3650
+                interview_max_turns:
+                  type: "integer"
+                  minimum: 1
+                  maximum: 100
+                interview_max_cost_micro_usd:
+                  type: "integer"
+                  minimum: 0
+                  maximum: 10000000
+                expert_question_expiry_days:
+                  type: "integer"
+                  minimum: 1
+                  maximum: 365
+                quiz_questions_per_attempt:
+                  type: "integer"
+                  minimum: 1
+                  maximum: 50
+                quiz_time_limit_minutes:
+                  type: "integer"
+                  minimum: 5
+                  maximum: 240
+                quiz_min_questions_per_topic:
+                  type: "integer"
+                  minimum: 1
+                  maximum: 20
+                quiz_show_answers_after_grading:
+                  type: "boolean"
+              minProperties: 1
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KSettings"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/ai/budget:
+    get:
+      operationId: "getAiBudget"
+      summary: "This month's AI use and cap."
+      tags:
+        - "ai"
+      x-permission: "ai_budget:read"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KAiBudget"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/tenants/{tenant_id}/ai-budget:
+    put:
+      operationId: "setTenantAiBudget"
+      summary: "Platform operator: set a company's monthly AI cap."
+      tags:
+        - "ai"
+      x-permission: "ai_budget:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/TenantId"
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "monthly_cap_micro_usd"
+              properties:
+                monthly_cap_micro_usd:
+                  type: "integer"
+                  minimum: 0
+                  maximum: 100000000
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KTenantAiBudget"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/platform/ai/kill-switch:
+    put:
+      operationId: "setAiKillSwitch"
+      summary: "Platform operator: stop (or resume) every AI call. Search keeps working."
+      tags:
+        - "ai"
+      x-permission: "ai_kill_switch:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - "$ref": "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "on"
+              properties:
+                on:
+                  type: "boolean"
+                reason:
+                  type: "string"
+                  maxLength: 200
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KKillSwitch"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
+  /v1/platform/storage:
+    get:
+      operationId: "getPlatformStorage"
+      summary: "Platform operator: database size and captured passages per company."
+      tags:
+        - "ai"
+      x-permission: "platform_storage:read"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/KStorage"
+        "400":
+          "$ref": "#/components/responses/BadRequest"
+        "401":
+          "$ref": "#/components/responses/Unauthorized"
+        "403":
+          "$ref": "#/components/responses/Forbidden"
+        "404":
+          "$ref": "#/components/responses/NotFound"
+        "409":
+          "$ref": "#/components/responses/Conflict"
+        "422":
+          "$ref": "#/components/responses/Unprocessable"
+        "429":
+          "$ref": "#/components/responses/TooManyRequests"
 components:
   securitySchemes:
     sessionCookie:
       type: apiKey
       in: cookie
       name: __Host-lai_session
-    serviceBearer:
-      type: http
-      scheme: bearer
   parameters:
+    SourceId:
+      name: source_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ItemId:
+      name: item_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    InterviewId:
+      name: interview_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    QuestionId:
+      name: question_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AttemptId:
+      name: attempt_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AnswerId:
+      name: answer_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ConsentId:
+      name: consent_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TopicId:
+      name: topic_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TermId:
+      name: term_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    JobRole:
+      name: job_role
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 120
+        pattern: ^[^/]+$
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -1741,6 +5363,30 @@ components:
           - deny
           - event
   responses:
+    PayloadTooLarge:
+      description: "The file is too large."
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    BadGateway:
+      description: "The knowledge service did not answer. Nothing was changed by this request."
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    AiUnavailable:
+      description: "AI is not available right now (switched off, or the budget is used up)."
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    StorageFull:
+      description: "Storage for captured knowledge is full."
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
     BadRequest:
       description: The request does not match the contract.
       content:
@@ -1794,6 +5440,1568 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
   schemas:
+    KSource:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "kind"
+        - "title"
+        - "department_id"
+        - "sensitivity"
+        - "contributor_person_id"
+        - "company_document"
+        - "status"
+        - "failure_code"
+        - "mime"
+        - "byte_size"
+        - "page_count"
+        - "chunk_count"
+        - "created_at"
+        - "ready_at"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        kind:
+          type: "string"
+          enum:
+            - "document"
+            - "interview"
+        title:
+          type: "string"
+        department_id:
+          type:
+            - "string"
+            - "null"
+          format: "uuid"
+        sensitivity:
+          type: "integer"
+          minimum: 0
+          maximum: 3
+        contributor_person_id:
+          type:
+            - "string"
+            - "null"
+          format: "uuid"
+        company_document:
+          type: "boolean"
+        status:
+          type: "string"
+        failure_code:
+          type:
+            - "string"
+            - "null"
+        mime:
+          type:
+            - "string"
+            - "null"
+        byte_size:
+          type:
+            - "integer"
+            - "null"
+        page_count:
+          type:
+            - "integer"
+            - "null"
+        chunk_count:
+          type: "integer"
+        created_at:
+          type: "string"
+          format: "date-time"
+        ready_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+    KSourceDetail:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "redactions"
+        - "id"
+        - "kind"
+        - "title"
+        - "department_id"
+        - "sensitivity"
+        - "contributor_person_id"
+        - "company_document"
+        - "status"
+        - "failure_code"
+        - "mime"
+        - "byte_size"
+        - "page_count"
+        - "chunk_count"
+        - "created_at"
+        - "ready_at"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        kind:
+          type: "string"
+          enum:
+            - "document"
+            - "interview"
+        title:
+          type: "string"
+        department_id:
+          type:
+            - "string"
+            - "null"
+          format: "uuid"
+        sensitivity:
+          type: "integer"
+          minimum: 0
+          maximum: 3
+        contributor_person_id:
+          type:
+            - "string"
+            - "null"
+          format: "uuid"
+        company_document:
+          type: "boolean"
+        status:
+          type: "string"
+        failure_code:
+          type:
+            - "string"
+            - "null"
+        mime:
+          type:
+            - "string"
+            - "null"
+        byte_size:
+          type:
+            - "integer"
+            - "null"
+        page_count:
+          type:
+            - "integer"
+            - "null"
+        chunk_count:
+          type: "integer"
+        created_at:
+          type: "string"
+          format: "date-time"
+        ready_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        redactions:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "type"
+              - "count"
+              - "low_confidence"
+            properties:
+              type:
+                type: "string"
+              count:
+                type: "integer"
+              low_confidence:
+                type: "integer"
+    KSourceCreated:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "status"
+        - "title"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        status:
+          type: "string"
+        title:
+          type: "string"
+    KUploadResult:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "status"
+        - "failure_code"
+        - "chunk_count"
+        - "pending_chunks"
+        - "duplicate_of"
+      properties:
+        status:
+          type: "string"
+          enum:
+            - "ready"
+            - "processing"
+            - "failed"
+        failure_code:
+          type:
+            - "string"
+            - "null"
+        chunk_count:
+          type:
+            - "integer"
+            - "null"
+        pending_chunks:
+          type:
+            - "integer"
+            - "null"
+        duplicate_of:
+          type:
+            - "string"
+            - "null"
+          format: "uuid"
+    KStatus:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "status"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        status:
+          type: "string"
+    KSourceWithdrawn:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "status"
+        - "items_withdrawn"
+        - "items_back_in_review"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        status:
+          type: "string"
+        items_withdrawn:
+          type: "integer"
+        items_back_in_review:
+          type: "integer"
+    KLabelResult:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "rows"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        rows:
+          type: "integer"
+    KCitation:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "ref"
+        - "kind"
+        - "id"
+        - "title"
+        - "snippet"
+        - "verification_status"
+        - "expert_display_name"
+        - "derived_from"
+      properties:
+        ref:
+          type: "string"
+        kind:
+          type: "string"
+          enum:
+            - "item"
+            - "source"
+        id:
+          type: "string"
+          format: "uuid"
+        title:
+          type: "string"
+        snippet:
+          type: "string"
+        verification_status:
+          type: "string"
+        expert_display_name:
+          type:
+            - "string"
+            - "null"
+        derived_from:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "source_id"
+              - "title"
+            properties:
+              source_id:
+                type: "string"
+                format: "uuid"
+              title:
+                type: "string"
+    KAnswer:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "outcome"
+        - "answer"
+        - "reason"
+        - "confidence"
+        - "contains_unverified_sources"
+        - "citations"
+        - "can_ask_expert"
+      properties:
+        outcome:
+          type: "string"
+          enum:
+            - "answered"
+            - "dont_know"
+            - "search_only"
+        answer:
+          type:
+            - "string"
+            - "null"
+        reason:
+          type:
+            - "string"
+            - "null"
+        confidence:
+          type:
+            - "string"
+            - "null"
+          enum:
+            - "high"
+            - "medium"
+            - null
+        contains_unverified_sources:
+          type: "boolean"
+        citations:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/KCitation"
+        can_ask_expert:
+          type: "boolean"
+    KItemSummary:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "title"
+        - "status"
+        - "origin"
+        - "ai_extracted"
+        - "department_id"
+        - "sensitivity"
+        - "owner_person_id"
+        - "usage_count"
+        - "verified_at"
+        - "stale_after"
+        - "updated_at"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        title:
+          type: "string"
+        status:
+          type: "string"
+        origin:
+          type: "string"
+        ai_extracted:
+          type: "boolean"
+        department_id:
+          type:
+            - "string"
+            - "null"
+          format: "uuid"
+        sensitivity:
+          type: "integer"
+          minimum: 0
+          maximum: 3
+        owner_person_id:
+          type:
+            - "string"
+            - "null"
+          format: "uuid"
+        usage_count:
+          type: "integer"
+        verified_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        stale_after:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        updated_at:
+          type: "string"
+          format: "date-time"
+    KItemDetail:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "title"
+        - "status"
+        - "origin"
+        - "ai_extracted"
+        - "department_id"
+        - "sensitivity"
+        - "owner_person_id"
+        - "usage_count"
+        - "verified_at"
+        - "stale_after"
+        - "updated_at"
+        - "body"
+        - "self_verified"
+        - "versions"
+        - "provenance"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        title:
+          type: "string"
+        status:
+          type: "string"
+        origin:
+          type: "string"
+        ai_extracted:
+          type: "boolean"
+        department_id:
+          type:
+            - "string"
+            - "null"
+          format: "uuid"
+        sensitivity:
+          type: "integer"
+          minimum: 0
+          maximum: 3
+        owner_person_id:
+          type:
+            - "string"
+            - "null"
+          format: "uuid"
+        usage_count:
+          type: "integer"
+        verified_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        stale_after:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        updated_at:
+          type: "string"
+          format: "date-time"
+        body:
+          type: "string"
+        self_verified:
+          type: "boolean"
+        versions:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "version_no"
+              - "change_kind"
+              - "author_person_id"
+              - "created_at"
+              - "erased_at"
+              - "current"
+            properties:
+              version_no:
+                type: "integer"
+              change_kind:
+                type: "string"
+              author_person_id:
+                type:
+                  - "string"
+                  - "null"
+                format: "uuid"
+              created_at:
+                type: "string"
+                format: "date-time"
+              erased_at:
+                type:
+                  - "string"
+                  - "null"
+                format: "date-time"
+              current:
+                type: "boolean"
+        provenance:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "source_id"
+              - "title"
+              - "page_from"
+              - "page_to"
+            properties:
+              source_id:
+                type: "string"
+                format: "uuid"
+              title:
+                type: "string"
+              page_from:
+                type:
+                  - "integer"
+                  - "null"
+              page_to:
+                type:
+                  - "integer"
+                  - "null"
+    KVersionCreated:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "status"
+        - "version_no"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        status:
+          type: "string"
+        version_no:
+          type: "integer"
+    KCount:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "count"
+      properties:
+        count:
+          type: "integer"
+    KRestricted:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "sensitivity"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        sensitivity:
+          type: "integer"
+          minimum: 0
+          maximum: 3
+    KInterview:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "expert_person_id"
+        - "job_role"
+        - "status"
+        - "turn_count"
+        - "max_turns"
+        - "created_at"
+        - "last_turn_at"
+        - "completed_at"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        expert_person_id:
+          type: "string"
+          format: "uuid"
+        job_role:
+          type: "string"
+        status:
+          type: "string"
+        turn_count:
+          type: "integer"
+        max_turns:
+          type: "integer"
+        created_at:
+          type: "string"
+          format: "date-time"
+        last_turn_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        completed_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+    KInterviewDetail:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "expert_person_id"
+        - "job_role"
+        - "status"
+        - "turn_count"
+        - "max_turns"
+        - "created_at"
+        - "last_turn_at"
+        - "completed_at"
+        - "turns"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        expert_person_id:
+          type: "string"
+          format: "uuid"
+        job_role:
+          type: "string"
+        status:
+          type: "string"
+        turn_count:
+          type: "integer"
+        max_turns:
+          type: "integer"
+        created_at:
+          type: "string"
+          format: "date-time"
+        last_turn_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        completed_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        turns:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "ordinal"
+              - "topic_id"
+              - "question"
+              - "kind"
+              - "answer"
+              - "answered_at"
+              - "erased"
+            properties:
+              ordinal:
+                type: "integer"
+              topic_id:
+                type:
+                  - "string"
+                  - "null"
+                format: "uuid"
+              question:
+                type: "string"
+              kind:
+                type: "string"
+              answer:
+                type:
+                  - "string"
+                  - "null"
+              answered_at:
+                type:
+                  - "string"
+                  - "null"
+                format: "date-time"
+              erased:
+                type: "boolean"
+    KTurn:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "interview_id"
+        - "status"
+        - "next_question"
+        - "turn_count"
+        - "candidate_item_id"
+      properties:
+        interview_id:
+          type: "string"
+          format: "uuid"
+        status:
+          type: "string"
+        next_question:
+          type:
+            - "string"
+            - "null"
+        turn_count:
+          type: "integer"
+        candidate_item_id:
+          type:
+            - "string"
+            - "null"
+          format: "uuid"
+    KGapReport:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "job_role"
+        - "topics"
+      properties:
+        job_role:
+          type: "string"
+        topics:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "topic_id"
+              - "name"
+              - "required"
+              - "importance"
+              - "label"
+              - "verified_items"
+              - "contributors"
+            properties:
+              topic_id:
+                type: "string"
+                format: "uuid"
+              name:
+                type: "string"
+              required:
+                type: "boolean"
+              importance:
+                type: "integer"
+              label:
+                type: "string"
+                enum:
+                  - "uncovered"
+                  - "unverified"
+                  - "single_source"
+                  - "stale"
+                  - "thin"
+                  - "covered"
+              verified_items:
+                type: "integer"
+              contributors:
+                type: "integer"
+    KTopic:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "name"
+        - "description"
+        - "department_id"
+        - "sensitivity"
+        - "origin"
+        - "status"
+        - "created_at"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        name:
+          type: "string"
+        description:
+          type: "string"
+        department_id:
+          type:
+            - "string"
+            - "null"
+          format: "uuid"
+        sensitivity:
+          type: "integer"
+          minimum: 0
+          maximum: 3
+        origin:
+          type: "string"
+        status:
+          type: "string"
+        created_at:
+          type: "string"
+          format: "date-time"
+    KRoleTopics:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "job_role"
+        - "topics"
+      properties:
+        job_role:
+          type: "string"
+        topics:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "topic_id"
+              - "required"
+              - "importance"
+            properties:
+              topic_id:
+                type: "string"
+                format: "uuid"
+              required:
+                type: "boolean"
+              importance:
+                type: "integer"
+    KRolePeople:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "job_role"
+        - "people"
+      properties:
+        job_role:
+          type: "string"
+        people:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "person_id"
+              - "relation"
+            properties:
+              person_id:
+                type: "string"
+                format: "uuid"
+              relation:
+                type: "string"
+    KProposed:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "proposed"
+      properties:
+        proposed:
+          type: "array"
+          items:
+            type: "string"
+            format: "uuid"
+    KExpertQuestionCreated:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "status"
+        - "expires_at"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        status:
+          type: "string"
+        expires_at:
+          type: "string"
+          format: "date-time"
+    KExpertQuestion:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "question"
+        - "expert_person_id"
+        - "status"
+        - "decline_reason"
+        - "answer_item_id"
+        - "created_at"
+        - "answered_at"
+        - "expires_at"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        question:
+          type: "string"
+        expert_person_id:
+          type: "string"
+          format: "uuid"
+        status:
+          type: "string"
+        decline_reason:
+          type:
+            - "string"
+            - "null"
+        answer_item_id:
+          type:
+            - "string"
+            - "null"
+          format: "uuid"
+        created_at:
+          type: "string"
+          format: "date-time"
+        answered_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        expires_at:
+          type: "string"
+          format: "date-time"
+    KExpertReply:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "status"
+        - "answer_item_id"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        status:
+          type: "string"
+        answer_item_id:
+          type: "string"
+          format: "uuid"
+    KGenerated:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "created"
+        - "refused"
+      properties:
+        created:
+          type: "array"
+          items:
+            type: "string"
+            format: "uuid"
+        refused:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "item_id"
+              - "reason"
+            properties:
+              item_id:
+                type: "string"
+                format: "uuid"
+              reason:
+                type: "string"
+    KQuizItem:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "topic_id"
+        - "knowledge_item_id"
+        - "kind"
+        - "stem"
+        - "options"
+        - "correct_option"
+        - "rubric"
+        - "status"
+        - "approved_at"
+        - "created_at"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        topic_id:
+          type:
+            - "string"
+            - "null"
+          format: "uuid"
+        knowledge_item_id:
+          type: "string"
+          format: "uuid"
+        kind:
+          type: "string"
+        stem:
+          type: "string"
+        options:
+          type:
+            - "array"
+            - "null"
+          items:
+            type: "string"
+        correct_option:
+          type:
+            - "integer"
+            - "null"
+        rubric:
+          type:
+            - "array"
+            - "null"
+          items:
+            type: "string"
+        status:
+          type: "string"
+        approved_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        created_at:
+          type: "string"
+          format: "date-time"
+    KAttemptStarted:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "expires_at"
+        - "questions"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        expires_at:
+          type: "string"
+          format: "date-time"
+        questions:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "position"
+              - "kind"
+              - "stem"
+              - "options"
+            properties:
+              position:
+                type: "integer"
+              kind:
+                type: "string"
+              stem:
+                type: "string"
+              options:
+                type:
+                  - "array"
+                  - "null"
+                items:
+                  type: "string"
+    KAttempt:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "learner_person_id"
+        - "job_role"
+        - "status"
+        - "started_at"
+        - "expires_at"
+        - "submitted_at"
+        - "graded_at"
+        - "bank_size"
+        - "questions"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        learner_person_id:
+          type: "string"
+          format: "uuid"
+        job_role:
+          type: "string"
+        status:
+          type: "string"
+        started_at:
+          type: "string"
+          format: "date-time"
+        expires_at:
+          type: "string"
+          format: "date-time"
+        submitted_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        graded_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        bank_size:
+          type: "integer"
+        questions:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "answer_id"
+              - "position"
+              - "kind"
+              - "stem"
+              - "options"
+              - "chosen_option"
+              - "answer_text"
+              - "final_score"
+              - "decided_by"
+            properties:
+              answer_id:
+                type: "string"
+                format: "uuid"
+              position:
+                type: "integer"
+              kind:
+                type: "string"
+              stem:
+                type: "string"
+              options:
+                type:
+                  - "array"
+                  - "null"
+                items:
+                  type: "string"
+              chosen_option:
+                type:
+                  - "integer"
+                  - "null"
+              answer_text:
+                type:
+                  - "string"
+                  - "null"
+              final_score:
+                type:
+                  - "number"
+                  - "null"
+              decided_by:
+                type:
+                  - "string"
+                  - "null"
+              correct_option:
+                type: "integer"
+    KAnswerSaved:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "position"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        position:
+          type: "integer"
+    KReport:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "attempt_id"
+        - "learner_person_id"
+        - "job_role"
+        - "status"
+        - "started_at"
+        - "submitted_at"
+        - "graded_at"
+        - "bank_size"
+        - "statement"
+        - "topics"
+        - "coverage_gaps"
+      properties:
+        attempt_id:
+          type: "string"
+          format: "uuid"
+        learner_person_id:
+          type: "string"
+          format: "uuid"
+        job_role:
+          type: "string"
+        status:
+          type: "string"
+        started_at:
+          type: "string"
+          format: "date-time"
+        submitted_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        graded_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        bank_size:
+          type: "integer"
+        statement:
+          type: "string"
+        topics:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "topic_id"
+              - "name"
+              - "score"
+              - "note"
+              - "questions_asked"
+              - "questions_in_bank"
+              - "ai_graded"
+              - "person_graded"
+            properties:
+              topic_id:
+                type: "string"
+                format: "uuid"
+              name:
+                type: "string"
+              score:
+                type:
+                  - "number"
+                  - "null"
+              note:
+                type:
+                  - "string"
+                  - "null"
+              questions_asked:
+                type: "integer"
+              questions_in_bank:
+                type: "integer"
+              ai_graded:
+                type: "integer"
+              person_graded:
+                type: "integer"
+        coverage_gaps:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "topic_id"
+              - "name"
+              - "gap"
+            properties:
+              topic_id:
+                type: "string"
+                format: "uuid"
+              name:
+                type: "string"
+              gap:
+                type: "string"
+    KConsent:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "person_id"
+        - "scope"
+        - "purpose"
+        - "policy_version"
+        - "granted_at"
+        - "expires_at"
+        - "superseded_at"
+        - "withdrawn_at"
+        - "withdrawal_status"
+        - "legal_hold"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        person_id:
+          type: "string"
+          format: "uuid"
+        scope:
+          type: "string"
+        purpose:
+          type: "string"
+        policy_version:
+          type: "string"
+        granted_at:
+          type: "string"
+          format: "date-time"
+        expires_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        superseded_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        withdrawn_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        withdrawal_status:
+          type: "string"
+        legal_hold:
+          type: "boolean"
+    KWithdrawalsForPerson:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "person_id"
+        - "withdrawals"
+      properties:
+        person_id:
+          type: "string"
+          format: "uuid"
+        withdrawals:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "consent_id"
+              - "withdrawal_status"
+            properties:
+              consent_id:
+                type: "string"
+                format: "uuid"
+              withdrawal_status:
+                type: "string"
+    KTask:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "kind"
+        - "subject_type"
+        - "subject_id"
+        - "department_id"
+        - "sensitivity"
+        - "priority"
+        - "status"
+        - "assigned_to_card_id"
+        - "created_at"
+        - "due_at"
+        - "first_response_at"
+        - "resolved_at"
+        - "resolution"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        kind:
+          type: "string"
+        subject_type:
+          type: "string"
+        subject_id:
+          type: "string"
+          format: "uuid"
+        department_id:
+          type:
+            - "string"
+            - "null"
+          format: "uuid"
+        sensitivity:
+          type: "integer"
+          minimum: 0
+          maximum: 3
+        priority:
+          type: "integer"
+        status:
+          type: "string"
+        assigned_to_card_id:
+          type:
+            - "string"
+            - "null"
+          format: "uuid"
+        created_at:
+          type: "string"
+          format: "date-time"
+        due_at:
+          type: "string"
+          format: "date-time"
+        first_response_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        resolved_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        resolution:
+          type:
+            - "string"
+            - "null"
+    KBulkResult:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "results"
+      properties:
+        results:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "task_id"
+              - "outcome"
+            properties:
+              task_id:
+                type: "string"
+                format: "uuid"
+              outcome:
+                type: "string"
+                enum:
+                  - "done"
+                  - "forbidden"
+                  - "not_found"
+                  - "refused"
+    KAllowTerm:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "term"
+        - "entity_type"
+        - "created_at"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        term:
+          type: "string"
+        entity_type:
+          type: "string"
+        created_at:
+          type: "string"
+          format: "date-time"
+    KSettings:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "chunk_quota"
+        - "max_upload_bytes"
+        - "max_pdf_pages"
+        - "second_reviewer_required"
+        - "verifications_per_hour"
+        - "verifications_per_day"
+        - "learner_sources"
+        - "stale_after_days"
+        - "review_sla_days"
+        - "answer_log_retention_days"
+        - "quiz_answer_retention_days"
+        - "interview_max_turns"
+        - "interview_max_cost_micro_usd"
+        - "expert_question_expiry_days"
+        - "quiz_questions_per_attempt"
+        - "quiz_time_limit_minutes"
+        - "quiz_min_questions_per_topic"
+        - "quiz_show_answers_after_grading"
+      properties:
+        chunk_quota:
+          type: "integer"
+        max_upload_bytes:
+          type: "integer"
+        max_pdf_pages:
+          type: "integer"
+        second_reviewer_required:
+          type: "boolean"
+        verifications_per_hour:
+          type: "integer"
+        verifications_per_day:
+          type: "integer"
+        learner_sources:
+          type: "string"
+          enum:
+            - "verified_only"
+            - "all_marked"
+        stale_after_days:
+          type: "integer"
+        review_sla_days:
+          type: "integer"
+        answer_log_retention_days:
+          type: "integer"
+        quiz_answer_retention_days:
+          type: "integer"
+        interview_max_turns:
+          type: "integer"
+        interview_max_cost_micro_usd:
+          type: "integer"
+        expert_question_expiry_days:
+          type: "integer"
+        quiz_questions_per_attempt:
+          type: "integer"
+        quiz_time_limit_minutes:
+          type: "integer"
+        quiz_min_questions_per_topic:
+          type: "integer"
+        quiz_show_answers_after_grading:
+          type: "boolean"
+    KAiBudget:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "period"
+        - "monthly_cap_micro_usd"
+        - "spent_micro_usd"
+        - "reserved_micro_usd"
+        - "calls"
+        - "ai_stopped"
+      properties:
+        period:
+          type: "string"
+        monthly_cap_micro_usd:
+          type: "integer"
+        spent_micro_usd:
+          type: "integer"
+        reserved_micro_usd:
+          type: "integer"
+        calls:
+          type: "integer"
+        ai_stopped:
+          type: "boolean"
+    KTenantAiBudget:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "tenant_id"
+        - "monthly_cap_micro_usd"
+      properties:
+        tenant_id:
+          type: "string"
+          format: "uuid"
+        monthly_cap_micro_usd:
+          type: "integer"
+    KKillSwitch:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "on"
+        - "reason"
+      properties:
+        on:
+          type: "boolean"
+        reason:
+          type:
+            - "string"
+            - "null"
+    KStorage:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "database_bytes"
+        - "total_chunks"
+        - "companies"
+      properties:
+        database_bytes:
+          type: "integer"
+        total_chunks:
+          type: "integer"
+        companies:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "tenant_id"
+              - "chunk_count"
+            properties:
+              tenant_id:
+                type: "string"
+                format: "uuid"
+              chunk_count:
+                type: "integer"
     Problem:
       type: object
       additionalProperties: false
@@ -2933,61 +8141,3 @@ components:
           anyOf:
             - *a5
             - type: "null"
-    PolicyCheckRequest:
-      type: object
-      additionalProperties: false
-      required:
-        - tenant_id
-        - card_id
-        - action
-        - resource
-      properties:
-        tenant_id: *a1
-        card_id: *a1
-        action:
-          type: string
-          pattern: ^[a-z_]+:[a-z_]+$
-        resource:
-          type: object
-          additionalProperties: false
-          required:
-            - type
-          properties:
-            type:
-              type: string
-              maxLength: 60
-            id:
-              type: string
-              maxLength: 100
-            owner_card_id: *a1
-            owner_person_id: *a1
-            department_id: *a1
-            sensitivity:
-              type: integer
-              minimum: 0
-              maximum: 3
-    PolicyDecision:
-      type: object
-      additionalProperties: false
-      required:
-        - effect
-        - reason_code
-        - obligations
-      properties:
-        effect:
-          type: string
-          enum:
-            - allow
-            - deny
-        reason_code:
-          type: string
-        obligations:
-          type: array
-          items:
-            type: object
-            additionalProperties: true
-            required:
-              - type
-            properties:
-              type:
-                type: string

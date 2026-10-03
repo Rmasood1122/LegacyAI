@@ -7,7 +7,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CONTRACT_PATH } from '../../src/app.ts';
 import {
-  createHttpServer, createLogger, loadConfig, loadContract, PostgresIdempotencyStore, SESSION_COOKIE, type AuthPort,
+  createHttpServer, createLogger, loadConfig, loadContract, PostgresIdempotencyStore, type AuthPort,
 } from '../../src/modules/platform/index.ts';
 import { systemClock } from '../../src/shared/clock.ts';
 import { testEnv } from '../helpers/env.ts';
@@ -22,6 +22,9 @@ beforeAll(async () => {
   tenant = await createTenant(t, 'contract');
 });
 afterAll(async () => t.close());
+
+/** Paths of the Phase 2 (knowledge) operations. */
+const PHASE2_PATH = /^\/v1\/(sources|knowledge|interviews|gaps|topics|job-roles|expert-questions|readiness|consents|review|redaction|ai|me\/(consents|contributions)|people\/\{person_id\}\/consent-withdrawals|tenants\/\{tenant_id\}\/ai-budget|platform\/(ai|storage))(\/|$)/;
 
 describe('the contract file', () => {
   it('is OpenAPI 3.1 with 47 operations, all under /v1, each with a unique operationId', () => {
@@ -270,23 +273,16 @@ describe('every one of the 47 operations returns a contract-conforming success',
     const exp = ok('createExport', await o.post('/v1/exports'), 202);
     ok('getExport', await o.get(`/v1/exports/${exp.body.id}`), 200);
 
-    // internal
-    const pol = await t.app.http.app.inject({
-      method: 'POST', url: '/v1/internal/policy/check', headers: { authorization: `Bearer ${testEnv().INTERNAL_SERVICE_TOKEN}` },
-      payload: { tenant_id: tenant.tenantId, card_id: tenant.ownerCard.id, action: 'knowledge:read', resource: { type: 'knowledge', id: 'item-1', sensitivity: 2 } },
-    });
-    expect(pol.statusCode).toBe(200);
-    expect(pol.json()).toEqual({ effect: 'allow', reason_code: 'ALLOW', obligations: [] });
-    hit.add('internalPolicyCheck');
-
     ok('logout', await member.request('POST', '/v1/auth/logout'), 401); // the member's session ended when the card was replaced...
     hit.delete('logout');
     const fresh = await addMember(t, o, [{ role_key: 'expert' }]);
     ok('logout', await fresh.client.request('POST', '/v1/auth/logout'), 204);
 
-    const all = [...t.app.http.contract.operations.keys()].sort();
+    // Phase 2 operations need the AI service: they are walked, with the real service, by test/contract/phase2-walk.test.ts.
+    const all = [...t.app.http.contract.operations.values()].filter((op) => !PHASE2_PATH.test(op.path)).map((op) => op.operationId).sort();
     expect([...hit].sort()).toEqual(all);
-    expect(hit.size).toBe(47);
+    expect(hit.size).toBe(46);
+    expect(t.app.http.contract.operations.size).toBe(46 + 73);
   });
 });
 
@@ -315,21 +311,16 @@ describe('errors use one format everywhere (RFC 9457 problem details)', () => {
     }
   });
 
-  it('a session cookie is not accepted by the service-only endpoint, and a bearer token is not accepted by session endpoints', async () => {
-    const viaCookie = await t.app.http.app.inject({
-      method: 'POST', url: '/v1/internal/policy/check', cookies: { [SESSION_COOKIE]: tenant.owner.cookie! },
-      payload: { tenant_id: tenant.tenantId, card_id: tenant.ownerCard.id, action: 'card:read', resource: { type: 'card' } },
-    });
-    expect(viaCookie.statusCode).toBe(401);
-    const viaBearer = await t.app.http.app.inject({ method: 'GET', url: '/v1/cards', headers: { authorization: `Bearer ${testEnv().INTERNAL_SERVICE_TOKEN}` } });
-    expect(viaBearer.statusCode).toBe(401);
-    for (const bad of ['', 'Bearer ', 'Bearer wrong', `Basic ${testEnv().INTERNAL_SERVICE_TOKEN}`, `bearer ${testEnv().INTERNAL_SERVICE_TOKEN}x`]) {
-      const res = await t.app.http.app.inject({
-        method: 'POST', url: '/v1/internal/policy/check', headers: bad === '' ? {} : { authorization: bad },
-        payload: { tenant_id: tenant.tenantId, card_id: tenant.ownerCard.id, action: 'card:read', resource: { type: 'card' } },
-      });
-      expect(res.statusCode, `"${bad}"`).toBe(401);
+  it('a bearer token is not accepted by session endpoints, and the removed internal endpoint is gone', async () => {
+    for (const bad of [`Bearer ${testEnv().SERVICE_TOKEN_KEY}`, 'Bearer wrong', `Basic ${testEnv().SERVICE_TOKEN_KEY}`]) {
+      const res = await t.app.http.app.inject({ method: 'GET', url: '/v1/cards', headers: { authorization: bad } });
+      expect(res.statusCode, bad).toBe(401);
     }
+    const gone = await t.app.http.app.inject({
+      method: 'POST', url: '/v1/internal/policy/check', headers: { authorization: `Bearer ${testEnv().SERVICE_TOKEN_KEY}` },
+      payload: { tenant_id: tenant.tenantId },
+    });
+    expect(gone.statusCode).toBe(404);
   });
 });
 

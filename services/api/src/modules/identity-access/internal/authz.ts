@@ -5,8 +5,9 @@ import type { BillingPort } from '../../billing/index.ts';
 import { getSettings, getTenant, writeAudit, type Tx } from '../../platform/index.ts';
 import { accessPhase } from './lifecycle.ts';
 import {
-  buildResourceFilter, decide, usageKey,
-  type Grant, type Matrix, type PermissionDef, type PolicyContext, type ResourceDescriptor, type ResourceFilter, type Restriction,
+  buildResourceFilter, buildResourceFilterSpec, decide, usageKey,
+  type FilterSpec, type Grant, type Matrix, type PermissionDef, type PolicyContext, type ResourceDescriptor, type ResourceFilter,
+  type Restriction,
 } from './policy.ts';
 import { loadCompanyCard, sessionExtras } from './sessions.ts';
 
@@ -24,12 +25,24 @@ function windowStart(now: Date, windowSeconds: number): Date {
   return new Date(Math.floor(now.getTime() / ms) * ms);
 }
 
+/** Company settings that belong to the knowledge module; it supplies them (this module does not read its tables). */
+export type KnowledgeSettingsLoader = (tx: Tx, tenantId: string) => Promise<{ learner_verified_only: boolean; second_reviewer_required: boolean }>;
+
+/** Actions whose decisions depend on the knowledge settings. */
+const KNOWLEDGE_NAMESPACES = ['knowledge:', 'source:', 'capture:', 'quiz:', 'expert_question:', 'interview:', 'gap:', 'topic:', 'review:'];
+
 export class Authorizer {
   readonly #billing: BillingPort;
   #matrix: { value: Matrix; loadedAt: number } | null = null;
+  #knowledgeSettings: KnowledgeSettingsLoader | null = null;
 
   constructor(billing: BillingPort) {
     this.#billing = billing;
+  }
+
+  /** Plugged in once by app.ts. Without it the safe defaults apply (verified only, second reviewer). */
+  useKnowledgeSettings(loader: KnowledgeSettingsLoader): void {
+    this.#knowledgeSettings = loader;
   }
 
   async matrix(tx: Tx): Promise<Matrix> {
@@ -65,8 +78,11 @@ export class Authorizer {
     }
 
     const plan = await this.#billing.checkLimit({ tenantId: subject.tenant_id, planCode: tenant.plan_code, action });
+    const knowledge = this.#knowledgeSettings !== null && KNOWLEDGE_NAMESPACES.some((n) => action.startsWith(n))
+      ? await this.#knowledgeSettings(tx, subject.tenant_id)
+      : {};
     return {
-      now: ctx.now, ip: ctx.ip, tenant: { status: tenant.status }, settings, matrix: await this.matrix(tx),
+      now: ctx.now, ip: ctx.ip, tenant: { status: tenant.status }, settings: { ...settings, ...knowledge }, matrix: await this.matrix(tx),
       companyCard, restrictions, usage, planAllows: plan.allowed === true,
     };
   }
@@ -135,6 +151,15 @@ export class Authorizer {
       return buildResourceFilter(subject, action, descriptor, await this.policyContext(tx, subject, action, ctx), firstParam);
     } catch {
       return { sql: 'FALSE', params: [] };
+    }
+  }
+
+  /** The access filter as data, for the AI service (docs/phase2/03, lock 2). Any error means "nothing". */
+  async filterSpec(tx: Tx, subject: Subject, action: string, ctx: RequestContext): Promise<FilterSpec> {
+    try {
+      return buildResourceFilterSpec(subject, action, await this.policyContext(tx, subject, action, ctx));
+    } catch {
+      return { v: 1, tenant_id: subject.tenant_id, action, nothing: true, only_verified: true, any_of: [] };
     }
   }
 

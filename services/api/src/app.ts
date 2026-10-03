@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { StubBilling, type BillingPort } from './modules/billing/index.ts';
 import { createIdentityAccess, type AuthLimits, type IdentityAccess } from './modules/identity-access/index.ts';
+import { createKnowledgeGateway } from './modules/knowledge-gateway/index.ts';
 import {
   createHttpServer, createLogger, Database, ExportRegistry, LogNotifier, platformRoutes, PostgresIdempotencyStore,
   PostgresRateLimiter, type Config, type HttpServer, type Logger, type Notifier, type RateLimiter,
@@ -63,6 +64,7 @@ export async function createApp(config: Config, overrides: AppOverrides = {}): P
   });
   http.defineRoutes(platformRoutes({ config, db, exports }));
   http.defineRoutes(identity.routes);
+  http.defineRoutes(createKnowledgeGateway({ config, db, authorizer: identity.authorizer, notifier }).routes);
 
   // Every operation in openapi.yaml must have a route, and vice versa.
   const registered = new Set(http.registeredRoutes().map((r) => r.operationId));

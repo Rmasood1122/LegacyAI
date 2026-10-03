@@ -67,3 +67,34 @@ def finish(db: Database, tenant_id: str, card_id: str | None, request_id: str | 
         write_audit(cur, tenant_id=tenant_id, card_id=card_id, action="capture:withdrawal_erased", reason_code="WITHDRAWAL_ERASED",
                     resource_type="consent", resource_id=consent_id, request_id=request_id,
                     details={"consent_id": consent_id, "count": sources, "rows": items})
+
+
+def items_citing_source(cur: psycopg.Cursor[Any], tenant_id: str, source_id: str) -> tuple[list[str], list[str]]:
+    """(items resting ONLY on this source, items that also rest on other material) - current versions, not yet withdrawn."""
+    cur.execute(
+        """SELECT i.id::text AS id,
+                  bool_and(c.source_id IS NOT DISTINCT FROM %s::uuid) AS only_this
+             FROM knowledge_items i
+             JOIN citations ci ON ci.tenant_id = i.tenant_id AND ci.subject_type = 'knowledge_version' AND ci.subject_id = i.current_version_id
+             JOIN chunks c ON c.tenant_id = ci.tenant_id AND c.id = ci.chunk_id
+            WHERE i.tenant_id = %s AND i.status <> 'withdrawn'
+              AND EXISTS (SELECT 1 FROM citations x JOIN chunks y ON y.tenant_id = x.tenant_id AND y.id = x.chunk_id
+                           WHERE x.tenant_id = i.tenant_id AND x.subject_type = 'knowledge_version' AND x.subject_id = i.current_version_id
+                             AND y.source_id = %s::uuid)
+            GROUP BY i.id""", (source_id, tenant_id, source_id))
+    rows = cur.fetchall()
+    return [r["id"] for r in rows if r["only_this"]], [r["id"] for r in rows if not r["only_this"]]
+
+
+def withdraw_source(cur: psycopg.Cursor[Any], tenant_id: str, source_id: str) -> bool:
+    """Hides one document and erases its passages, findings and title. Returns False if it was not there.
+    Items are handled by the caller (knowledge) BEFORE this runs, because their provenance is deleted here."""
+    cur.execute("UPDATE sources SET status = 'withdrawn' WHERE tenant_id = %s AND id = %s AND status <> 'withdrawn' RETURNING id",
+                (tenant_id, source_id))
+    if cur.fetchone() is None:
+        return False
+    cur.execute("DELETE FROM redaction_findings WHERE tenant_id = %s AND source_id = %s", (tenant_id, source_id))
+    cur.execute("DELETE FROM chunks WHERE tenant_id = %s AND source_id = %s", (tenant_id, source_id))
+    cur.execute("UPDATE sources SET title = '' WHERE tenant_id = %s AND id = %s", (tenant_id, source_id))
+    cur.execute("DELETE FROM topics WHERE tenant_id = %s AND status = 'proposed' AND extracted_from_source_id = %s", (tenant_id, source_id))
+    return True

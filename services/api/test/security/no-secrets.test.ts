@@ -39,7 +39,7 @@ beforeAll(async () => {
   tenant = await createTenant(t, 'nosecrets');
 
   const env = testEnv();
-  remember('internal service token', env.INTERNAL_SERVICE_TOKEN);
+  remember('service token key', env.SERVICE_TOKEN_KEY);
   remember('SC pepper', PEPPER_V1);
   remember('HMAC index key', env.HMAC_INDEX_KEY);
   remember('TOTP encryption keyring', env.CREDENTIAL_ENC_KEYRING);

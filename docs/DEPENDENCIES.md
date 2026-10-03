@@ -185,7 +185,7 @@ Rejected: pdfminer.six / pdfplumber (code-execution advisory CVE-2025-64512, no 
 
 | Purpose | Package and version | Released | Licence | Evidence |
 |---|---|---|---|---|
-| Service tokens | jose 6.2.12 | 2026-09-05 (6.x since 2025-02-22) | MIT | https://registry.npmjs.org/jose |
+| Service tokens | jose 6.2.8 | 2026-08-03 (6.x since 2025-02-22) | MIT, no dependencies | https://registry.npmjs.org/jose (read 2026-10-03). The design named 6.2.12, which is only 28 days old; 6.2.8 is the newest release older than 60 days. `npm audit`: 0 vulnerabilities. |
 
 ### 9.3 AI provider SDKs (chosen at Gate 2)
 

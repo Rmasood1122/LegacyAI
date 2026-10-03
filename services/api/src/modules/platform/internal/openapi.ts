@@ -18,6 +18,8 @@ export interface Operation {
   isService: boolean;
   idempotent: boolean;
   hasBody: boolean;
+  /** Content types of a raw-file body (uploads). Empty for JSON operations. */
+  binaryTypes: string[];
   validateBody: ValidateFunction | null;
   validateParams: ValidateFunction | null;
   validateQuery: ValidateFunction | null;
@@ -89,7 +91,9 @@ export function loadContract(filePath: string): Contract {
       };
       const idemParam = parameters.find((p) => p.in === 'header' && p.name === 'Idempotency-Key');
 
-      const bodySchema = ((op.requestBody as Json | undefined)?.content as Json | undefined)?.['application/json'] as Json | undefined;
+      const bodyContent = ((op.requestBody as Json | undefined)?.content ?? {}) as Json;
+      const bodySchema = bodyContent['application/json'] as Json | undefined;
+      const binaryTypes = Object.keys(bodyContent).filter((k) => k !== 'application/json');
       const responses = new Map<number, ValidateFunction | null>();
       for (const [status, res] of Object.entries((op.responses ?? {}) as Record<string, Json>)) {
         const content = (res.content ?? {}) as Record<string, Json>;
@@ -112,7 +116,8 @@ export function loadContract(filePath: string): Contract {
         isPublic,
         isService,
         idempotent: op['x-idempotent'] === true,
-        hasBody: bodySchema !== undefined,
+        hasBody: bodySchema !== undefined || binaryTypes.length > 0,
+        binaryTypes,
         validateBody: bodySchema ? strict.compile(bodySchema.schema as Json) : null,
         validateParams: group('path'),
         validateQuery: group('query'),

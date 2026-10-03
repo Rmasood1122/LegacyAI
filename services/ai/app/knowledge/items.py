@@ -307,7 +307,7 @@ def relabel(db: Database, ctx: ServiceContext, kind: str, target_id: str, depart
         before = cur.fetchone()
         if before is None:
             raise ItemRefused("not_found", 404)
-        cur.execute("SELECT relabel(%s, %s, %s, %s::smallint) AS n", (kind, target_id, department_id, sensitivity))
+        cur.execute("SELECT relabel(%s, %s, %s, %s::smallint) AS n", ("source" if kind == "source" else "item", target_id, department_id, sensitivity))
         n = int(one(cur)["n"])
         write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="knowledge:label", reason_code="LABELS_CHANGED",
                     resource_type=kind, resource_id=target_id, request_id=ctx.request_id,
@@ -393,3 +393,25 @@ def erase_withdrawn_items(cur: psycopg.Cursor[Any], tenant_id: str, consent_id: 
         if item["status"] != "withdrawn":
             _task(cur, tenant_id, item_id, "verify_item", sla)
     return len(erased)
+
+
+def withdraw_items(cur: psycopg.Cursor[Any], tenant_id: str, only: list[str], mixed: list[str]) -> None:
+    """For a withdrawn document: items that rested only on it are withdrawn and erased; items that
+    also rest on other material go back to review (a passage they cited is about to disappear)."""
+    for item_id in only:
+        cur.execute("UPDATE knowledge_items SET status = 'withdrawn' WHERE tenant_id = %s AND id = %s AND status <> 'withdrawn'",
+                    (tenant_id, item_id))
+        cur.execute("DELETE FROM chunks WHERE tenant_id = %s AND knowledge_item_id = %s", (tenant_id, item_id))
+        cur.execute("UPDATE quiz_items SET status = 'retired' WHERE tenant_id = %s AND knowledge_item_id = %s AND status <> 'retired'",
+                    (tenant_id, item_id))
+        cur.execute("SELECT id FROM knowledge_versions WHERE tenant_id = %s AND item_id = %s AND erased_at IS NULL", (tenant_id, item_id))
+        for v in cur.fetchall():
+            cur.execute("SELECT erase_version(%s)", (v["id"],))
+        cur.execute("UPDATE knowledge_items SET title = '' WHERE tenant_id = %s AND id = %s", (tenant_id, item_id))
+    sla = int(_settings(cur, tenant_id)["review_sla_days"])
+    for item_id in mixed:
+        item = _item(cur, tenant_id, item_id)
+        if item["status"] in ("verified", "corrected", "stale", "rejected"):
+            _move(cur, tenant_id, item_id, "in_review", None)
+            _search_copy(cur, tenant_id, item, "in_review", _NO_EMBEDDER)
+        _task(cur, tenant_id, item_id, "verify_item", sla)

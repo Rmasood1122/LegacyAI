@@ -22,8 +22,8 @@ export {
 } from './internal/tenants.ts';
 export {
   createHttpServer, SESSION_COOKIE,
-  type AuthPort, type HandlerResult, type HttpDeps, type HttpServer, type PublicHandlerArgs, type RegisteredRoute,
-  type RouteDef, type SessionHandlerArgs,
+  type AuthPort, type GatewayCallArgs, type GatewayPrepared, type HandlerResult, type HttpDeps, type HttpServer, type PublicHandlerArgs,
+  type RegisteredRoute, type RouteDef, type SessionHandlerArgs,
 } from './internal/http.ts';
 export { loadContract, type Contract, type Operation } from './internal/openapi.ts';
 export { decodeCursor, encodeCursor, platformRoutes } from './internal/routes.ts';

@@ -13,7 +13,7 @@ import { resolveSession, tenantOfToken } from './internal/sessions.ts';
 
 export { DEFAULT_AUTH_LIMITS, type AuthLimits } from './internal/auth.ts';
 export { bootstrapOperator, recoverOperator, type BootstrapResult } from './internal/bootstrap.ts';
-export { Authorizer, loadMatrix } from './internal/authz.ts';
+export { Authorizer, loadMatrix, type KnowledgeSettingsLoader } from './internal/authz.ts';
 export {
   dammCheckDigit, dammValid, formatCardNumber, generateCardNumber, isValidCardNumber, luhnValid, maskCardNumber, normalizeCardNumber,
 } from './internal/card-number.ts';

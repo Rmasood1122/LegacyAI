@@ -61,7 +61,7 @@ echo "selftest: 3/6 audit-chain verification on the RESTORED database"
 # These are random, generated for this run only, and protect nothing.
 k() { node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"; }
 verify() { # $1 = database name, $2 = output file. Exit code 3 means "ran fine, found a broken chain"; anything else non-zero is a crash.
-  ( cd "$repo/services/api" &&     NODE_ENV=test LOG_LEVEL=silent     DATABASE_URL="postgres://legacyai_app:$APP_PW@${TEST_PG_HOST:-127.0.0.1}:${TEST_PG_PORT:-55432}/$1"     SC_PEPPER_KEYRING="{\"current\":\"v1\",\"keys\":{\"v1\":\"$(k)\"}}"     CREDENTIAL_ENC_KEYRING="{\"current\":\"k1\",\"keys\":{\"k1\":\"$(k)\"}}"     HMAC_INDEX_KEY="$(k)" INTERNAL_SERVICE_TOKEN="$(k)"     WEBAUTHN_RP_ID=localhost ALLOWED_ORIGINS=http://localhost:3000     node src/cli/verify-audit-chain.ts --tenant all > "$2" 2>/dev/null ) || [ $? -eq 3 ]
+  ( cd "$repo/services/api" &&     NODE_ENV=test LOG_LEVEL=silent     DATABASE_URL="postgres://legacyai_app:$APP_PW@${TEST_PG_HOST:-127.0.0.1}:${TEST_PG_PORT:-55432}/$1"     SC_PEPPER_KEYRING="{\"current\":\"v1\",\"keys\":{\"v1\":\"$(k)\"}}"     CREDENTIAL_ENC_KEYRING="{\"current\":\"k1\",\"keys\":{\"k1\":\"$(k)\"}}"     HMAC_INDEX_KEY="$(k)" SERVICE_TOKEN_KEY="$(k)" AI_SERVICE_URL=http://127.0.0.1:9     WEBAUTHN_RP_ID=localhost ALLOWED_ORIGINS=http://localhost:3000     node src/cli/verify-audit-chain.ts --tenant all > "$2" 2>/dev/null ) || [ $? -eq 3 ]
 }
 out="${TMPDIR:-/tmp}"
 verify "$SOURCE_DB" "$out/legacyai-selftest-source.jsonl"

@@ -25,7 +25,14 @@ module.exports = {
       comment: 'platform must not depend on identity-access or billing (it defines ports instead).',
       severity: 'error',
       from: { path: '^src/modules/platform/' },
-      to: { path: '^src/modules/(identity-access|billing)/' },
+      to: { path: '^src/modules/(identity-access|billing|knowledge-gateway)/' },
+    },
+    {
+      name: 'identity-does-not-depend-on-knowledge',
+      comment: 'The policy decision point is given the knowledge settings it needs through a port; it never imports the knowledge module.',
+      severity: 'error',
+      from: { path: '^src/modules/(identity-access|billing)/' },
+      to: { path: '^src/modules/knowledge-gateway/' },
     },
     {
       name: 'billing-does-not-depend-on-identity',

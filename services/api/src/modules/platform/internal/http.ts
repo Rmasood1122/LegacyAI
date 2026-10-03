@@ -2,6 +2,10 @@
 // contract validation -> rate limit -> session -> CSRF -> policy decision -> idempotency
 // -> handler -> response validation.
 //
+// Gateway routes (Phase 2) split the handler in two: `prepare` runs inside the decision's
+// transaction, which is then COMMITTED; `call` talks to the AI service with no database
+// connection held, and may open short transactions of its own (docs/phase2/01).
+//
 // Handlers cannot skip the policy decision point: a route can only be registered through
 // `defineRoutes`, which requires policy metadata, and Fastify is hooked so that any route
 // registered another way makes the server refuse to start.
@@ -51,6 +55,8 @@ export interface PublicHandlerArgs {
 }
 
 export interface SessionHandlerArgs extends PublicHandlerArgs {
+  /** The request's content type (without parameters), for raw-file uploads. */
+  contentType?: string;
   tx: Tx;
   subject: Subject;
   decision: Decision;
@@ -61,18 +67,33 @@ export interface SessionHandlerArgs extends PublicHandlerArgs {
 
 export type PolicySpec =
   | { public: true; reason: string }
-  | { service: true }
   | {
       /** Loads the thing being acted on. Returning null means "not found" (also for other tenants' data). */
       resource: (args: { tx: Tx; subject: Subject; params: any; body: any; query: any; ctx: RequestContext }) => Promise<ResourceRef | null>;
     };
 
+export interface GatewayCallArgs {
+  ctx: RequestContext;
+  subject: Subject;
+  resource: ResourceRef;
+  /** A short transaction for the subject's tenant, for work between or after AI-service calls. */
+  withTx<T>(fn: (tx: Tx) => Promise<T>): Promise<T>;
+}
+
+/** What `prepare` returns: either the final answer, or the call to make once the transaction has committed. */
+export type GatewayPrepared = HandlerResult | { call: (a: GatewayCallArgs) => Promise<HandlerResult> };
+
 export type RouteDef =
   | { kind: 'public'; operationId: string; policy: { public: true; reason: string }; handler: (a: PublicHandlerArgs) => Promise<HandlerResult> }
-  | { kind: 'service'; operationId: string; policy: { service: true }; handler: (a: PublicHandlerArgs) => Promise<HandlerResult> }
-  | { kind: 'session'; operationId: string; policy: Extract<PolicySpec, { resource: unknown }>; handler: (a: SessionHandlerArgs) => Promise<HandlerResult> };
+  | { kind: 'session'; operationId: string; policy: Extract<PolicySpec, { resource: unknown }>; handler: (a: SessionHandlerArgs) => Promise<HandlerResult> }
+  | {
+      kind: 'gateway'; operationId: string; policy: Extract<PolicySpec, { resource: unknown }>;
+      /** Larger request bodies (file uploads). Defaults to the normal limit. */
+      bodyLimit?: number;
+      prepare: (a: SessionHandlerArgs) => Promise<GatewayPrepared>;
+    };
 
-type SessionRouteDef = Extract<RouteDef, { kind: 'session' }>;
+type SessionRouteDef = Extract<RouteDef, { kind: 'session' | 'gateway' }>;
 
 export interface HttpDeps {
   config: Config;
@@ -91,7 +112,7 @@ export interface RegisteredRoute {
   operationId: string;
   method: string;
   path: string;
-  kind: 'public' | 'service' | 'session';
+  kind: 'public' | 'session' | 'gateway';
   permission: string | null;
   publicReason: string | null;
 }
@@ -149,6 +170,9 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
     maxAge: 600,
   });
   await app.register(cookie);
+  // Raw files (uploads) arrive as bytes. Only operations whose contract lists the type accept them;
+  // any other operation refuses a non-JSON body in validateRequest.
+  app.addContentTypeParser(['application/pdf', 'text/plain', 'text/markdown'], { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
 
   app.addHook('onSend', async (req, reply) => {
     reply.header('x-request-id', req.id);
@@ -190,14 +214,19 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
     return { requestId: req.id, ip: req.ip, userAgent: typeof ua === 'string' ? ua.slice(0, 300) : '', now: clock.now() };
   }
 
-  function validateRequest(op: Operation, req: FastifyRequest): { body: unknown; params: unknown; query: unknown; idemKey: string | null } {
+  function validateRequest(op: Operation, req: FastifyRequest): { body: unknown; params: unknown; query: unknown; idemKey: string | null; contentType: string } {
     const errors: Array<{ path: string; message: string }> = [];
     const params = { ...((req.params as Record<string, unknown>) ?? {}) };
     const query = { ...((req.query as Record<string, unknown>) ?? {}) };
     const body = req.body;
     if (op.validateParams && !op.validateParams(params)) errors.push(...validationErrors(op.validateParams, 'path'));
     if (op.validateQuery && !op.validateQuery(query)) errors.push(...validationErrors(op.validateQuery, 'query'));
-    if (op.validateBody) {
+    const contentType = String(req.headers['content-type'] ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
+    if (Buffer.isBuffer(body)) {
+      if (!op.binaryTypes.includes(contentType)) errors.push({ path: 'body', message: 'this content type is not accepted here' });
+    } else if (op.binaryTypes.length > 0 && !op.validateBody) {
+      errors.push({ path: 'body', message: `send the file as one of: ${op.binaryTypes.join(', ')}` });
+    } else if (op.validateBody) {
       if (!op.validateBody(body ?? null)) errors.push(...validationErrors(op.validateBody, 'body'));
     } else if (body !== undefined && body !== null) {
       errors.push({ path: 'body', message: 'this operation does not accept a body' });
@@ -210,7 +239,7 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
       } else idemKey = header;
     }
     if (errors.length > 0) throw problems.badRequest(errors);
-    return { body, params, query, idemKey };
+    return { body, params, query, idemKey, contentType };
   }
 
   function send(op: Operation, reply: FastifyReply, result: HandlerResult): FastifyReply {
@@ -242,7 +271,7 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
     if (typeof token !== 'string' || token === '' || !constantTimeEqual(token, expectedToken)) throw problems.csrf();
   }
 
-  type Outcome = { result: HandlerResult } | { problem: ProblemError };
+  type Outcome = { result: HandlerResult } | { problem: ProblemError } | { call: Extract<GatewayPrepared, { call: unknown }>['call'] };
 
   async function runSessionRoute(
     op: Operation, def: SessionRouteDef, req: FastifyRequest,
@@ -298,10 +327,27 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
           }
         }
 
-        const result = await def.handler({
+        const handlerArgs: SessionHandlerArgs = {
           ctx, tx, subject, decision, resource: loaded, body: input.body, params: input.params, query: input.query,
-          sessionToken: token, csrfToken: session.csrfToken,
-        });
+          sessionToken: token, csrfToken: session.csrfToken, contentType: input.contentType,
+        };
+        if (def.kind === 'gateway') {
+          const prepared = await def.prepare(handlerArgs);
+          if ('call' in prepared && typeof prepared.call === 'function') {
+            // The decision (and anything prepare wrote) is committed BEFORE the AI service is called.
+            await recordAllow();
+            return { call: prepared.call };
+          }
+          if (input.idemKey !== null) {
+            await deps.idempotency.complete(tx, {
+              tenantId, actorCardId: subject.card_id, key: input.idemKey, status: (prepared as HandlerResult).status ?? 200,
+              body: (prepared as HandlerResult).body,
+            });
+          }
+          await recordAllow();
+          return { result: prepared as HandlerResult };
+        }
+        const result = await def.handler(handlerArgs);
 
         if (input.idemKey !== null) {
           await deps.idempotency.complete(tx, {
@@ -312,7 +358,42 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
         return { result };
       });
       if ('problem' in outcome) throw outcome.problem;
-      return outcome.result;
+      if ('result' in outcome) return outcome.result;
+      const granted = allowed as unknown as { subject: Subject; resource: ResourceRef; decision: Decision };
+      const withTx = <T>(fn: (tx: Tx) => Promise<T>): Promise<T> => db.withTenantTx(tenantId, fn);
+      let result: HandlerResult;
+      try {
+        result = await outcome.call({ ctx, subject: granted.subject, resource: granted.resource, withTx });
+      } catch (callErr) {
+        // The allow row is already committed; record that the work did not complete, and free the
+        // idempotency key so the caller can try again.
+        const status = callErr instanceof ProblemError ? callErr.status : 502;
+        try {
+          await db.withTenantTx(tenantId, async (tx) => {
+            if (input.idemKey !== null) {
+              await tx.query('DELETE FROM idempotency_keys WHERE tenant_id = $1 AND actor_card_id = $2 AND key = $3 AND status = $4',
+                [tenantId, granted.subject.card_id, input.idemKey, 'in_progress']);
+            }
+            await writeAudit(tx, {
+              tenantId, actorCardId: granted.subject.card_id, actorKind: 'card', action,
+              resourceType: granted.resource.type, resourceId: granted.resource.id ?? null,
+              decision: 'allow', reasonCode: granted.decision.reason_code, requestId: ctx.requestId, ip: ctx.ip,
+              details: { outcome: 'failed', status },
+            });
+          });
+        } catch (auditErr) {
+          req.log.error({ err: auditErr }, 'could not record a failed gateway call in the audit log');
+        }
+        allowed = null; // already recorded above
+        throw callErr;
+      }
+      if (input.idemKey !== null) {
+        const key = input.idemKey;
+        await db.withTenantTx(tenantId, (tx) => deps.idempotency.complete(tx, {
+          tenantId, actorCardId: granted.subject.card_id, key, status: result.status ?? 200, body: result.body,
+        }));
+      }
+      return result;
     } catch (err) {
       // The transaction rolled back, taking the "allow" audit row with it. Record that the
       // request was allowed but did not complete, so the trail has no silent gap.
@@ -341,8 +422,10 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
       if (!op) throw new Error(`defineRoutes: "${def.operationId}" is not an operation in openapi.yaml`);
       if (registry.some((r) => r.operationId === def.operationId)) throw new Error(`defineRoutes: "${def.operationId}" registered twice`);
       const kind = def.kind;
-      // The contract and the code must agree about which routes are public or service-only.
-      if ((kind === 'public') !== op.isPublic || (kind === 'service') !== op.isService) {
+      // The contract and the code must agree about which routes are public. There are no
+      // service-only routes any more (Phase 2 removed the internal policy endpoint): an operation
+      // marked x-service cannot be registered.
+      if ((kind === 'public') !== op.isPublic || op.isService) {
         throw new Error(`defineRoutes: "${def.operationId}" public/service flag differs from openapi.yaml`);
       }
       if (def.kind === 'public' && def.policy.reason.trim().length < 10) {
@@ -357,8 +440,9 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
         method: op.method,
         url: op.fastifyPath,
         config: { [ROUTE_MARK]: true } as Record<symbol, unknown>,
-        // Sign-in and enrollment bodies are small; anonymous callers get a tighter limit.
+        // Sign-in and enrollment bodies are small; anonymous callers get a tighter limit. Uploads declare their own.
         ...(kind === 'public' ? { bodyLimit: 16 * 1024 } : {}),
+        ...(def.kind === 'gateway' && def.bodyLimit !== undefined ? { bodyLimit: def.bodyLimit } : {}),
         handler: (req, reply) =>
           tracer.startActiveSpan(op.operationId, async (span) => {
             try {
@@ -369,13 +453,6 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
 
               let result: HandlerResult;
               if (def.kind === 'public') {
-                result = await def.handler({ ctx, body: input.body, params: input.params, query: input.query });
-              } else if (def.kind === 'service') {
-                const header = req.headers.authorization;
-                const presented = typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7) : '';
-                if (presented === '' || !constantTimeEqual(presented, config.internalServiceToken.reveal())) {
-                  throw problems.unauthenticated();
-                }
                 result = await def.handler({ ctx, body: input.body, params: input.params, query: input.query });
               } else {
                 result = await runSessionRoute(op, def, req, input, ctx);

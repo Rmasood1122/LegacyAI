@@ -20,7 +20,7 @@ import {
 } from './cards.ts';
 import { normalizeCardNumber } from './card-number.ts';
 import type { ResourceDescriptor } from './policy.ts';
-import { loadRoles, revokeSession, revokeSessionsForCard, rotateSession, subjectForCard } from './sessions.ts';
+import { loadRoles, revokeSession, revokeSessionsForCard, rotateSession } from './sessions.ts';
 
 export interface IdentityRouteDeps {
   db: Database;
@@ -901,31 +901,6 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
             plan: await getPlan(tx, tenant.plan_code),
           },
         };
-      },
-    },
-
-    // --------------------------------------------------------------- internal
-    {
-      operationId: 'internalPolicyCheck',
-      kind: 'service',
-      policy: { service: true },
-      handler: async ({ ctx, body }) => {
-        const decision = await db.withTenantTx(body.tenant_id, async (tx) => {
-          // The subject is re-loaded from the database; nothing about it is trusted from the caller.
-          // This endpoint exists for the knowledge layer (Phase 2). It answers knowledge questions only:
-          // card and people administration is decided on the session routes, where the target's rank,
-          // ownership and last-owner status are loaded from the database.
-          if (!String(body.action).startsWith('knowledge:')) {
-            return { effect: 'deny' as const, reason_code: 'DENY_INTERNAL_ACTION_NOT_ALLOWED', obligations: [] };
-          }
-          const subject = await subjectForCard(tx, body.tenant_id, body.card_id);
-          if (!subject) return { effect: 'deny' as const, reason_code: 'DENY_UNKNOWN_SUBJECT', obligations: [] };
-          const resource = { ...body.resource, tenant_id: body.tenant_id };
-          const decision = await authorizer.authorize(tx, subject, body.action, resource, ctx);
-          await authorizer.record(tx, subject, body.action, resource, decision, ctx, 'service');
-          return decision;
-        });
-        return { body: decision };
       },
     },
   ];

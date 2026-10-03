@@ -37,7 +37,12 @@ export interface Config {
   scPepper: Keyring;
   credentialEnc: Keyring;
   hmacIndexKey: Secret<Buffer>;
-  internalServiceToken: Secret;
+  /** Signs the short-lived service tokens the API hands to the AI service (docs/phase2/01). */
+  serviceTokenKey: Secret;
+  /** Where the private AI service listens. https in production; plain http only for localhost. */
+  aiServiceUrl: string;
+  /** How long the API waits for the AI service before giving up on a call. */
+  aiServiceTimeoutMs: number;
   webauthn: { rpId: string; rpName: string };
   allowedOrigins: string[];
   argon2: { memoryKiB: number; iterations: number; parallelism: number; maxConcurrency: number };
@@ -178,9 +183,24 @@ export function loadConfig(env: Env): Config {
   const hmacKeyText = required('HMAC_INDEX_KEY');
   const hmacKey = hmacKeyText === '' ? undefined : decodeKey('HMAC_INDEX_KEY', hmacKeyText, 32);
 
-  const serviceToken = required('INTERNAL_SERVICE_TOKEN');
+  const serviceToken = required('SERVICE_TOKEN_KEY');
   if (serviceToken !== '' && serviceToken.length < 32) {
-    problems.push('INTERNAL_SERVICE_TOKEN must be at least 32 characters');
+    problems.push('SERVICE_TOKEN_KEY must be at least 32 characters');
+  }
+
+  const aiServiceUrl = required('AI_SERVICE_URL');
+  if (aiServiceUrl !== '') {
+    let url: URL | undefined;
+    try {
+      url = new URL(aiServiceUrl);
+    } catch {
+      url = undefined;
+    }
+    const local = url !== undefined && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
+    if (url === undefined || url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== ''
+        || (url.protocol !== 'https:' && !(local && url.protocol === 'http:'))) {
+      problems.push('AI_SERVICE_URL must be an https URL (plain http only for localhost), without credentials or query');
+    }
   }
 
   const originsText = required('ALLOWED_ORIGINS');
@@ -216,7 +236,9 @@ export function loadConfig(env: Env): Config {
     scPepper: keyring('SC_PEPPER_KEYRING'),
     credentialEnc: keyring('CREDENTIAL_ENC_KEYRING', 32),
     hmacIndexKey: new Secret(hmacKey ?? Buffer.alloc(0)),
-    internalServiceToken: new Secret(serviceToken),
+    serviceTokenKey: new Secret(serviceToken),
+    aiServiceUrl: aiServiceUrl.replace(/\/+$/, ''),
+    aiServiceTimeoutMs: integer('AI_SERVICE_TIMEOUT_MS', 60_000, 1_000, 300_000),
     webauthn: { rpId, rpName: raw('WEBAUTHN_RP_NAME') ?? 'LegacyAI' },
     allowedOrigins,
     argon2: {

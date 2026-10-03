@@ -245,3 +245,23 @@ def set_status(db: Database, ctx: ServiceContext, interview_id: str, status: str
         write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action=f"capture:interview_{status}", reason_code="INTERVIEW_STATUS",
                     resource_type="interview", resource_id=interview_id, request_id=ctx.request_id, details={"interview_id": interview_id})
     return status
+
+
+def read(db: Database, ctx: ServiceContext, interview_id: str) -> dict[str, Any]:
+    """The interview with its turns (the API decided who may read it: the expert, or interview:read)."""
+    with db.tenant_tx(ctx.tenant_id) as cur:
+        cur.execute("""SELECT id::text AS id, expert_person_id::text AS expert_person_id, job_role, status, turn_count, max_turns,
+                              created_at, last_turn_at, completed_at FROM interviews WHERE tenant_id = %s AND id = %s""",
+                    (ctx.tenant_id, interview_id))
+        iv = cur.fetchone()
+        if iv is None:
+            raise InterviewRefused("not_found", 404)
+        out = dict(iv)
+        for k in ("created_at", "last_turn_at", "completed_at"):
+            out[k] = out[k].isoformat() if out[k] else None
+        cur.execute("""SELECT ordinal, topic_id::text AS topic_id, question_text, question_kind, answer_text, answered_at, erased_at
+                         FROM interview_turns WHERE tenant_id = %s AND interview_id = %s ORDER BY ordinal""", (ctx.tenant_id, interview_id))
+        out["turns"] = [{"ordinal": t["ordinal"], "topic_id": t["topic_id"], "question": t["question_text"], "kind": t["question_kind"],
+                         "answer": t["answer_text"], "answered_at": t["answered_at"].isoformat() if t["answered_at"] else None,
+                         "erased": t["erased_at"] is not None} for t in cur.fetchall()]
+    return out

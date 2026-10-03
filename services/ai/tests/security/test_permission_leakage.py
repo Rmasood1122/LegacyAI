@@ -157,8 +157,12 @@ def test_retrieval_returns_exactly_what_the_rules_allow(db: Database, two_compan
                 if s is None or not allowed(s, flt, token_tenant, contributor):
                     leaks.append((name, question, c.id))
             if question == QUESTION:
+                # Retrieval keeps at most 20 candidates per method (meaning and keywords). Below that cap it must
+                # return everything allowed; above it, it must return a full cap's worth - all of it allowed.
                 expected = {s.id for s in seeded if allowed(s, flt, token_tenant, contributor)}
-                if {c.id for c in got} != expected:
+                ids = {c.id for c in got}
+                complete = ids == expected if len(expected) <= 20 else (len(ids) >= 20 and ids <= expected)
+                if not complete:
                     misses.append(name)
     with capsys.disabled():
         print(f"\nleakage: retrieval - {len(groups)} attack groups, {queries} queries, {len(leaks)} leaks")

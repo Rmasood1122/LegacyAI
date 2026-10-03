@@ -25,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.ai_gateway import Caller, ChatProvider, Embedder, FakeProvider, Gateway, load_prices, load_prompts, make_embedder
 from app.capture import ingest, interviews, topics, withdrawal
 from app.capture.gaps import gap_report
-from app.knowledge import answers, expert, items, readiness
+from app.knowledge import answers, expert, items, readiness, reads
 from app.platform import (
     ConfigError,
     Database,
@@ -37,6 +37,7 @@ from app.platform import (
     load_settings,
     token_id,
     verify_service_token,
+    write_audit,
 )
 from app.platform import housekeeping as housekeeping_mod
 
@@ -158,6 +159,28 @@ class Override(Body):
     score: float = Field(ge=0, le=1)
 
 
+class ItemList(Body):
+    status: Literal["candidate", "in_review", "verified", "corrected", "rejected", "stale"] | None = None
+    owner_me: bool = False
+    limit: int = Field(default=50, ge=1, le=50)
+    after: Uuid | None = None
+
+
+class Restrict(Body):
+    sensitivity: Sensitivity
+
+
+class QuizList(Body):
+    status: Literal["draft", "approved", "retired"] | None = None
+    limit: int = Field(default=50, ge=1, le=50)
+    after: Uuid | None = None
+
+
+class QuestionBox(Body):
+    box: Literal["asked", "addressed", "all"]
+    limit: int = Field(default=50, ge=1, le=50)
+
+
 class Services:
     """What the routes need. Built once at start-up (or by a test)."""
 
@@ -223,6 +246,9 @@ def create_app(services: Services | None = None) -> FastAPI:
             jti, exp = token_id(raw)
             s.replay.check(jti, exp, time.time())
             return ctx
+        # Read by app/contract.py: the internal contract names the token action (and record) of every route.
+        dep.legacyai_action = action  # type: ignore[attr-defined]
+        dep.legacyai_subject = subject_param  # type: ignore[attr-defined]
         return dep
 
     @app.exception_handler(TokenError)
@@ -279,6 +305,18 @@ def create_app(services: Services | None = None) -> FastAPI:
                                          s.settings.storage_budget_bytes, deadline())
         return JSONResponse(result)
 
+    @app.post("/internal/sources/{source_id}/withdraw")
+    def source_withdraw(source_id: str, ctx: Annotated[ServiceContext, Depends(token("source.withdraw", "source_id"))]) -> dict[str, Any]:
+        with svc().db.tenant_tx(ctx.tenant_id) as cur:
+            only, mixed = withdrawal.items_citing_source(cur, ctx.tenant_id, source_id)     # before the passages are deleted
+            items.withdraw_items(cur, ctx.tenant_id, only, mixed)
+            if not withdrawal.withdraw_source(cur, ctx.tenant_id, source_id):
+                raise Refused("not_found", 404)
+            write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="capture:source_withdrawn", reason_code="SOURCE_WITHDRAWN",
+                        resource_type="source", resource_id=source_id, request_id=ctx.request_id,
+                        details={"source_id": source_id, "count": len(only), "rows": len(mixed)})
+        return {"id": source_id, "status": "withdrawn", "items_withdrawn": len(only), "items_back_in_review": len(mixed)}
+
     @app.post("/internal/sources/{source_id}/continue")
     def source_continue(source_id: str, ctx: Annotated[ServiceContext, Depends(token("source.continue", "source_id"))]) -> dict[str, Any]:
         s = svc()
@@ -318,7 +356,22 @@ def create_app(services: Services | None = None) -> FastAPI:
     @app.post("/internal/items/{item_id}/verify")
     def item_verify(item_id: str, ctx: Annotated[ServiceContext, Depends(token("item.verify", "item_id"))]) -> dict[str, Any]:
         s = svc()
+        if not reads.verification_rate_ok(s.db, ctx):
+            raise Refused("verification_limit", 429)    # poisoning defence: verifications per card per hour / day
         return {"id": item_id, "status": items.verify(s.db, ctx, item_id, s.embedder)}
+
+    @app.post("/internal/items/list")
+    def item_list(body: ItemList, ctx: Annotated[ServiceContext, Depends(token("item.list"))]) -> dict[str, Any]:
+        return reads.list_items(svc().db, ctx, status=body.status, owner_me=body.owner_me, limit=body.limit, after=body.after)
+
+    @app.post("/internal/items/{item_id}/read")
+    def item_read(item_id: str, ctx: Annotated[ServiceContext, Depends(token("item.read", "item_id"))]) -> dict[str, Any]:
+        return reads.get_item(svc().db, ctx, item_id)
+
+    @app.post("/internal/items/{item_id}/restrict")
+    def item_restrict(item_id: str, body: Restrict,
+                      ctx: Annotated[ServiceContext, Depends(token("item.restrict", "item_id"))]) -> dict[str, Any]:
+        return reads.restrict_contribution(svc().db, ctx, item_id, body.sensitivity)
 
     @app.post("/internal/items/{item_id}/reject")
     def item_reject(item_id: str, ctx: Annotated[ServiceContext, Depends(token("item.reject", "item_id"))]) -> dict[str, Any]:
@@ -374,6 +427,10 @@ def create_app(services: Services | None = None) -> FastAPI:
                                    ctx.filter, ctx.filter, on_answer(ctx))
         return r.__dict__
 
+    @app.post("/internal/interviews/{interview_id}/read")
+    def interview_read(interview_id: str, ctx: Annotated[ServiceContext, Depends(token("interview.read", "interview_id"))]) -> dict[str, Any]:
+        return interviews.read(svc().db, ctx, interview_id)
+
     @app.post("/internal/interviews/{interview_id}/status")
     def interview_status(interview_id: str, body: InterviewStatus,
                          ctx: Annotated[ServiceContext, Depends(token("interview.status", "interview_id"))]) -> dict[str, Any]:
@@ -407,6 +464,10 @@ def create_app(services: Services | None = None) -> FastAPI:
                                    department_id=body.department_id, sensitivity=body.sensitivity)
         return {"id": q["id"], "status": q["status"], "expires_at": q["expires_at"].isoformat()}
 
+    @app.post("/internal/expert-questions/list")
+    def eq_list(body: QuestionBox, ctx: Annotated[ServiceContext, Depends(token("expert_question.list"))]) -> dict[str, Any]:
+        return reads.list_expert_questions(svc().db, ctx, box=body.box, limit=body.limit)
+
     @app.post("/internal/expert-questions/{question_id}/reply")
     def eq_reply(question_id: str, body: ExpertReply,
                  ctx: Annotated[ServiceContext, Depends(token("expert_question.reply", "question_id"))]) -> dict[str, Any]:
@@ -425,6 +486,14 @@ def create_app(services: Services | None = None) -> FastAPI:
         if caller is None:
             raise Refused("ai_unavailable", 503)
         return readiness.generate(s.db, ctx, s.gateway, caller, body.kind)
+
+    @app.post("/internal/readiness/questions/list")
+    def quiz_list(body: QuizList, ctx: Annotated[ServiceContext, Depends(token("quiz.list"))]) -> dict[str, Any]:
+        return reads.list_quiz_items(svc().db, ctx, status=body.status, limit=body.limit, after=body.after)
+
+    @app.post("/internal/readiness/attempts/{attempt_id}/read")
+    def quiz_attempt_read(attempt_id: str, ctx: Annotated[ServiceContext, Depends(token("quiz.attempt_read", "attempt_id"))]) -> dict[str, Any]:
+        return reads.get_attempt(svc().db, ctx, attempt_id)
 
     @app.post("/internal/readiness/questions/{question_id}/edit")
     def quiz_edit(question_id: str, body: QuizEdit, ctx: Annotated[ServiceContext, Depends(token("quiz.edit", "question_id"))]) -> dict[str, Any]:

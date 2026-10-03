@@ -19,7 +19,7 @@ describe('config loader fails closed', () => {
     expect(() => loadConfig(testEnv({ NODE_ENV: 'production' }))).not.toThrow();
   });
 
-  const SECRETS = ['DATABASE_URL', 'SC_PEPPER_KEYRING', 'CREDENTIAL_ENC_KEYRING', 'HMAC_INDEX_KEY', 'INTERNAL_SERVICE_TOKEN'];
+  const SECRETS = ['DATABASE_URL', 'SC_PEPPER_KEYRING', 'CREDENTIAL_ENC_KEYRING', 'HMAC_INDEX_KEY', 'SERVICE_TOKEN_KEY'];
   const garbage: Array<[string, string | undefined]> = [['missing', undefined], ['empty', ''], ['whitespace', '   ']];
   for (const name of [...SECRETS, 'NODE_ENV', 'ALLOWED_ORIGINS', 'WEBAUTHN_RP_ID']) {
     it.each(garbage)(`refuses to start when ${name} is %s`, (_label, value) => {
@@ -37,7 +37,9 @@ describe('config loader fails closed', () => {
     ['pepper key is a number', { SC_PEPPER_KEYRING: JSON.stringify({ current: 'v1', keys: { v1: 12345 } }) }],
     ['encryption key not exactly 32 bytes', { CREDENTIAL_ENC_KEYRING: JSON.stringify({ current: 'k1', keys: { k1: Buffer.alloc(48, 1).toString('base64') } }) }],
     ['HMAC key too short', { HMAC_INDEX_KEY: Buffer.alloc(8, 1).toString('base64') }],
-    ['service token too short', { INTERNAL_SERVICE_TOKEN: 'short' }],
+    ['service token key too short', { SERVICE_TOKEN_KEY: 'short' }],
+    ['AI service over plain http to another host', { AI_SERVICE_URL: 'http://ai.example.test' }],
+    ['AI service URL with credentials', { AI_SERVICE_URL: 'https://user:pw@ai.example.test' }],
     ['wildcard origin', { ALLOWED_ORIGINS: '*' }],
     ['wildcard subdomain origin', { ALLOWED_ORIGINS: 'https://*.example.test' }],
     ['plain http origin', { ALLOWED_ORIGINS: 'http://app.example.test' }],
@@ -81,7 +83,7 @@ describe('config loader fails closed', () => {
   it('error messages name the variable and never contain its value', () => {
     const secretValue = 'postgres-url-with-password-S3CR3T';
     try {
-      loadConfig(testEnv({ DATABASE_URL: secretValue, INTERNAL_SERVICE_TOKEN: 'tiny-S3CR3T' }));
+      loadConfig(testEnv({ DATABASE_URL: secretValue, SERVICE_TOKEN_KEY: 'tiny-S3CR3T' }));
       expect.unreachable();
     } catch (e) {
       expect(e).toBeInstanceOf(ConfigError);
@@ -92,9 +94,9 @@ describe('config loader fails closed', () => {
 
   it('secrets do not leak when the config object is printed', () => {
     const c = loadConfig(testEnv());
-    const printed = `${JSON.stringify(c)} ${inspect(c, { depth: 10 })} ${String(c.databaseUrl)} ${`${c.internalServiceToken}`}`;
+    const printed = `${JSON.stringify(c)} ${inspect(c, { depth: 10 })} ${String(c.databaseUrl)} ${`${c.serviceTokenKey}`}`;
     expect(printed).not.toContain('local-test-app-password');
-    expect(printed).not.toContain('test-internal-service-token');
+    expect(printed).not.toContain('test-service-token-key');
     expect(printed).toContain('[redacted]');
     expect(new Secret('x').reveal()).toBe('x');
   });

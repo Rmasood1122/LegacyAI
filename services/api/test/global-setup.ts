@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { DB_URLS } from './helpers/env.ts';
 
 export default function setup(): void {
+  // The both-services CI job builds the database first and starts the AI service on it; resetting it here would cut that service off.
+  if (process.env.LEGACYAI_TEST_DB_READY === '1') return;
   const script = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'scripts', 'db-setup.mjs');
   const res = spawnSync(process.execPath, [script, 'reset'], {
     stdio: 'inherit',

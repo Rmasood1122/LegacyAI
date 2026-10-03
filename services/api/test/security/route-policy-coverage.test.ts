@@ -93,28 +93,28 @@ describe('a route cannot exist without policy metadata', () => {
 });
 
 describe('the list of routes that skip the session check is short and pinned', () => {
-  it('public = exactly these six; service-to-service = exactly this one', () => {
+  it('public = exactly these six; there are no service-to-service routes on the public API', () => {
     const routes = t.app.http.registeredRoutes();
     expect(routes.filter((r) => r.kind === 'public').map((r) => r.operationId).sort()).toEqual(
       ['enrollmentBegin', 'enrollmentComplete', 'getHealth', 'getReady', 'loginBegin', 'loginVerify']);
-    expect(routes.filter((r) => r.kind === 'service').map((r) => r.operationId)).toEqual(['internalPolicyCheck']);
+    expect(routes.every((r) => r.kind === 'public' || r.kind === 'session' || r.kind === 'gateway')).toBe(true);
     for (const r of routes.filter((x) => x.kind === 'public')) expect(r.publicReason!.length).toBeGreaterThan(20);
   });
 
-  it('every other route (40) is a session route with a permission that exists in the permission table', async () => {
+  it('every other route (113) is a session or gateway route with a permission that exists in the permission table', async () => {
     const su = await superuser();
     const known = new Set((await su.query('SELECT permission_key FROM permissions')).rows.map((r) => r.permission_key as string));
     await su.end();
-    const session = t.app.http.registeredRoutes().filter((r) => r.kind === 'session');
-    expect(session).toHaveLength(40);
+    const session = t.app.http.registeredRoutes().filter((r) => r.kind === 'session' || r.kind === 'gateway');
+    expect(session).toHaveLength(113);
     for (const r of session) expect(known.has(r.permission!), `${r.operationId} uses unknown permission ${r.permission}`).toBe(true);
   });
 
-  it('routes registered in the server == operations in openapi.yaml (47, no more, no fewer)', () => {
+  it('routes registered in the server == operations in openapi.yaml (119, no more, no fewer)', () => {
     const registered = t.app.http.registeredRoutes().map((r) => `${r.method} ${r.path}`).sort();
     const contract = [...t.app.http.contract.operations.values()].map((o) => `${o.method} ${o.path}`).sort();
     expect(registered).toEqual(contract);
-    expect(registered).toHaveLength(47);
+    expect(registered).toHaveLength(119);
     // and Fastify itself knows no route beyond those (HEAD/OPTIONS helpers aside)
     const printed = t.app.http.app.printRoutes({ commonPrefix: false });
     expect(printed).not.toMatch(/rogue/);
