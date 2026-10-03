@@ -2,7 +2,7 @@
 
 **Checked on:** 2026-10-02. Every version below was read from the package registry or the vendor's own page on that date, then cross-checked with a second source. Nothing here is from memory.
 
-A CI check (`scripts/check-dependencies-doc.mjs`) fails if `services/api/package.json` or `services/ai/requirements*.txt` contains a dependency — or a version — that is not written in this file.
+A CI check (`scripts/check-dependencies-doc.mjs`) fails if `services/api/package.json`, `web/package.json` or `services/ai/requirements*.txt` contains a dependency — or a version — that is not written in this file.
 
 ## How to read this file
 
@@ -275,3 +275,63 @@ Not needed after all: a multipart upload library for the API — uploads are sen
 10. Whether a 50-page text PDF parses, redacts and chunks inside one upload request (measured in CI).
 11. Whether Neon's console role can create the `vector` extension and the `legacyai_ai` role as the setup script expects.
 12. The price of backup storage beyond the free 5 GB (not re-read).
+
+## 10. Web application (`web/`) — Phase 3a
+
+**Checked on:** 2026-10-03. MEASURED for every row: `https://registry.npmjs.org/<package>` (publish dates, licence, peer dependencies).
+The maturity rule is applied to the **major** version, as everywhere in this file. The pins are the ones the founder approved in
+`docs/phase3/00-proposal.md` (the newest release that was itself at least 60 days old on the day of the proposal), which is stricter
+than the rule requires.
+
+### Runtime dependencies (5) — this is all the third-party code that runs in the browser
+
+| Package | Version | Evidence | Why |
+|---|---|---|---|
+| react | **19.0.8** (2026-07-21) | MEASURED: major 19 public since 2024-12-05; latest 19.3.0 (2026-09-09); MIT | Renders the screens. Escapes text by default, which is the main defence against script injection. |
+| react-dom | **19.0.8** (2026-07-21) | MEASURED: peer `react ^19.0.8`; MIT | React's browser part. |
+| react-router | **7.18.2** (2026-07-28) | MEASURED: major 7 since 2024-11-22; 8.0.0 was published 2026-06-17 and passes the 60-day rule, 8.4.0 is the latest; MIT | Screen addresses. Major 7 kept as approved in the proposal; moving to 8 is a later, separate change. |
+| @tanstack/react-query | **5.101.4** (2026-07-21) | MEASURED: major 5 since 2023-10-17; latest 5.104.1; peer `react ^18 or ^19`; MIT | Loading and refreshing data from the API. |
+| @simplewebauthn/browser | **13.3.0** (2026-03-10) | MEASURED: major 13 since 2024-12-09; 14.0.0 was published 2026-09-02 (31 days) → maturity rule; MIT | Passkeys in the browser. Same major as the server's `@simplewebauthn/server` 13.3.3. |
+
+### Development dependencies (17)
+
+| Package | Version | Evidence | Why |
+|---|---|---|---|
+| `typescript` (web) | **6.0.3** | see section 1 | Same as the API. |
+| vite | **8.2.0** (2026-07-30) | MEASURED: major 8 since 2026-03-12; latest 8.3.2 (2026-10-01); needs Node ^20.19 or >=22.12; MIT | Builds the application into plain files. |
+| @vitejs/plugin-react | **6.0.5** (2026-07-30) | MEASURED: major 6 since 2026-03-12; peer `vite ^8`; MIT | React support for the build tool. |
+| `vitest` (web) | **4.1.11** | see section 2; peer `vite ^6, ^7 or ^8` | Unit tests. Same version as the API. |
+| jsdom | **30.0.1** (2026-07-29) | MEASURED: major 30 since 2026-07-27 (68 days); latest 30.1.1; engines `^24.15.0`; MIT | A browser-like environment for unit tests. NOTE: the founder's machine has Node 24.14.1, slightly below the stated minimum; the 44 unit tests pass there. CI uses the current Node 24. |
+| @testing-library/react | **16.3.2** (2026-01-19) | MEASURED: major 16 since 2024-06-03; MIT | Tests screens the way a person uses them (by label and role). |
+| @testing-library/dom | **10.4.1** (2025-07-27) | MEASURED: required peer of @testing-library/react (`^10.0.0`); MIT | |
+| @testing-library/user-event | **14.6.3** (2026-08-03) | MEASURED: major 14 since 2022-03-29; latest 14.6.7; MIT | Simulates typing and clicking. |
+| @playwright/test | **1.62.1** (2026-07-30) | MEASURED: latest 1.63.0 (2026-09-04); Apache-2.0 | Browser tests in CI (Chromium). |
+| playwright-core | **1.62.1** | MEASURED: pinned explicitly so that @axe-core/playwright uses the same copy as @playwright/test (npm otherwise installs 1.63.0 beside it and the types clash) | |
+| @axe-core/playwright | **4.12.1** (2026-06-23) | MEASURED: major 4 since 2021-06-23; latest 4.13.0; MPL-2.0 (a test tool, not shipped) | Automated accessibility scan in the browser tests. |
+| `eslint` (web) | **10.11.0** | see section 2 | Lint, including the rules "only the API client talks to the network", "no browser storage", "no inline style or raw HTML". |
+| `typescript-eslint` (web) | **8.71.0** | see section 2 | |
+| @types/react | **19.0.14** (2025-04-02) | MEASURED: newest 19.0.x; MIT | Types. |
+| @types/react-dom | **19.0.6** (2025-04-02) | MEASURED: newest 19.0.x; MIT | Types. |
+| `@types/node` (web) | **24.19.0** | see section 2 | Types for the build and test scripts. |
+| `yaml` (web) | **2.9.1** | see section 2 | Reads `openapi.yaml` in the type generator. |
+
+### Decision: our own type generator instead of `openapi-typescript`
+
+The proposal named `openapi-typescript` 7.13.0. MEASURED: its peer dependency is `typescript ^5.x`; the repository uses TypeScript 6.0.3
+(section 1), so installing it would need npm's `--legacy-peer-deps` override. Instead `web/scripts/generate-api.mjs` (about 130 lines, uses
+only `yaml`) writes `web/src/api/generated.ts` from `services/api/openapi.yaml`. It stops with an error on any construct it does not
+know, and CI fails if the committed file differs from the contract.
+
+### GitHub Action added
+
+| Action | Pin | Evidence |
+|---|---|---|
+| actions/upload-artifact | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` (v7.0.1) | MEASURED 2026-10-03: `git ls-remote --tags https://github.com/actions/upload-artifact` |
+
+### Not verified
+
+- ASSUMPTION: Chromium accepts the session cookie (`__Host-` prefix, `Secure`) from `http://localhost` in the CI browser tests. Chromium
+  treats localhost as a secure context; if this turns out wrong the browser-test job fails at the first sign-in.
+- ASSUMPTION: the pinned versions work together in the Linux CI image; locally (Windows, Node 24.14.1) install, type-check, lint,
+  44 unit tests and the build pass.
+

@@ -163,6 +163,109 @@ jobs:
         if: failure()
         run: tail -n 120 ai-service.log
 
+  web:
+    name: Web application - type-check, lint, unit tests, build, contract types, audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      - name: The generated API types match openapi.yaml
+        run: EVIDENCE='api-types:' bash ../scripts/ci-run.sh "web - API types match the contract" npm run generate:check
+      - name: Type-check (TypeScript strict)
+        run: npm run typecheck
+      - name: Lint (only the API client talks to the network; no browser storage; no inline style or raw HTML)
+        run: npm run lint
+      - name: Lint rules really fire (deliberate violations must be rejected)
+        run: EVIDENCE='web-lint-selftest:' bash ../scripts/ci-run.sh "web - lint self-test" node scripts/lint-selftest.mjs
+      - name: Unit tests (API client and every screen's main states; no network)
+        run: EVIDENCE='Test Files|Tests ' bash ../scripts/ci-run.sh "web - unit tests" npm test
+      - name: Build, and check the built page fits the strict browser policy
+        run: EVIDENCE='web-build:|built in' bash ../scripts/ci-run.sh "web - build" npm run build
+      - name: npm audit - what runs in the browser, fail on high or critical
+        run: EVIDENCE='ulnerabilit' bash ../scripts/ci-run.sh "web - npm audit (runtime dependencies)" npm audit --omit=dev --audit-level=high
+      - name: npm audit - all dependencies (reported; does not fail the build)
+        run: npm audit || true
+
+  web-e2e:
+    name: Web - browser tests against the real API and AI service (fake AI only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            services/api/package-lock.json
+            web/package-lock.json
+      - run: pip install -r services/ai/requirements.txt
+      - name: Build the web application and install the test browser
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+          npx playwright install --with-deps chromium
+      - name: Start PostgreSQL 18 and build the schema
+        working-directory: services/api
+        run: |
+          npm ci
+          docker compose -f ../../docker-compose.yml up -d --wait
+          node ../../scripts/db-setup.mjs reset
+      - name: Start the AI service (fake provider, fake embedder; test-only key)
+        working-directory: services/ai
+        env:
+          ENVIRONMENT: test
+          AI_PROVIDER: fake
+          EMBEDDER: fake
+          DATABASE_URL: ${{ env.DATABASE_URL_AI }}
+          SERVICE_TOKEN_KEY: test-service-token-key-0123456789abcdef
+        run: |
+          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8090 > ../../ai-service.log 2>&1 &
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8090/health && exit 0; sleep 1; done
+          cat ../../ai-service.log; exit 1
+      - name: Start the API serving the built web application, with one synthetic company
+        working-directory: services/api
+        env:
+          WEB_DIST_DIR: ../../web/dist
+          AI_SERVICE_URL_REAL: http://127.0.0.1:8090
+        run: |
+          nohup node test/e2e/server.ts > ../../e2e-server.log 2>&1 &
+          for i in $(seq 1 120); do curl -fsS http://127.0.0.1:8788/health && exit 0; sleep 1; done
+          cat ../../e2e-server.log; exit 1
+      - name: Browser tests - sign-in, set-up, documents, ask, write and verify, review queue, consent, permissions, accessibility scan
+        working-directory: web
+        run: EVIDENCE='passed|failed|flaky|skipped' bash ../scripts/ci-run.sh "web - browser tests" npx playwright test
+      - name: Keep the screenshots and the test report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: web-browser-tests
+          path: |
+            web/e2e-artifacts
+            web/playwright-report
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Server logs (on failure)
+        if: failure()
+        run: |
+          tail -n 80 e2e-server.log || true
+          tail -n 80 ai-service.log || true
+
   dependency-audit:
     name: Dependency vulnerability audit (npm) and dependency record
     runs-on: ubuntu-24.04

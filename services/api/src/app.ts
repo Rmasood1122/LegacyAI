@@ -6,7 +6,7 @@ import { createIdentityAccess, type AuthLimits, type IdentityAccess } from './mo
 import { createKnowledgeGateway } from './modules/knowledge-gateway/index.ts';
 import {
   createHttpServer, createLogger, Database, ExportRegistry, LogNotifier, platformRoutes, PostgresIdempotencyStore,
-  PostgresRateLimiter, type Config, type HttpServer, type Logger, type Notifier, type RateLimiter,
+  PostgresRateLimiter, StaticSite, type Config, type HttpServer, type Logger, type Notifier, type RateLimiter,
 } from './modules/platform/index.ts';
 import { systemClock, type Clock } from './shared/clock.ts';
 
@@ -34,6 +34,8 @@ export const CONTRACT_PATH = path.resolve(here, '..', 'openapi.yaml');
 
 export async function createApp(config: Config, overrides: AppOverrides = {}): Promise<App> {
   const log = overrides.logger ?? createLogger(config.logLevel);
+  // Read before anything is opened: a folder that is not a usable web build stops start-up.
+  const staticSite = config.webDistDir === null ? undefined : StaticSite.load(config.webDistDir);
   const db = new Database(config.databaseUrl.reveal(), config.dbPoolMax);
 
   // Refuse to run with a database role that could bypass tenant isolation.
@@ -60,7 +62,7 @@ export async function createApp(config: Config, overrides: AppOverrides = {}): P
 
   const http = await createHttpServer({
     config, db, log, clock, auth: identity.authPort, rateLimiter, idempotency: new PostgresIdempotencyStore(),
-    contractPath: CONTRACT_PATH, generalLimit: overrides.generalLimit,
+    contractPath: CONTRACT_PATH, generalLimit: overrides.generalLimit, staticSite,
   });
   http.defineRoutes(platformRoutes({ config, db, exports }));
   http.defineRoutes(identity.routes);

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Fails if a dependency in services/api/package.json or services/ai/requirements*.txt is
+// Fails if a dependency in services/api/package.json, web/package.json or services/ai/requirements*.txt is
 // not recorded (name AND exact version) in docs/DEPENDENCIES.md. Keeps the "verify before
 // choosing" record honest: nothing gets added or bumped without being written down.
 import { readFileSync } from 'node:fs';
@@ -9,16 +9,19 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const doc = readFileSync(path.join(root, 'docs', 'DEPENDENCIES.md'), 'utf8');
 const pkg = JSON.parse(readFileSync(path.join(root, 'services', 'api', 'package.json'), 'utf8'));
+const webPkg = JSON.parse(readFileSync(path.join(root, 'web', 'package.json'), 'utf8'));
 const lines = doc.split('\n');
 // Name and exact version must appear on the SAME line (table row) of the record.
 const recorded = (name, version) => lines.some((l) => (l.includes(`| ${name} |`) || l.includes(`\`${name}\``) || l.toLowerCase().includes(`| ${name.toLowerCase()} `)) && l.includes(version));
 const missing = [];
 let checked = 0;
 
-for (const [name, version] of Object.entries({ ...pkg.dependencies, ...pkg.devDependencies })) {
-  checked += 1;
-  if (!/^\d+\.\d+\.\d+$/.test(version)) missing.push(`${name}: version "${version}" is not pinned exactly`);
-  else if (!recorded(name, version)) missing.push(`${name}@${version}`);
+for (const [where, deps] of [['services/api', { ...pkg.dependencies, ...pkg.devDependencies }], ['web', { ...webPkg.dependencies, ...webPkg.devDependencies }]]) {
+  for (const [name, version] of Object.entries(deps)) {
+    checked += 1;
+    if (!/^\d+\.\d+\.\d+$/.test(version)) missing.push(`${where}: ${name}: version "${version}" is not pinned exactly`);
+    else if (!recorded(name, version)) missing.push(`${where}: ${name}@${version}`);
+  }
 }
 for (const file of ['requirements.txt', 'requirements-dev.txt']) {
   for (const line of readFileSync(path.join(root, 'services', 'ai', file), 'utf8').split('\n')) {

@@ -24,6 +24,7 @@ import type { Config } from './config.ts';
 import type { Database, Tx } from './db.ts';
 import type { Logger } from './logger.ts';
 import { loadContract, validationErrors, type Contract, type Operation } from './openapi.ts';
+import { WEB_APP_CSP, type StaticSite } from './static-site.ts';
 import { hashRequest, type IdempotencyStore, type RateLimiter } from './support.ts';
 
 export const SESSION_COOKIE = '__Host-lai_session';
@@ -106,6 +107,8 @@ export interface HttpDeps {
   contractPath: string;
   /** Per-IP limit on all endpoints. Tests override it; production uses the default. */
   generalLimit?: { limit: number; windowSeconds: number };
+  /** The web application's files. Absent = the API serves no files at all. See static-site.ts. */
+  staticSite?: StaticSite;
 }
 
 export interface RegisteredRoute {
@@ -174,9 +177,12 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
   // any other operation refuses a non-JSON body in validateRequest.
   app.addContentTypeParser(['application/pdf', 'text/plain', 'text/markdown'], { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
 
+  const staticReplies = new WeakSet<FastifyReply>();
   app.addHook('onSend', async (req, reply) => {
     reply.header('x-request-id', req.id);
-    reply.header('cache-control', 'no-store');
+    // API answers are never cached, whatever a handler set. The ONLY exception is a reply the
+    // static-file handler below produced, which it marks explicitly.
+    if (!staticReplies.has(reply)) reply.header('cache-control', 'no-store');
   });
   app.addHook('onResponse', async (req, reply) => {
     req.log.info({
@@ -190,7 +196,18 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
     return reply.status(err.status).type('application/problem+json').send(problemBody(err, req.id));
   };
 
-  app.setNotFoundHandler((req, reply) => sendProblem(req, reply, problems.notFound()));
+  // Nothing matched an API route. The only other thing this server may send is a file of the web
+  // application (never under /v1, GET and HEAD only, only files read at start-up).
+  app.setNotFoundHandler((req, reply) => {
+    const asset = deps.staticSite?.resolve(req.method, req.url) ?? null;
+    if (asset === null) return sendProblem(req, reply, problems.notFound());
+    staticReplies.add(reply);
+    return reply.status(200)
+      .header('content-security-policy', WEB_APP_CSP)
+      .header('cache-control', asset.cacheControl)
+      .type(asset.contentType)
+      .send(req.method === 'HEAD' ? undefined : asset.body);
+  });
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof ProblemError) return sendProblem(req, reply, err);
     // Two requests that lock the same rows in opposite order: PostgreSQL aborts one of them.

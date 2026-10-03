@@ -25,5 +25,6 @@ export {
   type AuthPort, type GatewayCallArgs, type GatewayPrepared, type HandlerResult, type HttpDeps, type HttpServer, type PublicHandlerArgs,
   type RegisteredRoute, type RouteDef, type SessionHandlerArgs,
 } from './internal/http.ts';
+export { StaticSite, StaticSiteError, WEB_APP_CSP, type StaticAsset } from './internal/static-site.ts';
 export { loadContract, type Contract, type Operation } from './internal/openapi.ts';
 export { decodeCursor, encodeCursor, platformRoutes } from './internal/routes.ts';

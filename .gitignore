@@ -40,3 +40,8 @@ services/ai/.venv/
 
 # evaluation results are written here by the runner; EVALUATION.md is the kept record
 services/ai/eval/out/
+
+# web application
+web/playwright-report/
+web/test-results/
+web/e2e-artifacts/

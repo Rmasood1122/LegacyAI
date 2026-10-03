@@ -55,6 +55,8 @@ export interface Config {
   trustProxyHops: number;
   validateResponses: boolean;
   exportDir: string;
+  /** Folder holding the built web application. null = the API serves no files. */
+  webDistDir: string | null;
 }
 
 export class ConfigError extends Error {
@@ -275,6 +277,7 @@ export function loadConfig(env: Env): Config {
     trustProxyHops: raw('TRUST_PROXY') === 'false' ? 0 : integer('TRUST_PROXY', 0, 0, 5),
     validateResponses: bool('VALIDATE_RESPONSES', nodeEnv !== 'production'),
     exportDir: raw('EXPORT_DIR') ?? './exports',
+    webDistDir: raw('WEB_DIST_DIR') ?? null,
   };
 
   // The placeholder keys from .env.example decode to text starting with "FAKE-". They must
