@@ -197,3 +197,28 @@ describe('idempotency replay never stores one-time secrets', () => {
     expect(stripOneTimeSecrets(null)).toBeNull();
   });
 });
+
+describe('grouped secrets (docs/phase2/01, "Secrets: five")', () => {
+  it('the three API keys may arrive as one JSON value, API_KEYRINGS', () => {
+    const env = testEnv();
+    const bundled = testEnv({
+      SC_PEPPER_KEYRING: undefined, CREDENTIAL_ENC_KEYRING: undefined, HMAC_INDEX_KEY: undefined,
+      API_KEYRINGS: JSON.stringify({ SC_PEPPER_KEYRING: env.SC_PEPPER_KEYRING, CREDENTIAL_ENC_KEYRING: env.CREDENTIAL_ENC_KEYRING, HMAC_INDEX_KEY: env.HMAC_INDEX_KEY }),
+    });
+    const a = loadConfig(env);
+    const b = loadConfig(bundled);
+    expect(b.hmacIndexKey.reveal().equals(a.hmacIndexKey.reveal())).toBe(true);
+    expect(b.scPepper.currentId).toBe(a.scPepper.currentId);
+  });
+
+  it('a malformed or unexpected bundle stops the service', () => {
+    expect(() => loadConfig(testEnv({ API_KEYRINGS: '{not json' }))).toThrow(ConfigError);
+    expect(() => loadConfig(testEnv({ API_KEYRINGS: JSON.stringify({ DATABASE_URL: 'postgres://x' }) }))).toThrow(ConfigError);
+  });
+
+  it('the AI service identity mode is none unless the cloud asks for Google identity tokens', () => {
+    expect(loadConfig(testEnv()).aiServiceIdentity).toBe('none');
+    expect(loadConfig(testEnv({ AI_SERVICE_IDENTITY: 'google-metadata' })).aiServiceIdentity).toBe('google-metadata');
+    expect(() => loadConfig(testEnv({ AI_SERVICE_IDENTITY: 'anything' }))).toThrow(ConfigError);
+  });
+});

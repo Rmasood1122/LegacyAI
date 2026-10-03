@@ -81,7 +81,11 @@ export class AiServiceClient {
   readonly #key: Uint8Array;
   readonly #ops: ContractOperation[];
 
-  constructor(baseUrl: string, timeoutMs: number, key: Secret, contract: ContractOperation[]) {
+  readonly #identity: 'none' | 'google-metadata';
+  #idToken: { value: string; until: number } | null = null;
+
+  constructor(baseUrl: string, timeoutMs: number, key: Secret, contract: ContractOperation[], identity: 'none' | 'google-metadata' = 'none') {
+    this.#identity = identity;
     this.#baseUrl = baseUrl;
     this.#timeoutMs = timeoutMs;
     this.#key = new TextEncoder().encode(key.reveal());
@@ -103,6 +107,16 @@ export class AiServiceClient {
       .sign(this.#key);
   }
 
+  /** Google identity token for Cloud Run's own check (cached; such tokens live about an hour). */
+  async #googleIdToken(): Promise<string> {
+    if (this.#idToken && this.#idToken.until > Date.now()) return this.#idToken.value;
+    const url = `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=${encodeURIComponent(this.#baseUrl)}`;
+    const res = await fetch(url, { headers: { 'Metadata-Flavor': 'Google' }, signal: AbortSignal.timeout(5_000) });
+    if (!res.ok) throw new ProblemError(502, 'ai-service-error', 'The knowledge service did not answer');
+    this.#idToken = { value: (await res.text()).trim(), until: Date.now() + 45 * 60_000 };
+    return this.#idToken.value;
+  }
+
   async call<T = Record<string, unknown>>(c: AiCall): Promise<T> {
     const method = c.method ?? 'POST';
     const op = this.#ops.find((o) => o.method === method && o.pattern.test(c.path));
@@ -113,6 +127,13 @@ export class AiServiceClient {
 
     const token = await this.#token(c.action, c.subject, c.claims);
     const headers: Record<string, string> = { authorization: `Bearer ${token}`, 'x-request-id': c.claims.request_id };
+    if (this.#identity === 'google-metadata') {
+      try {
+        headers['x-serverless-authorization'] = `Bearer ${await this.#googleIdToken()}`;
+      } catch {
+        throw new ProblemError(502, 'ai-service-error', 'The knowledge service did not answer');
+      }
+    }
     let body: string | Buffer | undefined;
     if (c.bytes) {
       headers['content-type'] = c.bytes.contentType;

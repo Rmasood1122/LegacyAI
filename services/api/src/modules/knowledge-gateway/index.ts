@@ -30,7 +30,7 @@ export interface KnowledgeGateway {
 
 export function createKnowledgeGateway(deps: KnowledgeGatewayDeps): KnowledgeGateway {
   const ai = new AiServiceClient(deps.config.aiServiceUrl, deps.config.aiServiceTimeoutMs, deps.config.serviceTokenKey,
-    loadInternalContract(INTERNAL_CONTRACT_PATH));
+    loadInternalContract(INTERNAL_CONTRACT_PATH), deps.config.aiServiceIdentity);
   // The policy decision point needs two of this module's settings; it is given a way to read them.
   deps.authorizer.useKnowledgeSettings(knowledgePolicySettings);
   const g = { db: deps.db, authorizer: deps.authorizer, ai, notifier: deps.notifier };

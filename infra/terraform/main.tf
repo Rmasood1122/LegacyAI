@@ -5,7 +5,7 @@
 #     CPU only allocated while a request is being handled.
 #   - Artifact Registry: old images deleted automatically (0.5 GB free).
 #   - Buckets: us-central1, Standard class, automatic deletion of old backups (5 GB free).
-#   - Secrets: exactly 6 (the free allowance is 6 active versions).
+#   - Secrets: exactly 5 (the free allowance is 6 active versions; Phase 2 regrouped them).
 #   - Scheduler: 2 jobs (3 are free per billing account).
 #   - A budget alert. An alert is an email - it does NOT stop spending.
 
@@ -25,17 +25,20 @@ locals {
   ]
 
   # Names only. Terraform never sees a secret VALUE: you add values by hand.
+  # Phase 2 (docs/phase2/01, "Secrets: five"): the three API keys are one JSON value, and the AI service
+  # gets one JSON value of its own (its database login; after Gate 2 also the AI provider key).
   secrets = {
-    database-url           = "Connection string for the app role (legacyai_app). No superuser, no BYPASSRLS."
-    database-url-admin     = "Connection string for BACKUPS: a role that can read every tenant. NOT mounted into the API."
-    sc-pepper-keyring      = "JSON keyring: pepper for the 3-digit secret code."
-    credential-enc-keyring = "JSON keyring: encrypts authenticator-app seeds."
-    hmac-index-key         = "Key for one-way fingerprints of IPs and card numbers."
-    internal-service-token = "Shared secret for service-to-service calls."
+    database-url       = "Connection string for the app role (legacyai_app). No superuser, no BYPASSRLS."
+    database-url-admin = "Connection string for BACKUPS: a role that can read every tenant. NOT mounted into the API."
+    api-keyrings       = "JSON: SC_PEPPER_KEYRING, CREDENTIAL_ENC_KEYRING, HMAC_INDEX_KEY."
+    service-token-key  = "Signs the 60-second tokens the API gives the AI service. Read by the API and the AI service."
+    ai-service-config  = "JSON for the AI service: DATABASE_URL (legacyai_ai login); after Gate 2 also AI_PROVIDER_KEY."
   }
 
-  # The API may read these five. It must never see the admin connection string.
-  api_secrets = ["database-url", "sc-pepper-keyring", "credential-enc-keyring", "hmac-index-key", "internal-service-token"]
+  # The API may read these three. It must never see the admin connection string or the AI service's config.
+  api_secrets = ["database-url", "api-keyrings", "service-token-key"]
+  # The AI service may read these two.
+  ai_secrets = ["service-token-key", "ai-service-config"]
 
   registry = "${var.primary_region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.containers.repository_id}"
 
@@ -162,6 +165,14 @@ resource "google_secret_manager_secret_iam_member" "backup_reads_admin_url" {
   member    = "serviceAccount:${google_service_account.backup.email}"
 }
 
+resource "google_secret_manager_secret_iam_member" "ai_reads" {
+  for_each  = toset(local.ai_secrets)
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.secret[each.value].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.ai.email}"
+}
+
 # The anchor job connects exactly like the API (app role, row-level security on).
 resource "google_secret_manager_secret_iam_member" "anchor_reads" {
   for_each  = toset(local.api_secrets)
@@ -245,8 +256,9 @@ resource "google_cloud_run_v2_service" "api" {
   deletion_protection = true
 
   template {
+    # An answer may wait for the AI service (docs/phase2/01, "Runtime settings").
     service_account                  = google_service_account.api.email
-    timeout                          = "30s"
+    timeout                          = "60s"
     max_instance_request_concurrency = 40
 
     scaling {
@@ -306,40 +318,32 @@ resource "google_cloud_run_v2_service" "api" {
         }
       }
       env {
-        name = "SC_PEPPER_KEYRING"
+        name = "API_KEYRINGS"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.secret["sc-pepper-keyring"].secret_id
+            secret  = google_secret_manager_secret.secret["api-keyrings"].secret_id
             version = "latest"
           }
         }
       }
       env {
-        name = "CREDENTIAL_ENC_KEYRING"
+        name = "SERVICE_TOKEN_KEY"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.secret["credential-enc-keyring"].secret_id
+            secret  = google_secret_manager_secret.secret["service-token-key"].secret_id
             version = "latest"
           }
         }
       }
       env {
-        name = "HMAC_INDEX_KEY"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.secret["hmac-index-key"].secret_id
-            version = "latest"
-          }
-        }
+        # The AI service of the same region. Not a secret: it refuses anyone without both a Google
+        # identity token of the API's account and a service token signed with SERVICE_TOKEN_KEY.
+        name  = "AI_SERVICE_URL"
+        value = google_cloud_run_v2_service.ai[each.key].uri
       }
       env {
-        name = "INTERNAL_SERVICE_TOKEN"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.secret["internal-service-token"].secret_id
-            version = "latest"
-          }
-        }
+        name  = "AI_SERVICE_IDENTITY"
+        value = "google-metadata"
       }
 
       # Liveness never touches the database, so health checks cannot wake Neon and burn free compute.
@@ -369,21 +373,22 @@ resource "google_cloud_run_v2_service_iam_member" "api_public" {
   member   = "allUsers"
 }
 
-# NOTE (Phase 2): with internal-only ingress, the API can reach this service only if the
-# API's outbound traffic goes through a VPC (Direct VPC egress), which is NOT configured
-# here because it must be costed first. In Phase 1 nothing calls the AI stub, so it is
-# deliberately unreachable from outside. Decide the networking when Phase 2 starts.
+# Phase 2 (docs/phase2/01, option A): the AI service accepts traffic from the internet ONLY with a Google
+# identity token of an account holding run.invoker - the API's, and nobody else's (no allUsers). The API
+# sends that token in X-Serverless-Authorization and its own 60-second service token in Authorization.
+# This avoids a private network (Direct VPC egress would need Cloud NAT or a private DNS zone: not $0).
 resource "google_cloud_run_v2_service" "ai" {
   for_each            = local.service_regions
   project             = var.project_id
   name                = "legacyai-ai-${each.key}"
   location            = each.value
-  ingress             = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  ingress             = "INGRESS_TRAFFIC_ALL"
   deletion_protection = true
 
   template {
+    # Parsing, redaction and embedding of an upload happen inside one request.
     service_account                  = google_service_account.ai.email
-    timeout                          = "30s"
+    timeout                          = "120s"
     max_instance_request_concurrency = 20
 
     scaling {
@@ -398,16 +403,61 @@ resource "google_cloud_run_v2_service" "ai" {
         container_port = 8080
       }
 
+      # Memory: redaction model + PDF parsing + local embedding model. ASSUMPTION until measured (docs/phase2/01).
       resources {
         limits = {
           cpu    = "1"
-          memory = "512Mi"
+          memory = "1Gi"
         }
         cpu_idle          = true
         startup_cpu_boost = false
       }
+
+      env {
+        name  = "ENVIRONMENT"
+        value = "production"
+      }
+      env {
+        # "fake" until Gate 2. The real provider is switched on only after the owner supplies a key with a hard spending limit.
+        name  = "AI_PROVIDER"
+        value = var.ai_provider
+      }
+      env {
+        name  = "AI_KILL_SWITCH"
+        value = var.ai_kill_switch ? "true" : "false"
+      }
+      env {
+        name = "SERVICE_TOKEN_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["service-token-key"].secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "AI_SERVICE_CONFIG"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.secret["ai-service-config"].secret_id
+            version = "latest"
+          }
+        }
+      }
+
+      startup_probe {
+        initial_delay_seconds = 0
+        timeout_seconds       = 3
+        period_seconds        = 5
+        failure_threshold     = 12
+        http_get {
+          path = "/health"
+        }
+      }
     }
   }
+
+  depends_on = [google_secret_manager_secret_iam_member.ai_reads]
 }
 
 # Only the API may call the AI service.
@@ -516,14 +566,17 @@ resource "google_cloud_run_v2_job" "anchor" {
           name  = "WEBAUTHN_RP_ID"
           value = var.webauthn_rp_id
         }
+        env {
+          # The anchor job never calls the AI service; the shared configuration still requires an address.
+          name  = "AI_SERVICE_URL"
+          value = "https://ai-not-used-by-this-job.invalid"
+        }
 
         dynamic "env" {
           for_each = {
-            DATABASE_URL           = "database-url"
-            SC_PEPPER_KEYRING      = "sc-pepper-keyring"
-            CREDENTIAL_ENC_KEYRING = "credential-enc-keyring"
-            HMAC_INDEX_KEY         = "hmac-index-key"
-            INTERNAL_SERVICE_TOKEN = "internal-service-token"
+            DATABASE_URL      = "database-url"
+            API_KEYRINGS      = "api-keyrings"
+            SERVICE_TOKEN_KEY = "service-token-key"
           }
           content {
             name = env.key

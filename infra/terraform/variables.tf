@@ -157,3 +157,19 @@ variable "github_repository" {
   type        = string
   default     = ""
 }
+
+variable "ai_provider" {
+  description = "AI provider for the AI service. \"fake\" until Gate 2; a real provider also needs AI_PROVIDER_KEY in the ai-service-config secret."
+  type        = string
+  default     = "fake"
+  validation {
+    condition     = contains(["fake", "anthropic", "openai"], var.ai_provider)
+    error_message = "ai_provider must be fake, anthropic or openai."
+  }
+}
+
+variable "ai_kill_switch" {
+  description = "Stops every AI call at the AI service (search keeps working). The operator can also flip it in the database."
+  type        = bool
+  default     = false
+}

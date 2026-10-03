@@ -20,7 +20,17 @@ default_of() { block "$vars" "^variable \"$1\"" | sed -n 's/^ *default *= *\(.*\
 [ "$(count '^ *max_instance_count *=')" -eq 2 ] || fail "unexpected number of max_instance_count settings"
 [ "$(count '^ *cpu_idle *= *true$')" -eq 2 ] || fail "both services must use request-based billing (cpu_idle = true)"
 [ "$(count '^ *cpu_idle *= *false$')" -eq 0 ] || fail "a service has always-allocated CPU"
-[ "$(count 'ingress *= *"INGRESS_TRAFFIC_INTERNAL_ONLY"')" -eq 1 ] || fail "the AI service must be internal-only"
+# The AI service (Phase 2, option A): reachable only with a Google identity token of the API's account.
+ai_block="$(block "$code" '^resource "google_cloud_run_v2_service" "ai"')"
+printf '%s\n' "$ai_block" | grep -Eq 'ingress *= *"INGRESS_TRAFFIC_(ALL|INTERNAL_ONLY)"' || fail "the AI service has no explicit ingress"
+[ "$(count 'member *= *"allUsers"')" -eq 1 ] || fail "exactly one public invoker (the API) is allowed; the AI service must never be public"
+printf '%s\n' "$(block "$code" '^resource "google_cloud_run_v2_service_iam_member" "api_public"')" | grep -q '"allUsers"' \
+  || fail "the only allUsers invoker must be the API's"
+printf '%s\n' "$(block "$code" '^resource "google_cloud_run_v2_service_iam_member" "ai_invoked_by_api"')" \
+  | grep -q 'member *= *"serviceAccount:${google_service_account.api.email}"' || fail "only the API's account may invoke the AI service"
+[ "$(count '^resource "google_cloud_run_v2_service_iam_member" ')" -eq 2 ] || fail "unexpected invoker bindings on the services"
+printf '%s\n' "$ai_block" | grep -Eq 'memory *= *"(512Mi|1Gi)"' || fail "the AI service memory must stay at or below 1Gi"
+printf '%s\n' "$ai_block" | grep -Eq 'value *= *var\.ai_provider$' || fail "the AI provider must come from var.ai_provider"
 api_max="$(default_of api_max_instances)"
 case "$api_max" in 1|2|3) ;; *) fail "api_max_instances default must be 1, 2 or 3 (found '$api_max')" ;; esac
 
@@ -28,6 +38,8 @@ case "$api_max" in 1|2|3) ;; *) fail "api_max_instances default must be 1, 2 or 
 for flag in deploy_services lock_audit_anchor_retention enable_ci_deploy; do
   [ "$(default_of "$flag")" = "false" ] || fail "variable $flag must default to false"
 done
+# No real AI provider until the owner has supplied a key with a hard spending limit (Gate 2).
+[ "$(default_of ai_provider)" = '"fake"' ] || fail "ai_provider must default to fake"
 
 # Budget alert, buckets, secrets.
 [ "$(count '^resource "google_billing_budget"')" -eq 1 ] || fail "no budget alert"
@@ -39,17 +51,17 @@ buckets="$(count '^resource "google_storage_bucket" ')"
 [ "$(count '^ *location *= *var\.primary_region$')" -ge "$buckets" ] || fail "buckets must be in the primary (free-allowance) region"
 [ "$(default_of primary_region)" = '"us-central1"' ] || fail "primary_region must default to us-central1 (free Cloud Storage allowance)"
 secrets="$(block "$code" '^  secrets = [{]' '^  [}]' | grep -Ec '^ +[a-z-]+ += +"')"
-[ "$secrets" -eq 6 ] || fail "expected exactly 6 secrets (the free allowance), found $secrets"
+[ "$secrets" -eq 5 ] || fail "expected exactly 5 secrets (inside the free 6), found $secrets"
 [ "$(count '^resource "google_cloud_scheduler_job" ')" -le 3 ] || fail "more than 3 scheduler jobs (only 3 are free)"
 
 # Terraform must never hold a secret VALUE, and nothing always-on or billable-by-the-hour may be added.
 if grep -Eq 'secret_data|google_secret_manager_secret_version' ./*.tf; then fail "Terraform must never hold a secret VALUE"; fi
 # A secret-ish name assigned a literal with no spaces (descriptions have spaces; the six secret NAMES are allowed).
 if printf '%s\n%s\n' "$code" "$vars" | grep -Ei '(password|pepper|token|keyring|secret|_key)[a-z_-]* *= *"[^" $]{12,}"' \
-   | grep -Evq '= *"(database-url|database-url-admin|sc-pepper-keyring|credential-enc-keyring|hmac-index-key|internal-service-token)"'; then
+   | grep -Evq '= *"(database-url|database-url-admin|api-keyrings|service-token-key|ai-service-config)"'; then
   fail "something that looks like a secret value is written in the Terraform code"
 fi
 paid='google_sql_|google_redis_|google_compute_(instance|address|global_address|router|forwarding_rule|backend_service)|google_container_cluster|google_vpc_access_connector|google_logging_project_sink|google_alloydb_|google_memcache_|google_kms_'
 if grep -Eq "resource \"($paid)" ./*.tf; then fail "a resource that costs money while idle was added"; fi
 
-echo "terraform-guardrails: PASS (min 0 x2, max api=$api_max ai=1, request-based billing x2, budget alert, $secrets empty secrets, $buckets private buckets with retention, risky flags default to false)"
+echo "terraform-guardrails: PASS (min 0 x2, max api=$api_max ai=1, request-based billing x2, AI service invokable only by the API, AI memory <= 1Gi, fake AI provider by default, budget alert, $secrets empty secrets, $buckets private buckets with retention, risky flags default to false)"

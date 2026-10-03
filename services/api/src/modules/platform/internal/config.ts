@@ -43,6 +43,11 @@ export interface Config {
   aiServiceUrl: string;
   /** How long the API waits for the AI service before giving up on a call. */
   aiServiceTimeoutMs: number;
+  /**
+   * 'google-metadata' in the cloud: each call also carries a Google identity token (from the metadata
+   * server) in X-Serverless-Authorization, which Cloud Run checks before the request reaches the AI service.
+   */
+  aiServiceIdentity: 'none' | 'google-metadata';
   webauthn: { rpId: string; rpName: string };
   allowedOrigins: string[];
   argon2: { memoryKiB: number; iterations: number; parallelism: number; maxConcurrency: number };
@@ -69,8 +74,24 @@ type Env = Record<string, string | undefined>;
 export function loadConfig(env: Env): Config {
   const problems: string[] = [];
 
+  // The cloud groups the three API keys into one secret (docs/phase2/01, "Secrets: five"): API_KEYRINGS is a JSON
+  // object holding SC_PEPPER_KEYRING, CREDENTIAL_ENC_KEYRING and HMAC_INDEX_KEY. Separate variables still work.
+  const bundle: Record<string, string> = {};
+  if (typeof env.API_KEYRINGS === 'string' && env.API_KEYRINGS.trim() !== '') {
+    try {
+      const parsed = JSON.parse(env.API_KEYRINGS) as unknown;
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('not an object');
+      for (const [k, v] of Object.entries(parsed)) {
+        if (!['SC_PEPPER_KEYRING', 'CREDENTIAL_ENC_KEYRING', 'HMAC_INDEX_KEY'].includes(k)) throw new Error('unknown key');
+        bundle[k] = typeof v === 'string' ? v : JSON.stringify(v);
+      }
+    } catch {
+      problems.push('API_KEYRINGS must be a JSON object with SC_PEPPER_KEYRING, CREDENTIAL_ENC_KEYRING and HMAC_INDEX_KEY');
+    }
+  }
+
   const raw = (name: string): string | undefined => {
-    const v = env[name];
+    const v = env[name] ?? bundle[name];
     if (typeof v !== 'string') return undefined;
     const t = v.trim();
     return t === '' ? undefined : t;
@@ -239,6 +260,7 @@ export function loadConfig(env: Env): Config {
     serviceTokenKey: new Secret(serviceToken),
     aiServiceUrl: aiServiceUrl.replace(/\/+$/, ''),
     aiServiceTimeoutMs: integer('AI_SERVICE_TIMEOUT_MS', 60_000, 1_000, 300_000),
+    aiServiceIdentity: oneOf('AI_SERVICE_IDENTITY', ['none', 'google-metadata'] as const, 'none'),
     webauthn: { rpId, rpName: raw('WEBAUTHN_RP_NAME') ?? 'LegacyAI' },
     allowedOrigins,
     argon2: {

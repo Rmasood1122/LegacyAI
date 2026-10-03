@@ -1560,7 +1560,7 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -1597,21 +1597,21 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KSourceCreated"
+                $ref: "#/components/schemas/KSourceCreated"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
     get:
       operationId: "listSources"
       summary: "Documents this card may see (labels, status, counts - no content)."
@@ -1641,7 +1641,7 @@ paths:
             maximum: 50
             default: 25
           description: "Page size."
-        - "$ref": "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           description: "Success"
@@ -1657,25 +1657,25 @@ paths:
                   items:
                     type: "array"
                     items:
-                      "$ref": "#/components/schemas/KSource"
+                      $ref: "#/components/schemas/KSource"
                   next_cursor:
                     type:
                       - "string"
                       - "null"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/sources/{source_id}/content:
     put:
       operationId: "uploadSourceContent"
@@ -1686,7 +1686,7 @@ paths:
       security:
         - sessionCookie: []
       parameters:
-        - "$ref": "#/components/parameters/SourceId"
+        - $ref: "#/components/parameters/SourceId"
       requestBody:
         required: true
         content:
@@ -1708,29 +1708,29 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KUploadResult"
+                $ref: "#/components/schemas/KUploadResult"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "413":
-          "$ref": "#/components/responses/PayloadTooLarge"
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
         "503":
-          "$ref": "#/components/responses/AiUnavailable"
+          $ref: "#/components/responses/AiUnavailable"
         "507":
-          "$ref": "#/components/responses/StorageFull"
+          $ref: "#/components/responses/StorageFull"
   /v1/sources/{source_id}:
     get:
       operationId: "getSource"
@@ -1741,30 +1741,30 @@ paths:
       security:
         - sessionCookie: []
       parameters:
-        - "$ref": "#/components/parameters/SourceId"
+        - $ref: "#/components/parameters/SourceId"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KSourceDetail"
+                $ref: "#/components/schemas/KSourceDetail"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/sources/{source_id}/confirm:
     post:
       operationId: "confirmSource"
@@ -1776,31 +1776,31 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/SourceId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/SourceId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStatus"
+                $ref: "#/components/schemas/KStatus"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/sources/{source_id}/withdraw:
     post:
       operationId: "withdrawSource"
@@ -1812,31 +1812,31 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/SourceId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/SourceId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KSourceWithdrawn"
+                $ref: "#/components/schemas/KSourceWithdrawn"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/sources/{source_id}/labels:
     patch:
       operationId: "setSourceLabels"
@@ -1848,8 +1848,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/SourceId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/SourceId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -1875,23 +1875,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KLabelResult"
+                $ref: "#/components/schemas/KLabelResult"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/knowledge/ask:
     post:
       operationId: "askKnowledge"
@@ -1926,23 +1926,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KAnswer"
+                $ref: "#/components/schemas/KAnswer"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/knowledge/items:
     get:
       operationId: "listKnowledgeItems"
@@ -1979,7 +1979,7 @@ paths:
             maximum: 50
             default: 25
           description: "Page size."
-        - "$ref": "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           description: "Success"
@@ -1995,27 +1995,27 @@ paths:
                   items:
                     type: "array"
                     items:
-                      "$ref": "#/components/schemas/KItemSummary"
+                      $ref: "#/components/schemas/KItemSummary"
                   next_cursor:
                     type:
                       - "string"
                       - "null"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
     post:
       operationId: "createKnowledgeItem"
       summary: "Write a candidate item by hand."
@@ -2026,7 +2026,7 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2066,23 +2066,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStatus"
+                $ref: "#/components/schemas/KStatus"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/knowledge/items/{item_id}:
     get:
       operationId: "getKnowledgeItem"
@@ -2093,30 +2093,30 @@ paths:
       security:
         - sessionCookie: []
       parameters:
-        - "$ref": "#/components/parameters/ItemId"
+        - $ref: "#/components/parameters/ItemId"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KItemDetail"
+                $ref: "#/components/schemas/KItemDetail"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/knowledge/items/{item_id}/versions:
     post:
       operationId: "proposeItemVersion"
@@ -2128,8 +2128,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/ItemId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/ItemId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2150,23 +2150,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KVersionCreated"
+                $ref: "#/components/schemas/KVersionCreated"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/knowledge/items/{item_id}/submit:
     post:
       operationId: "submitKnowledgeItem"
@@ -2178,31 +2178,31 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/ItemId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/ItemId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStatus"
+                $ref: "#/components/schemas/KStatus"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/knowledge/items/{item_id}/verify:
     post:
       operationId: "verifyKnowledgeItem"
@@ -2214,31 +2214,31 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/ItemId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/ItemId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStatus"
+                $ref: "#/components/schemas/KStatus"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/knowledge/items/{item_id}/reject:
     post:
       operationId: "rejectKnowledgeItem"
@@ -2250,31 +2250,31 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/ItemId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/ItemId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStatus"
+                $ref: "#/components/schemas/KStatus"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/knowledge/items/{item_id}/reopen:
     post:
       operationId: "reopenKnowledgeItem"
@@ -2286,8 +2286,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/ItemId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/ItemId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2306,23 +2306,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStatus"
+                $ref: "#/components/schemas/KStatus"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/knowledge/items/{item_id}/retire:
     post:
       operationId: "retireKnowledgeItem"
@@ -2334,31 +2334,31 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/ItemId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/ItemId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStatus"
+                $ref: "#/components/schemas/KStatus"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/knowledge/items/{item_id}/labels:
     patch:
       operationId: "setItemLabels"
@@ -2370,8 +2370,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/ItemId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/ItemId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2397,23 +2397,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KLabelResult"
+                $ref: "#/components/schemas/KLabelResult"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/knowledge/verifications/revert:
     post:
       operationId: "revertVerifications"
@@ -2425,7 +2425,7 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2453,23 +2453,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KCount"
+                $ref: "#/components/schemas/KCount"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/me/contributions:
     get:
       operationId: "listMyContributions"
@@ -2489,7 +2489,7 @@ paths:
             maximum: 50
             default: 25
           description: "Page size."
-        - "$ref": "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           description: "Success"
@@ -2505,27 +2505,27 @@ paths:
                   items:
                     type: "array"
                     items:
-                      "$ref": "#/components/schemas/KItemSummary"
+                      $ref: "#/components/schemas/KItemSummary"
                   next_cursor:
                     type:
                       - "string"
                       - "null"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/me/contributions/{item_id}/restrict:
     post:
       operationId: "restrictContribution"
@@ -2537,8 +2537,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/ItemId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/ItemId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2559,23 +2559,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KRestricted"
+                $ref: "#/components/schemas/KRestricted"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/interviews:
     post:
       operationId: "createInterview"
@@ -2587,7 +2587,7 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2612,23 +2612,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStatus"
+                $ref: "#/components/schemas/KStatus"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
     get:
       operationId: "listInterviews"
       summary: "Interviews (status only)."
@@ -2659,7 +2659,7 @@ paths:
             maximum: 50
             default: 25
           description: "Page size."
-        - "$ref": "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           description: "Success"
@@ -2675,25 +2675,25 @@ paths:
                   items:
                     type: "array"
                     items:
-                      "$ref": "#/components/schemas/KInterview"
+                      $ref: "#/components/schemas/KInterview"
                   next_cursor:
                     type:
                       - "string"
                       - "null"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/interviews/{interview_id}:
     get:
       operationId: "getInterview"
@@ -2704,30 +2704,30 @@ paths:
       security:
         - sessionCookie: []
       parameters:
-        - "$ref": "#/components/parameters/InterviewId"
+        - $ref: "#/components/parameters/InterviewId"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KInterviewDetail"
+                $ref: "#/components/schemas/KInterviewDetail"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/interviews/{interview_id}/accept:
     post:
       operationId: "acceptInterview"
@@ -2739,31 +2739,31 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/InterviewId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/InterviewId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KTurn"
+                $ref: "#/components/schemas/KTurn"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/interviews/{interview_id}/turns:
     post:
       operationId: "answerInterviewTurn"
@@ -2775,8 +2775,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/InterviewId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/InterviewId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -2797,23 +2797,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KTurn"
+                $ref: "#/components/schemas/KTurn"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/interviews/{interview_id}/pause:
     post:
       operationId: "pauseInterview"
@@ -2825,31 +2825,31 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/InterviewId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/InterviewId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStatus"
+                $ref: "#/components/schemas/KStatus"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/interviews/{interview_id}/resume:
     post:
       operationId: "resumeInterview"
@@ -2861,31 +2861,31 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/InterviewId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/InterviewId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStatus"
+                $ref: "#/components/schemas/KStatus"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/interviews/{interview_id}/complete:
     post:
       operationId: "completeInterview"
@@ -2897,31 +2897,31 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/InterviewId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/InterviewId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStatus"
+                $ref: "#/components/schemas/KStatus"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/gaps:
     get:
       operationId: "getGapReport"
@@ -2945,23 +2945,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KGapReport"
+                $ref: "#/components/schemas/KGapReport"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/topics:
     get:
       operationId: "listTopics"
@@ -2990,7 +2990,7 @@ paths:
             maximum: 50
             default: 25
           description: "Page size."
-        - "$ref": "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           description: "Success"
@@ -3006,25 +3006,25 @@ paths:
                   items:
                     type: "array"
                     items:
-                      "$ref": "#/components/schemas/KTopic"
+                      $ref: "#/components/schemas/KTopic"
                   next_cursor:
                     type:
                       - "string"
                       - "null"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
     post:
       operationId: "createTopic"
       summary: "Add a topic."
@@ -3035,7 +3035,7 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -3068,23 +3068,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KTopic"
+                $ref: "#/components/schemas/KTopic"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/topics/{topic_id}:
     patch:
       operationId: "updateTopic"
@@ -3096,8 +3096,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/TopicId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/TopicId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -3126,23 +3126,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KTopic"
+                $ref: "#/components/schemas/KTopic"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/job-roles/{job_role}/topics:
     put:
       operationId: "setRoleTopics"
@@ -3154,8 +3154,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/JobRole"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/JobRole"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -3190,21 +3190,21 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KRoleTopics"
+                $ref: "#/components/schemas/KRoleTopics"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/job-roles/{job_role}/people:
     put:
       operationId: "setRolePeople"
@@ -3216,8 +3216,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/JobRole"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/JobRole"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -3252,21 +3252,21 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KRolePeople"
+                $ref: "#/components/schemas/KRolePeople"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/topics/suggest:
     post:
       operationId: "suggestTopics"
@@ -3278,7 +3278,7 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -3298,25 +3298,25 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KProposed"
+                $ref: "#/components/schemas/KProposed"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
         "503":
-          "$ref": "#/components/responses/AiUnavailable"
+          $ref: "#/components/responses/AiUnavailable"
   /v1/expert-questions:
     post:
       operationId: "createExpertQuestion"
@@ -3328,7 +3328,7 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -3362,23 +3362,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KExpertQuestionCreated"
+                $ref: "#/components/schemas/KExpertQuestionCreated"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
     get:
       operationId: "listExpertQuestions"
       summary: "Questions asked by or addressed to this card."
@@ -3421,27 +3421,27 @@ paths:
                   items:
                     type: "array"
                     items:
-                      "$ref": "#/components/schemas/KExpertQuestion"
+                      $ref: "#/components/schemas/KExpertQuestion"
                   next_cursor:
                     type:
                       - "string"
                       - "null"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/expert-questions/{question_id}/reply:
     post:
       operationId: "replyExpertQuestion"
@@ -3453,8 +3453,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/QuestionId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/QuestionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -3478,23 +3478,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KExpertReply"
+                $ref: "#/components/schemas/KExpertReply"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/expert-questions/{question_id}/decline:
     post:
       operationId: "declineExpertQuestion"
@@ -3506,8 +3506,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/QuestionId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/QuestionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -3531,23 +3531,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStatus"
+                $ref: "#/components/schemas/KStatus"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/readiness/questions/generate:
     post:
       operationId: "generateQuizQuestions"
@@ -3559,7 +3559,7 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -3589,25 +3589,25 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KGenerated"
+                $ref: "#/components/schemas/KGenerated"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
         "503":
-          "$ref": "#/components/responses/AiUnavailable"
+          $ref: "#/components/responses/AiUnavailable"
   /v1/readiness/questions:
     get:
       operationId: "listQuizQuestions"
@@ -3636,7 +3636,7 @@ paths:
             maximum: 50
             default: 25
           description: "Page size."
-        - "$ref": "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           description: "Success"
@@ -3652,27 +3652,27 @@ paths:
                   items:
                     type: "array"
                     items:
-                      "$ref": "#/components/schemas/KQuizItem"
+                      $ref: "#/components/schemas/KQuizItem"
                   next_cursor:
                     type:
                       - "string"
                       - "null"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/readiness/questions/{question_id}:
     patch:
       operationId: "editQuizQuestion"
@@ -3684,8 +3684,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/QuestionId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/QuestionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -3724,23 +3724,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStatus"
+                $ref: "#/components/schemas/KStatus"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/readiness/questions/{question_id}/approve:
     post:
       operationId: "approveQuizQuestion"
@@ -3752,31 +3752,31 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/QuestionId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/QuestionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStatus"
+                $ref: "#/components/schemas/KStatus"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/readiness/questions/{question_id}/retire:
     post:
       operationId: "retireQuizQuestion"
@@ -3788,31 +3788,31 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/QuestionId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/QuestionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStatus"
+                $ref: "#/components/schemas/KStatus"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/readiness/attempts:
     post:
       operationId: "startReadinessAttempt"
@@ -3824,7 +3824,7 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -3845,23 +3845,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KAttemptStarted"
+                $ref: "#/components/schemas/KAttemptStarted"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/readiness/attempts/{attempt_id}:
     get:
       operationId: "getReadinessAttempt"
@@ -3872,30 +3872,30 @@ paths:
       security:
         - sessionCookie: []
       parameters:
-        - "$ref": "#/components/parameters/AttemptId"
+        - $ref: "#/components/parameters/AttemptId"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KAttempt"
+                $ref: "#/components/schemas/KAttempt"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/readiness/attempts/{attempt_id}/answers:
     post:
       operationId: "saveAttemptAnswer"
@@ -3907,8 +3907,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/AttemptId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AttemptId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -3940,23 +3940,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KAnswerSaved"
+                $ref: "#/components/schemas/KAnswerSaved"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/readiness/attempts/{attempt_id}/submit:
     post:
       operationId: "submitReadinessAttempt"
@@ -3968,31 +3968,31 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/AttemptId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AttemptId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStatus"
+                $ref: "#/components/schemas/KStatus"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/readiness/answers/{answer_id}/override:
     post:
       operationId: "overrideQuizAnswer"
@@ -4004,8 +4004,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/AnswerId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/AnswerId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -4026,23 +4026,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStatus"
+                $ref: "#/components/schemas/KStatus"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/readiness/reports/{attempt_id}:
     get:
       operationId: "getReadinessReport"
@@ -4053,30 +4053,30 @@ paths:
       security:
         - sessionCookie: []
       parameters:
-        - "$ref": "#/components/parameters/AttemptId"
+        - $ref: "#/components/parameters/AttemptId"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KReport"
+                $ref: "#/components/schemas/KReport"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/consents:
     get:
       operationId: "listConsents"
@@ -4102,7 +4102,7 @@ paths:
             maximum: 50
             default: 25
           description: "Page size."
-        - "$ref": "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           description: "Success"
@@ -4118,25 +4118,25 @@ paths:
                   items:
                     type: "array"
                     items:
-                      "$ref": "#/components/schemas/KConsent"
+                      $ref: "#/components/schemas/KConsent"
                   next_cursor:
                     type:
                       - "string"
                       - "null"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
     post:
       operationId: "giveConsent"
       summary: "Give consent, with your own card. Replaces your live consent of the same scope."
@@ -4147,7 +4147,7 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -4183,21 +4183,21 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KConsent"
+                $ref: "#/components/schemas/KConsent"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/me/consents:
     get:
       operationId: "listMyConsents"
@@ -4222,25 +4222,25 @@ paths:
                   items:
                     type: "array"
                     items:
-                      "$ref": "#/components/schemas/KConsent"
+                      $ref: "#/components/schemas/KConsent"
                   next_cursor:
                     type:
                       - "string"
                       - "null"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/consents/{consent_id}/withdraw:
     post:
       operationId: "withdrawConsent"
@@ -4252,31 +4252,31 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/ConsentId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/ConsentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KConsent"
+                $ref: "#/components/schemas/KConsent"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/people/{person_id}/consent-withdrawals:
     post:
       operationId: "recordWithdrawalForPerson"
@@ -4288,8 +4288,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/PersonId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -4315,23 +4315,23 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KWithdrawalsForPerson"
+                $ref: "#/components/schemas/KWithdrawalsForPerson"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/consents/{consent_id}/hold:
     post:
       operationId: "holdConsent"
@@ -4343,8 +4343,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/ConsentId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/ConsentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -4365,21 +4365,21 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KConsent"
+                $ref: "#/components/schemas/KConsent"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/consents/{consent_id}/release-hold:
     post:
       operationId: "releaseConsentHold"
@@ -4391,31 +4391,31 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/ConsentId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/ConsentId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KConsent"
+                $ref: "#/components/schemas/KConsent"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
         "502":
-          "$ref": "#/components/responses/BadGateway"
+          $ref: "#/components/responses/BadGateway"
   /v1/review/tasks:
     get:
       operationId: "listReviewTasks"
@@ -4457,7 +4457,7 @@ paths:
             maximum: 50
             default: 25
           description: "Page size."
-        - "$ref": "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
           description: "Success"
@@ -4473,25 +4473,25 @@ paths:
                   items:
                     type: "array"
                     items:
-                      "$ref": "#/components/schemas/KTask"
+                      $ref: "#/components/schemas/KTask"
                   next_cursor:
                     type:
                       - "string"
                       - "null"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/review/tasks/{task_id}:
     get:
       operationId: "getReviewTask"
@@ -4502,28 +4502,28 @@ paths:
       security:
         - sessionCookie: []
       parameters:
-        - "$ref": "#/components/parameters/TaskId"
+        - $ref: "#/components/parameters/TaskId"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KTask"
+                $ref: "#/components/schemas/KTask"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/review/tasks/{task_id}/assign:
     post:
       operationId: "assignReviewTask"
@@ -4535,8 +4535,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/TaskId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/TaskId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -4555,21 +4555,21 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KTask"
+                $ref: "#/components/schemas/KTask"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/review/tasks/{task_id}/unassign:
     post:
       operationId: "unassignReviewTask"
@@ -4581,29 +4581,29 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/TaskId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/TaskId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KTask"
+                $ref: "#/components/schemas/KTask"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/review/tasks/{task_id}/dismiss:
     post:
       operationId: "dismissReviewTask"
@@ -4615,29 +4615,29 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/TaskId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/TaskId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "200":
           description: "Success"
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KTask"
+                $ref: "#/components/schemas/KTask"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/review/tasks/bulk:
     post:
       operationId: "bulkReviewTasks"
@@ -4649,7 +4649,7 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -4682,21 +4682,21 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KBulkResult"
+                $ref: "#/components/schemas/KBulkResult"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/redaction/allowlist:
     get:
       operationId: "listRedactionAllowlist"
@@ -4721,25 +4721,25 @@ paths:
                   items:
                     type: "array"
                     items:
-                      "$ref": "#/components/schemas/KAllowTerm"
+                      $ref: "#/components/schemas/KAllowTerm"
                   next_cursor:
                     type:
                       - "string"
                       - "null"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
     post:
       operationId: "addRedactionAllowlistTerm"
       summary: "Add a term. Never an e-mail address or anything with a number."
@@ -4750,7 +4750,7 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -4779,21 +4779,21 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KAllowTerm"
+                $ref: "#/components/schemas/KAllowTerm"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/redaction/allowlist/{term_id}:
     delete:
       operationId: "deleteRedactionAllowlistTerm"
@@ -4805,25 +4805,25 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/TermId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/TermId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       responses:
         "204":
           description: "Done"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/knowledge/settings:
     get:
       operationId: "getKnowledgeSettings"
@@ -4839,21 +4839,21 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KSettings"
+                $ref: "#/components/schemas/KSettings"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
     patch:
       operationId: "updateKnowledgeSettings"
       summary: "Change knowledge settings (Owner)."
@@ -4864,7 +4864,7 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -4950,21 +4950,21 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KSettings"
+                $ref: "#/components/schemas/KSettings"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/ai/budget:
     get:
       operationId: "getAiBudget"
@@ -4980,21 +4980,21 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KAiBudget"
+                $ref: "#/components/schemas/KAiBudget"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/tenants/{tenant_id}/ai-budget:
     put:
       operationId: "setTenantAiBudget"
@@ -5006,8 +5006,8 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/TenantId"
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -5028,21 +5028,21 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KTenantAiBudget"
+                $ref: "#/components/schemas/KTenantAiBudget"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/platform/ai/kill-switch:
     put:
       operationId: "setAiKillSwitch"
@@ -5054,7 +5054,7 @@ paths:
         - sessionCookie: []
       x-idempotent: true
       parameters:
-        - "$ref": "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -5076,21 +5076,21 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KKillSwitch"
+                $ref: "#/components/schemas/KKillSwitch"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
   /v1/platform/storage:
     get:
       operationId: "getPlatformStorage"
@@ -5106,21 +5106,21 @@ paths:
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/KStorage"
+                $ref: "#/components/schemas/KStorage"
         "400":
-          "$ref": "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequest"
         "401":
-          "$ref": "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthorized"
         "403":
-          "$ref": "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Forbidden"
         "404":
-          "$ref": "#/components/responses/NotFound"
+          $ref: "#/components/responses/NotFound"
         "409":
-          "$ref": "#/components/responses/Conflict"
+          $ref: "#/components/responses/Conflict"
         "422":
-          "$ref": "#/components/responses/Unprocessable"
+          $ref: "#/components/responses/Unprocessable"
         "429":
-          "$ref": "#/components/responses/TooManyRequests"
+          $ref: "#/components/responses/TooManyRequests"
 components:
   securitySchemes:
     sessionCookie:
@@ -5781,7 +5781,7 @@ components:
         citations:
           type: "array"
           items:
-            "$ref": "#/components/schemas/KCitation"
+            $ref: "#/components/schemas/KCitation"
         can_ask_expert:
           type: "boolean"
     KItemSummary:

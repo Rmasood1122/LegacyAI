@@ -183,7 +183,7 @@ describe('the handler never runs unless the policy decision point said allow', (
 });
 
 describe('real app: a card with almost no permissions cannot get a 2xx from anything it is not granted', () => {
-  it('walks all 40 protected operations as a Successor', async () => {
+  it('walks all 113 protected operations as a Successor', async () => {
     const su = await superuser();
     const granted = new Set((await su.query(`SELECT permission_key FROM role_permissions WHERE role_key = 'successor'`)).rows.map((r) => r.permission_key as string));
     await su.end();
@@ -199,20 +199,36 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
       createPerson: { display_name: 'x' }, updatePerson: { display_name: 'x' }, createDepartment: { name: 'x' },
       createTenant: { name: 'x', slug: 'x-tenant', owner_display_name: 'x' }, updateTenantSettings: { grace_days: 1 }, verifyAuditChain: {},
       renewCompanyCard: {}, recoverOwnerCard: { card_id: tenant.ownerCard.id, verification_reference: 'CASE-000001' },
+      // Phase 2: valid bodies, so that the contract check cannot be what stops the request
+      createSource: { title: 'x', company_document: true }, setSourceLabels: { sensitivity: 1 }, createKnowledgeItem: { title: 'x', body: 'x' },
+      proposeItemVersion: { body: 'x' }, reopenKnowledgeItem: {}, setItemLabels: { sensitivity: 1 },
+      revertVerifications: { card_id: tenant.ownerCard.id, since: '2026-01-01T00:00:00Z', until: '2026-12-31T00:00:00Z' },
+      createInterview: { expert_person_id: successor.personId, job_role: 'x' }, answerInterviewTurn: { answer: 'x' }, createTopic: { name: 'x' },
+      updateTopic: { name: 'x' }, setRoleTopics: { topics: [] }, setRolePeople: { people: [] }, suggestTopics: { source_id: randomUUID() },
+      replyExpertQuestion: { answer: 'x' }, declineExpertQuestion: { reason: 'other' }, generateQuizQuestions: { kind: 'mcq', item_ids: [randomUUID()] },
+      editQuizQuestion: { stem: 'x' }, overrideQuizAnswer: { score: 1 }, recordWithdrawalForPerson: { reference: 'REF-000001' }, holdConsent: { reason: 'x' },
+      assignReviewTask: {}, bulkReviewTasks: { action: 'dismiss', task_ids: [randomUUID()] }, addRedactionAllowlistTerm: { term: 'x', entity_type: 'OTHER' },
+      updateKnowledgeSettings: { review_sla_days: 5 }, setTenantAiBudget: { monthly_cap_micro_usd: 1 }, setAiKillSwitch: { on: false },
     };
     let denied = 0;
     for (const op of t.app.http.contract.operations.values()) {
       if (op.isPublic || op.isService || granted.has(op.permission!)) continue;
       // Target a REAL resource in the same tenant (the Owner's card / the Successor's own person), so that
       // "not found" cannot be what stops the request.
-      const url = op.path.replace('{card_id}', tenant.ownerCard.id).replace('{person_id}', successor.personId).replace('{tenant_id}', tenant.tenantId)
-        .replace('{role_key}', 'company_owner').replace('{export_id}', randomUUID()).replace('{credential_id}', randomUUID());
-      const res = await successor.client.request(op.method, url, bodies[op.operationId], { idem: op.idempotent ? `walk-${randomUUID()}` : false });
+      let url = op.path.replace('{card_id}', tenant.ownerCard.id).replace('{person_id}', successor.personId).replace('{tenant_id}', tenant.tenantId)
+        .replace('{role_key}', 'company_owner').replace('{export_id}', randomUUID()).replace('{credential_id}', randomUUID()).replace('{job_role}', 'x');
+      const phase2Target = /\{[a-z_]+_id\}/.test(url);   // Phase 2 record ids are random here: "not found" is an acceptable refusal
+      url = url.replace(/\{[a-z_]+_id\}/g, () => randomUUID());
+      if (op.operationId === 'getGapReport') url += '?job_role=x';
+      const upload = op.binaryTypes.length > 0;
+      const res = await successor.client.request(op.method, url, upload ? (Buffer.from('x') as unknown as object) : bodies[op.operationId],
+        { idem: op.idempotent ? `walk-${randomUUID()}` : false, headers: upload ? { 'content-type': 'text/plain' } : {} });
       expect([403, 404], `${op.operationId} answered ${res.status}: ${res.raw}`).toContain(res.status);
-      if (res.status === 404) expect(op.operationId).toBe('getExport'); // the only one whose target does not exist
+      if (res.status === 404 && !phase2Target) expect(op.operationId).toBe('getExport'); // the only Phase 1 one whose target does not exist
       denied += 1;
     }
-    expect(denied).toBe(28); // 40 protected operations minus the 12 that the Successor's 11 permissions reach
+    // Phase 1: 40 protected operations minus the 12 the Successor's permissions reach; Phase 2: 73 minus the 18 its permissions reach.
+    expect(denied).toBe(28 + 55);
   });
 });
 
