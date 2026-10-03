@@ -42,7 +42,8 @@ describe('the frame', () => {
   });
 
   it('the right to read consents alone (experts and successors have it for their own records) does not offer the company consent screen', () => {
-    show(sessionValue(makeSession(permissionsFor('listConsents', 'listMyConsents'))), '/consents');
+    // listPeople too: these roles may read their own person, which is why that right cannot be the second condition
+    show(sessionValue(makeSession(permissionsFor('listConsents', 'listMyConsents', 'listPeople'))), '/consents');
     expect(menu()).toEqual(['Home', 'My consent']);
     expect(screen.queryByRole('navigation', { name: 'Manage' })).toBeNull();
     expect(screen.getByRole('heading', { name: 'This screen is not available' })).toBeTruthy();

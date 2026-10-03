@@ -66,10 +66,12 @@ export const ROUTES = {
   people: { path: '/people', label: 'People', requiredOperation: 'listPeople', alsoRequires: ['createPerson'], menu: 'manage' },
   cards: { path: '/cards', label: 'Cards', requiredOperation: 'listCards', alsoRequires: ['issueCard'], menu: 'manage' },
   card: { path: '/cards/:cardId', requiredOperation: 'getCard' },
-  // Experts and Successors hold the consent-reading right for their OWN records, so listConsents alone would offer
-  // this company-wide screen to them (the API then shows them only their own). The screen picks a person from the
-  // people list, so it is offered only to cards that may also read that list.
-  consentAdmin: { path: '/consents', label: 'Consents', requiredOperation: 'listConsents', alsoRequires: ['listPeople'], menu: 'manage' },
+  // Experts and Successors hold the consent-reading right for their OWN records (and may read their own person), so
+  // neither listConsents nor listPeople tells them apart from the roles that look after the company's consents. The
+  // session lists permissions without their scope. The right to read the company's settings is held only by the
+  // administering roles (Owner, Admin, Auditor), so it is used as the second condition. The API remains the authority:
+  // a card with an own-scope grant gets only its own records from it.
+  consentAdmin: { path: '/consents', label: 'Consents', requiredOperation: 'listConsents', alsoRequires: ['getTenantSettings'], menu: 'manage' },
   settings: { path: '/settings', label: 'Settings', requiredOperation: 'getTenantSettings', menu: 'manage' },
   audit: { path: '/audit', label: 'Audit log', requiredOperation: 'listAuditEvents', menu: 'manage' },
   operator: { path: '/operator', label: 'Operator console', requiredOperation: 'listTenants', menu: 'manage' },
