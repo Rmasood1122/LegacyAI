@@ -13,4 +13,6 @@ regexes = [
   '''RkFLRS1[A-Za-z0-9+/=]+''',
   '''fake-internal-token-do-not-use-0+''',
   '''test-internal-service-token-0123456789''',
+  # A public AI model name, flagged only because a test passes it next to a variable called FAKE_KEY.
+  '''claude-haiku-4-5-20251001''',
 ]

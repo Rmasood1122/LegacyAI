@@ -196,6 +196,17 @@ Rejected: pdfminer.six / pdfplumber (code-execution advisory CVE-2025-64512, no 
 
 Evidence: https://pypi.org/pypi/anthropic/json · https://pypi.org/pypi/openai/json
 
+**Decision (2026-10-03): no provider SDK is installed.** Both current SDK lines fail the 60-day rule, and the two calls we need are one HTTPS request each. `services/ai/app/ai_gateway/remote.py` uses the Python standard library. Facts it relies on, re-read on 2026-10-03:
+
+| Fact | Evidence |
+|---|---|
+| Anthropic Messages API: `POST https://api.anthropic.com/v1/messages`, headers `x-api-key`, `anthropic-version: 2023-06-01`; structured output `output_config.format = {type: json_schema, schema}`, supported by `claude-haiku-4-5-20251001`; schemas may not use length or number limits and need `additionalProperties: false`; usage in `usage.input_tokens` / `output_tokens` | https://platform.claude.com/docs/en/api/messages · https://platform.claude.com/docs/en/build-with-claude/structured-outputs |
+| Claude Haiku 4.5: $1 / $5 per million tokens (re-read, unchanged) | https://platform.claude.com/docs/en/about-claude/pricing |
+| OpenAI Chat Completions: `response_format = {type: json_schema, json_schema: {name, schema, strict}}`; `max_completion_tokens` bounds visible **and** reasoning tokens (`max_tokens` is deprecated); `reasoning_effort` values none…max, not all supported by every model; usage in `usage.prompt_tokens` / `completion_tokens` | https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create · https://developers.openai.com/api/docs/guides/structured-outputs (read through a summariser) |
+| `gpt-5.6-luna`: $0.20 / $1.20, Chat Completions and structured outputs supported (re-read, unchanged) | https://developers.openai.com/api/docs/models/gpt-5.6-luna |
+
+**ASSUMPTION until the first real call at Gate 2:** that `gpt-5.6-luna` accepts `reasoning_effort: "low"` and leaves enough of a 300–600 token output limit for the visible answer. If it does not, the evaluation will show failed attempts, and the setting is one environment variable (`AI_REASONING_EFFORT`).
+
 ### 9.4 Models and prices (read 2026-10-03; re-read at Gate 2)
 
 | Model | Price per million tokens (in / out) | Released | Evidence |

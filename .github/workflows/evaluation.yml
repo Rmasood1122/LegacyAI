@@ -1,0 +1,99 @@
+# The Gate 2 evaluation: the ONLY place a real AI provider is ever called from this repository.
+#
+# It does not run on ordinary pushes. It runs when the owner starts it by hand ("Run workflow"), or when
+# the request file services/ai/eval/RUN_REAL.md is changed on main - which is how the run is asked for
+# after Gate 2. It needs provider keys stored as GitHub Actions secrets (never in a file):
+#   ANTHROPIC_API_KEY and/or OPENAI_API_KEY - each created with a hard spending limit at the provider.
+# A model whose key is missing is skipped.
+#
+# Spending is limited three ways: the provider's own hard limit (set by the owner), the cap below
+# (enforced by the same budget code as every company's cap: the run stops when it is reached), and the
+# small fixed size of the evaluation set. Data sent: only the synthetic "Northfield Bottling Plant
+# (FICTIONAL)" documents and questions in services/ai/eval/golden.
+name: evaluation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["services/ai/eval/RUN_REAL.md"]
+
+permissions:
+  contents: write   # only to publish the result files on the evaluation-results branch
+
+concurrency:
+  group: evaluation
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "24"
+  EVAL_CAP_USD: "5"
+  # Throwaway values for the CI database container only. Not secrets.
+  DATABASE_URL_SUPERUSER: postgres://postgres:local-dev-only-not-a-secret@127.0.0.1:55432/legacyai_test
+  DATABASE_URL_ADMIN: postgres://legacyai_migrator:local-test-migrator-password@127.0.0.1:55432/legacyai_test
+  DATABASE_URL: postgres://legacyai_app:local-test-app-password@127.0.0.1:55432/legacyai_test
+  DATABASE_URL_BACKUP: postgres://legacyai_backup:local-test-backup-password@127.0.0.1:55432/legacyai_test
+  DATABASE_URL_AI: postgres://legacyai_ai:local-test-ai-svc-password@127.0.0.1:55432/legacyai_test
+
+jobs:
+  real-model-evaluation:
+    name: Real-model evaluation (capped, synthetic data only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: services/api/package-lock.json
+      - run: pip install -r services/ai/requirements.txt
+      - name: Start PostgreSQL 18 and build the schema
+        working-directory: services/api
+        run: |
+          npm ci
+          docker compose -f ../../docker-compose.yml up -d --wait
+          node ../../scripts/db-setup.mjs reset
+      - name: Run the evaluation with each model that has a key (one shared cap for the whole run)
+        working-directory: services/ai
+        shell: bash   # with pipefail: a crashed run fails this step instead of being hidden by the output filter
+        env:
+          EVAL_ALLOW_REAL: "1"
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          mkdir -p eval/out
+          ran=0
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            python -m eval.run --provider anthropic --model claude-haiku-4-5-20251001 --embedder local --cap-usd "$EVAL_CAP_USD" --out eval/out/anthropic-claude-haiku-4-5.json | grep '^eval:' | sed 's/^/::notice title=evaluation::/'
+            ran=1
+          else
+            echo "::notice title=evaluation::no ANTHROPIC_API_KEY secret - Claude Haiku 4.5 skipped"
+          fi
+          if [ -n "$OPENAI_API_KEY" ]; then
+            python -m eval.run --provider openai --model gpt-5.6-luna --embedder local --cap-usd "$EVAL_CAP_USD" --out eval/out/openai-gpt-5.6-luna.json | grep '^eval:' | sed 's/^/::notice title=evaluation::/'
+            ran=1
+          else
+            echo "::notice title=evaluation::no OPENAI_API_KEY secret - GPT-5.6 Luna skipped"
+          fi
+          if [ "$ran" -eq 0 ]; then echo "::error title=evaluation::no provider key is stored as a secret - nothing was run and nothing was spent"; exit 1; fi
+      - name: Publish the result files on the evaluation-results branch
+        if: always()
+        run: |
+          ls services/ai/eval/out/*.json >/dev/null 2>&1 || { echo "no result files"; exit 0; }
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          tmp="$(mktemp -d)"
+          cp services/ai/eval/out/*.json "$tmp"/
+          git config user.name "evaluation workflow"
+          git config user.email "actions@users.noreply.github.com"
+          git fetch -q origin evaluation-results || true
+          if git rev-parse -q --verify origin/evaluation-results >/dev/null; then git checkout -q -B evaluation-results origin/evaluation-results; else git checkout -q --orphan evaluation-results && git rm -rfq . ; fi
+          mkdir -p "runs/$stamp-${GITHUB_SHA::7}"
+          cp "$tmp"/*.json "runs/$stamp-${GITHUB_SHA::7}/"
+          git add runs
+          git commit -q -m "evaluation results $stamp (commit ${GITHUB_SHA::7})"
+          git push -q origin evaluation-results
+          echo "::notice title=evaluation::results published at runs/$stamp-${GITHUB_SHA::7} on branch evaluation-results"
