@@ -37,3 +37,6 @@ services/api/.test-exports/
 # python
 services/ai/.venv/
 .pytest_cache/
+
+# evaluation results are written here by the runner; EVALUATION.md is the kept record
+services/ai/eval/out/

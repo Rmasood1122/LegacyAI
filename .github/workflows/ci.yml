@@ -102,9 +102,9 @@ jobs:
           cache-dependency-path: services/api/package-lock.json
       - run: pip install -r requirements-dev.txt
       - name: Lint (ruff)
-        run: EVIDENCE='All checks passed|error' bash ../../scripts/ci-run.sh "ruff" python -m ruff check app tests
+        run: EVIDENCE='All checks passed|error' bash ../../scripts/ci-run.sh "ruff" python -m ruff check app tests eval
       - name: Type-check (mypy, strict)
-        run: EVIDENCE='Success|error' bash ../../scripts/ci-run.sh "mypy" python -m mypy app
+        run: EVIDENCE='Success|error' bash ../../scripts/ci-run.sh "mypy" python -m mypy app eval
       - name: Start PostgreSQL 18 and build the schema (roles + every migration)
         working-directory: services/api
         run: |
@@ -113,6 +113,8 @@ jobs:
           node ../../scripts/db-setup.mjs reset
       - name: Tests - unit, database, leakage, redaction golden set (fake AI provider only)
         run: EVIDENCE='passed|failed|^leakage:|^redaction-golden:|^sizes:' bash ../../scripts/ci-run.sh "AI service tests" python -m pytest -q -p no:cacheprovider
+      - name: Evaluation with the FAKE provider ($0) - checks the evaluation runs end to end; its numbers say nothing about a real model
+        run: EVIDENCE='^eval:' bash ../../scripts/ci-run.sh "evaluation (fake provider)" python -m eval.run --provider fake --embedder fake --out eval/out/fake.json
       - name: Internal contract file matches the code (contracts/ai-internal.openapi.json)
         run: EVIDENCE='^ai-contract:' bash ../../scripts/ci-run.sh "internal contract" python -m app.contract --check
       - name: Dependency vulnerability audit (Python)

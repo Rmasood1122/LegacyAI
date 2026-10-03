@@ -1,0 +1,11 @@
+Northfield Bottling Plant (FICTIONAL — synthetic evaluation data)
+Capper settings sheet (issued 2023)
+Capper torque setting: 1.8 Nm on all heads.
+Inspect the capping chucks monthly for wear and cracks.
+Replace the capper springs every 6 months, or earlier if a head gives low torque readings.
+After any spring change, check the torque on 5 caps per head.
+---PAGE---
+Northfield Bottling Plant (FICTIONAL — synthetic evaluation data)
+Capper settings sheet (issued 2023), page 2
+Cap size for both 330 ml and 500 ml bottles: 28 mm.
+The capper speed follows the line speed automatically; do not change it by hand.

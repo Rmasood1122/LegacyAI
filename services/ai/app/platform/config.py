@@ -42,6 +42,7 @@ class Settings:
     service_token_key: Secret
     ai_provider: Provider
     ai_provider_key: Secret | None
+    ai_model: str
     ai_kill_switch: bool
     embedder: Embedder
     storage_budget_bytes: int
@@ -90,6 +91,9 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         raise ConfigError("ENVIRONMENT=test allows only AI_PROVIDER=fake and no AI_PROVIDER_KEY")
     if provider != "fake" and provider_key is None:
         raise ConfigError("a real AI provider needs AI_PROVIDER_KEY")
+    model = merged.get("AI_MODEL", "fake-1" if provider == "fake" else "").strip()
+    if not model:
+        raise ConfigError("a real AI provider needs AI_MODEL (a model with a recorded price)")
 
     embedder = merged.get("EMBEDDER", "local" if environment == "production" else "fake")
     if embedder not in ("fake", "local"):
@@ -109,6 +113,7 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         service_token_key=Secret(key),
         ai_provider=provider,  # type: ignore[arg-type]
         ai_provider_key=Secret(provider_key) if provider_key else None,
+        ai_model=model,
         ai_kill_switch=merged.get("AI_KILL_SWITCH", "false").lower() in ("1", "true", "yes", "on"),
         embedder=embedder,  # type: ignore[arg-type]
         storage_budget_bytes=budget,

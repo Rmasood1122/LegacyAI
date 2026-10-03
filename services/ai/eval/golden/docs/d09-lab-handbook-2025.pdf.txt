@@ -1,0 +1,10 @@
+Northfield Bottling Plant (FICTIONAL — synthetic evaluation data)
+Quality lab handbook (2025 edition)
+In-line sampling: take samples every 60 minutes during production.
+After every line start-up, reject the first 50 bottles before sampling begins.
+CO2 content target for sparkling water: 5.5 g/L.
+---PAGE---
+Northfield Bottling Plant (FICTIONAL — synthetic evaluation data)
+Quality lab handbook (2025 edition), page 2
+Retained samples are kept for 6 months in the sample store.
+Every retained sample is labelled with the batch number and the date.

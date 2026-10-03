@@ -16,6 +16,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106", "S108"]
+"eval/**" = ["E501", "RUF046", "S311"]   # a report script: long report lines
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 # Only the AI gateway may talk to a model provider or load an embedding model (docs/phase2/04).

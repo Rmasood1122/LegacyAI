@@ -1,0 +1,33 @@
+# Northfield Bottling Plant (FICTIONAL — synthetic evaluation data). Written before any model was run.
+# A scripted expert answers 15 turns, whatever the question. 10 topics are mapped to the job role;
+# the answers cover topics 1-8; topics 9 and 10 are never covered and must still be reported as gaps.
+job_role: Line 2 maintenance lead
+expert: Priya Nair (fictional), retiring maintenance lead
+topics:
+  - {key: T1, name: Star wheel lubrication, description: greasing the filler star wheel bearings and avoiding contamination}
+  - {key: T2, name: CO2 supply, description: CO2 banks, low pressure alarms and refills}
+  - {key: T3, name: Capper torque and springs, description: capper torque settings, spring wear and torque checks}
+  - {key: T4, name: Lock-out tag-out, description: isolating energy before work inside guards}
+  - {key: T5, name: Filling valve leaks, description: leaking filling valves, seals and isolation}
+  - {key: T6, name: Rinser nozzles, description: blocked rinser nozzles, limescale and rinser pressure}
+  - {key: T7, name: Gearbox maintenance, description: main gearbox oil changes and oil samples}
+  - {key: T8, name: Spare parts store, description: critical spare parts and the spare parts store key}
+  - {key: T9, name: Electrical cabinet thermography, description: infrared inspection of electrical cabinets for hot spots}
+  - {key: T10, name: Air compressor overhaul, description: overhauling the plant air compressor}
+coverable: [T1, T2, T3, T4, T5, T6, T7, T8]
+answers:
+  - I grease the star wheel bearings every 250 hours with the H1 grease and always wipe off the excess, because drips on the bottle path give us contamination complaints.
+  - When F33 comes up I switch to CO2 bank B straight away and phone the gas supplier; bank A usually runs out on Wednesday nights in summer.
+  - The springs on the capper heads weaken after about five months, so I change them before the six months in the old sheet and check five caps per head afterwards.
+  - Before I open a guard I lock out at cabinet E3, open valve V-9 to dump the air and press start to prove that nothing moves.
+  - A leaking filling valve is almost always the lower seal. Two isolated valves are fine; at the third I stop the filler because the fill levels start drifting.
+  - The rinser nozzles block with limescale, so I soak them in descaler for an hour every Friday instead of waiting for them to block.
+  - The gearbox oil is changed every 4000 hours, and I take an oil sample at 2000 hours to look for metal particles before they do damage.
+  - I keep the spare parts store key; the critical spares are the filling valve seals, the capper springs and one spare star wheel set.
+  - Star wheel bearings that run hot usually have too much grease rather than too little, so I never pump in more than two strokes.
+  - In summer I keep one full CO2 bank on site at all times, because the supplier needs up to a day when they are busy.
+  - If one capper head drifts low on torque while the others are fine, it is nearly always that head's spring, not the setting.
+  - Never let anyone remove your lock for you, even at the end of a long shift; if the key is lost the shift lead and plant manager must be there.
+  - After replacing a filling valve seal, test that valve in jog mode with water before running product through it.
+  - If the rinser pressure drops below 2.5 bar, check the nozzles before you touch the pump settings.
+  - Every spare that leaves the store is written on the clipboard inside the door, so the reorder list stays right.

@@ -13,6 +13,7 @@ redaction, embedding) never blocks the event loop and /health keeps answering.
 
 # No `from __future__ import annotations` here: FastAPI must evaluate the route signatures, which
 # refer to names local to create_app().
+import os
 import time
 import uuid
 from collections.abc import Callable
@@ -23,6 +24,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.ai_gateway import Caller, ChatProvider, Embedder, FakeProvider, Gateway, load_prices, load_prompts, make_embedder
+from app.ai_gateway.remote import AnthropicProvider, OpenAIProvider
 from app.capture import ingest, interviews, topics, withdrawal
 from app.capture.gaps import gap_report
 from app.knowledge import answers, expert, items, readiness, reads
@@ -196,8 +198,14 @@ class Services:
 def build_provider(settings: Settings) -> ChatProvider:
     if settings.ai_provider == "fake":
         return FakeProvider()
-    # The real providers are added at Gate 2, after the owner supplies a key with a hard spending limit.
-    raise ConfigError(f"AI provider '{settings.ai_provider}' is not available in this build")
+    # Real providers: only with a key the owner created with a hard spending limit (Gate 2). The gateway
+    # refuses any model without a recorded price, and every call is capped by our own budgets first.
+    key = settings.ai_provider_key.reveal() if settings.ai_provider_key else ""
+    if settings.ai_provider == "anthropic":
+        return AnthropicProvider(key, settings.ai_model)
+    if settings.ai_provider == "openai":
+        return OpenAIProvider(key, settings.ai_model, reasoning_effort=os.environ.get("AI_REASONING_EFFORT", "low") or None)
+    raise ConfigError(f"AI provider '{settings.ai_provider}' is not available")
 
 
 def caller_of(ctx: ServiceContext) -> Caller | None:

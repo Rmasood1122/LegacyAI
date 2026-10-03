@@ -1,0 +1,10 @@
+Northfield Bottling Plant (FICTIONAL — synthetic evaluation data)
+Maintenance handbook (2019 edition)
+Grease the filler star wheel bearings every 500 operating hours.
+Change the main gearbox oil every 2000 operating hours.
+The CO2 low-pressure alarm is set at 3.0 bar.
+---PAGE---
+Northfield Bottling Plant (FICTIONAL — synthetic evaluation data)
+Maintenance handbook (2019 edition), page 2
+Check the vibration of the main drive monthly with the hand-held vibration meter.
+The key to the spare parts store is held by the maintenance lead.
