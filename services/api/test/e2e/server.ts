@@ -51,7 +51,7 @@ async function main(): Promise<void> {
   personas.set('owner', { card: ownerCard, totpSecret: ownerSecret });
   t.clock.advance(31_000);
   const owner = await login(t, ownerCard, { totp: ownerSecret });
-  for (const [name, roles] of [['author', ['expert']], ['reviewer', ['reviewer']], ['learner', ['successor']]] as const) {
+  for (const [name, roles] of [['author', ['expert']], ['reviewer', ['expert']], ['learner', ['successor']]] as const) {
     const card = await issue(owner, `Synthetic ${name}`, [...roles]);
     personas.set(name, { card, totpSecret: await enrollTotp(t, card) });
   }
