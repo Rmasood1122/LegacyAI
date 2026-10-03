@@ -187,8 +187,10 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
     const su = await superuser();
     const granted = new Set((await su.query(`SELECT permission_key FROM role_permissions WHERE role_key = 'successor'`)).rows.map((r) => r.permission_key as string));
     await su.end();
-    expect([...granted].sort()).toEqual(['card:list', 'card:read', 'card_events:read', 'card_roles:read', 'department:read', 'knowledge:read',
-      'person:read', 'role:read', 'self:credential_remove', 'self:logout', 'self:read']);
+    expect([...granted].sort()).toEqual(['card:list', 'card:read', 'card_events:read', 'card_roles:read', 'consent:give', 'consent:read',
+      'consent:withdraw', 'contribution:restrict', 'department:read', 'expert_question:create', 'expert_question:read', 'knowledge:ask',
+      'knowledge:read', 'person:read', 'quiz:read_results', 'quiz:take', 'role:read', 'self:credential_remove', 'self:logout', 'self:read',
+      'source:confirm', 'topic:read']);
 
     const bodies: Record<string, unknown> = {
       issueCard: { person_id: successor.personId, roles: [{ role_key: 'expert' }] },

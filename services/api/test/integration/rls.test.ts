@@ -38,8 +38,9 @@ async function asTenant<T>(tenantId: string | null, fn: () => Promise<T>): Promi
 }
 
 const GLOBAL_TABLES = [
-  'audit_detail_keys', 'auth_transactions', 'card_directory', 'login_attempts', 'permissions', 'plan_limits', 'rate_limit_buckets',
-  'role_permissions', 'roles', 'schema_migrations',
+  'ai_global', 'ai_plan_defaults', 'audit_detail_keys', 'auth_transactions', 'card_directory', 'login_attempts',
+  'permissions', 'plan_limits', 'rate_limit_buckets', 'role_permissions', 'roles', 'schema_migrations',
+  'tenant_usage_counters',
 ];
 
 describe('the application database role', () => {
@@ -67,9 +68,10 @@ describe('every tenant table has forced row-level security', () => {
           AND (c.relname = 'tenants' OR EXISTS (
                 SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname = 'tenant_id' AND NOT a.attisdropped))
         ORDER BY 1`);
-    const exempt = new Set(['auth_transactions', 'card_directory', 'login_attempts']); // global on purpose (documented)
+    // global on purpose (documented): sign-in tables, and the per-company chunk counter that holds counts only
+    const exempt = new Set(['auth_transactions', 'card_directory', 'login_attempts', 'tenant_usage_counters']);
     const scoped = rows.filter((r) => !exempt.has(r.table));
-    expect(scoped.length).toBe(24);
+    expect(scoped.length).toBe(49); // 24 from Phase 1 + 25 from Phase 2 (docs/phase2/02)
     for (const r of scoped) {
       expect(r, `table ${r.table}`).toMatchObject({ enabled: true, forced: true });
       expect(r.policies, `table ${r.table} has no policy`).toBeGreaterThanOrEqual(1);
@@ -226,6 +228,21 @@ describe('cross-tenant access attempts (as the app role, in SQL)', () => {
   });
 });
 
+// Every function we create, and which of them run with their owner's rights. A new function must be
+// added here on purpose - and pass the search-path rule below.
+const OUR_FUNCTIONS = [
+  'ai_usage_ledger_guard', 'app_current_tenant', 'audit_field', 'audit_log_chain', 'audit_log_reject_change',
+  'audit_write', 'cards_enforce_lifecycle', 'cards_register_directory', 'chunks_count', 'chunks_guard',
+  'citations_guard', 'consent_is_valid', 'consents_guard', 'erase_version', 'expert_questions_guard',
+  'interviews_guard', 'knowledge_items_guard', 'knowledge_versions_immutable', 'purge_login_attempts',
+  'quiz_attempts_guard', 'quiz_items_guard', 'relabel', 'resolve_card', 'review_tasks_guard', 'sources_guard',
+  'topics_guard',
+];
+const OUR_DEFINER_FUNCTIONS = [
+  'audit_log_chain', 'audit_write', 'cards_register_directory', 'chunks_count', 'erase_version',
+  'knowledge_items_guard', 'purge_login_attempts', 'resolve_card', 'sources_guard',
+];
+
 describe('SECURITY DEFINER functions cannot be hijacked', () => {
   it('the app role cannot create temporary tables (which could shadow a real table inside a definer function)', async () => {
     await asTenant(a.tenantId, async () => {
@@ -235,18 +252,19 @@ describe('SECURITY DEFINER functions cannot be hijacked', () => {
 
   it('every function in the schema pins its search path with pg_temp last', async () => {
     const { rows } = await su.query<{ proname: string; prosecdef: boolean; config: string[] | null }>(
-      `SELECT proname, prosecdef, proconfig AS config FROM pg_proc WHERE pronamespace = 'public'::regnamespace ORDER BY 1`);
-    expect(rows.map((r) => r.proname)).toEqual([
-      'app_current_tenant', 'audit_field', 'audit_log_chain', 'audit_log_reject_change', 'cards_enforce_lifecycle',
-      'cards_register_directory', 'purge_login_attempts', 'resolve_card',
-    ]);
+      `SELECT p.proname, p.prosecdef, p.proconfig AS config FROM pg_proc p
+        WHERE p.pronamespace = 'public'::regnamespace
+          -- functions that belong to an extension (pgvector) are not ours to configure
+          AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')
+        ORDER BY 1`);
+    expect(rows.map((r) => r.proname)).toEqual(OUR_FUNCTIONS);
     for (const r of rows) {
       const path = (r.config ?? []).find((c) => c.startsWith('search_path='));
       expect(path, `${r.proname} has no pinned search_path`).toBeDefined();
       expect(path!.endsWith('pg_temp'), `${r.proname}: ${path}`).toBe(true);
       expect(path!.startsWith('search_path=pg_catalog'), `${r.proname}: ${path}`).toBe(true);
     }
-    expect(rows.filter((r) => r.prosecdef).map((r) => r.proname)).toEqual(['audit_log_chain', 'cards_register_directory', 'purge_login_attempts', 'resolve_card']);
+    expect(rows.filter((r) => r.prosecdef).map((r) => r.proname)).toEqual(OUR_DEFINER_FUNCTIONS);
   });
 
   it('trigger functions cannot be called directly, and the purge function only removes OLD login attempts', async () => {
