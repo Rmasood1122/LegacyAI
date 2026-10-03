@@ -163,6 +163,11 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
     // records the route PATTERN (no ids, no query string) and nothing from the body.
     disableRequestLogging: true,
     bodyLimit: 64 * 1024,
+    // A path parameter is measured in its percent-encoded form, and the default limit is 100. A job-role name may be
+    // 120 characters; one character in a non-Latin script takes up to 12 encoded characters, so a name of about 9
+    // such characters or more could not be addressed at all (found by a CI test: 414). Every parameter is still
+    // validated against the contract after decoding.
+    routerOptions: { maxParamLength: 120 * 12 },
     requestTimeout: 30_000,
     // Trust exactly N proxy hops for the client address (never "all"): anything further left in
     // X-Forwarded-For was written by the caller and is ignored.
