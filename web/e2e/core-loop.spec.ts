@@ -111,7 +111,7 @@ test('asking: the screen shows exactly what the API decided - an answer with sou
     const answer = await response.json() as { outcome: string; answer: string | null; citations: unknown[] };
     if (answer.outcome === 'answered') {
       await expect(page.getByRole('heading', { name: 'Answer' })).toBeVisible();
-      await expect(page.getByText(answer.answer ?? '')).toBeVisible();
+      await expect(page.locator('p.answer')).toHaveText(answer.answer ?? '');   // the quote under Sources may repeat the same words
       await expect(page.getByRole('heading', { name: 'Sources' })).toBeVisible();
     } else {
       await expect(page.getByText(answer.outcome === 'search_only' ? 'No written answer — here is what was found' : 'I don’t know')).toBeVisible();
