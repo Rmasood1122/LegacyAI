@@ -161,7 +161,9 @@ jobs:
         run: EVIDENCE='Test Files|Tests ' bash ../../scripts/ci-run.sh "both services walk" npx vitest run test/contract/phase2-walk.test.ts
       - name: AI service log (on failure)
         if: failure()
-        run: tail -n 120 ai-service.log
+        run: |
+          tail -n 120 ai-service.log
+          echo "::error title=AI service log (last lines)::$(grep -v 'presidio-analyzer' ai-service.log | grep -v 'GET /health' | tail -n 25 | cut -c1-300 | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')" || true
 
   web:
     name: Web application - type-check, lint, unit tests, build, contract types, audit
@@ -267,6 +269,7 @@ jobs:
         run: |
           tail -n 80 e2e-server.log || true
           tail -n 80 ai-service.log || true
+          echo "::error title=AI service log (last lines)::$(grep -v 'presidio-analyzer\|GET /health' ai-service.log | tail -n 25 | cut -c1-300 | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')" || true
           for f in web/e2e-artifacts/failures/*.txt; do
             [ -f "$f" ] || continue
             echo "::error title=page text at the failure - $(basename "$f")::$(head -c 2500 "$f" | sed -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}')"

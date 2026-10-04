@@ -112,7 +112,12 @@ ALTER TABLE review_tasks DROP CONSTRAINT review_tasks_subject_type_check;
 ALTER TABLE review_tasks ADD CONSTRAINT review_tasks_subject_type_check CHECK (subject_type IN ('knowledge_item', 'source', 'expert_question',
   'quiz_item', 'quiz_answer', 'answer'));
 
+-- The audit trail may now say what a reader's opinion was and whether the question was shared (never the comment or
+-- the question itself). audit_write() refuses any detail key that is not listed here.
+INSERT INTO audit_detail_keys (key) VALUES ('verdict'), ('question_shared');
+
 -- migrate:down
+DELETE FROM audit_detail_keys WHERE key IN ('verdict', 'question_shared');
 -- Tasks of the two new kinds, of every company, must go before the old constraints return (see the note in "up").
 ALTER TABLE review_tasks NO FORCE ROW LEVEL SECURITY;
 DELETE FROM review_tasks WHERE kind IN ('item_conflict', 'answer_feedback') OR subject_type = 'answer';
