@@ -104,7 +104,7 @@ test('an anomaly rule locks a card after refused requests of its own session, an
   await checkScreen(page, '45-anomaly-locks');
   // the card is named by its masked number; the newest lock is the first row
   await locks.getByRole('link').first().click();
-  await expect(page.getByText('Locked by an anomaly rule')).toBeVisible();
+  await expect(page.getByText('Locked by an anomaly rule', { exact: true })).toBeVisible();   // the badge on the card, not the list's heading
   await page.getByRole('button', { name: 'Unlock with a new 3-digit code…' }).click();
   await page.getByRole('button', { name: 'Yes, unlock it' }).click();
   await expect(page.getByText('The card was unlocked')).toBeVisible();
