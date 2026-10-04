@@ -305,7 +305,10 @@ describe('what a request with a key can do', () => {
     expect(open + closed + publicOps).toBe(t.app.http.contract.operations.size);
     // and the stronger statement: the policy was never even asked, with this key, about anything but the five permissions
     const asked = new Set((await su.query('SELECT action, details FROM audit_log WHERE tenant_id = $1', [tenant.tenantId])).rows
-      .filter((r) => detailsOf(r).api_key_id === made.id).map((r) => r.action as string));
+      .filter((r) => detailsOf(r).api_key_id === made.id).map((r) => r.action as string)
+      // rows ABOUT the key (its creation by the Owner, records of its use) also name it; they are not questions the key asked
+      .filter((action) => !action.startsWith('api_key:')));
+    expect(asked.size).toBeGreaterThan(0);
     for (const action of asked) expect(['gap:read', 'knowledge:ask', 'knowledge:read', 'source:read', 'topic:read']).toContain(action);
   });
 });
