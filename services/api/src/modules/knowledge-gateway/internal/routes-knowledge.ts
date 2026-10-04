@@ -2,7 +2,7 @@
 import { problems } from '../../../shared/errors.ts';
 import type { ResourceRef } from '../../../shared/policy-types.ts';
 import { decodeIdCursor, encodeCursor, type RouteDef, type Tx } from '../../platform/index.ts';
-import { aiLimits, baseClaims, gatewayRoute, pick, uuidOrNull, withListFilter, type GatewayDeps } from './common.ts';
+import { aiLimits, baseClaims, gatewayRoute, keyGatewayRoute, pick, uuidOrNull, withListFilter, type GatewayDeps } from './common.ts';
 import { chunkRefs, collectionRef, forTopicChange, itemRef, newRef, sourceRef, topicRef } from './resources.ts';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -108,7 +108,7 @@ export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
       }, MAX_UPLOAD_BYTES),
     {
       operationId: 'listSources',
-      kind: 'session',
+      kind: 'session-or-key',   // also takes a machine's API key (openapi.yaml: x-api-key)
       listFilter: 'applied',
       policy: { resource: async ({ subject }) => collectionRef('source', subject.tenant_id) },
       handler: async ({ tx, subject, query, ctx }) => {
@@ -126,11 +126,12 @@ export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
     },
     {
       operationId: 'getSource',
-      kind: 'gateway',
+      kind: 'gateway-or-key',   // also takes a machine's API key (openapi.yaml: x-api-key)
       policy: { resource: ({ tx, subject, params }) => sourceRef(tx, subject.tenant_id, params.source_id) },
       prepare: async ({ tx, subject, decision, ctx, params, resource }) => {
-        // A document still being embedded continues on each status request (there is no background worker).
-        if ((resource as ResourceRef & { status: string }).status !== 'processing') {
+        // A document still being embedded continues on each status request (there is no background worker) - but only
+        // for a signed-in card. A machine's key READS: it is told the current status and starts no work.
+        if ((resource as ResourceRef & { status: string }).status !== 'processing' || subject.kind !== 'card') {
           return { body: await sourceDetail(tx, subject.tenant_id, params.source_id) };
         }
         const claims = baseClaims(subject, decision, ctx);
@@ -169,7 +170,7 @@ export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
     // ------------------------------------------------------------------ asking (two steps, approval in between)
     {
       operationId: 'askKnowledge',
-      kind: 'gateway',
+      kind: 'gateway-or-key',   // also takes a machine's API key (openapi.yaml: x-api-key)
       listFilter: 'delegated',
       policy: { resource: async ({ subject }) => collectionRef('knowledge', subject.tenant_id) },
       prepare: async ({ tx, subject, decision, ctx, body }) => {
@@ -224,14 +225,14 @@ export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
     },
 
     // ------------------------------------------------------------------ knowledge items
-    withListFilter('delegated', gatewayRoute(deps, 'listKnowledgeItems',
+    withListFilter('delegated', keyGatewayRoute(deps, 'listKnowledgeItems',
       async ({ subject }) => collectionRef('knowledge_item', subject.tenant_id),
       async ({ query }) => ({
         path: '/internal/items/list', action: 'item.list', filterAction: 'knowledge:read',
         json: { status: query.status ?? null, owner_me: query.mine === true, limit: query.limit, after: decodeIdCursor(query.cursor) },
         map: (r) => ({ items: (r.items ?? []).map((i: any) => pick(i, ITEM_SUMMARY)), next_cursor: r.next_cursor ? encodeCursor(r.next_cursor) : null }),
       }))),
-    gatewayRoute(deps, 'getKnowledgeItem',
+    keyGatewayRoute(deps, 'getKnowledgeItem',
       ({ tx, subject, params }) => itemRef(tx, subject.tenant_id, params.item_id),
       async ({ params }) => ({
         path: `/internal/items/${params.item_id}/read`, action: 'item.read', subject: params.item_id, filterAction: 'knowledge:read',

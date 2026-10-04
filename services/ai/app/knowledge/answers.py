@@ -284,5 +284,6 @@ def _finish(db: Database, ctx: ServiceContext, question_redacted: str, expert_pe
                 cur.execute("UPDATE knowledge_items SET usage_count = usage_count + 1 WHERE tenant_id = %s AND id = %s", (ctx.tenant_id, c.id))
         write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="knowledge:answer", reason_code=f"ANSWER_{result.outcome.upper()}",
                     resource_type="answer", resource_id=log_id, request_id=ctx.request_id,
-                    details={"candidates": result.candidates, "approved": result.approved, "outcome": result.outcome})
+                    details={"candidates": result.candidates, "approved": result.approved, "outcome": result.outcome},
+                    api_key_id=ctx.api_key_id)
     return result

@@ -1086,6 +1086,58 @@ export interface UpdateAnomalySettingsRequest {
   second_address_window_minutes?: number;
 }
 
+export type ApiKeyPermission = "knowledge:read" | "knowledge:ask" | "topic:read" | "gap:read" | "source:read";
+
+export type SensitivityLevel = number;
+
+export type ApiKeyToken = string;
+
+export interface ApiKeyFields {
+  id: string;
+  name: string;
+  created_by_card_id: string;
+  secret_hint: string;
+  scope: ApiKeyPermission[];
+  max_sensitivity: SensitivityLevel;
+  asks_per_hour: number;
+  allowed_cidrs: string[] | null;
+  status: "active" | "expired" | "revoked" | "suspended";
+  created_at: string;
+  expires_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  revoked_reason: "by_owner" | "maker_code_rotated" | "maker_credentials_reset" | "maker_privilege_change" | "maker_card_replaced" | "maker_card_revoked" | "maker_card_suspended" | "maker_card_locked" | null;
+}
+
+export type ApiKey = ApiKeyFields;
+
+export type ApiKeyCreated = ApiKeyFields & {
+  api_key?: ApiKeyToken;
+  secret_already_shown: boolean;
+};
+
+export interface ApiKeyOptions {
+  grantable: {
+    permission: ApiKeyPermission;
+    max_sensitivity: SensitivityLevel;
+  }[];
+  limits: {
+    max_expires_in_days: number;
+    requests_per_minute: number;
+    default_asks_per_hour: number;
+    max_asks_per_hour: number;
+  };
+}
+
+export interface NewApiKeyRequest {
+  name: string;
+  asks_per_hour?: number;
+  scope: ApiKeyPermission[];
+  max_sensitivity: number;
+  expires_in_days: number;
+  allowed_cidrs?: string[] | null;
+}
+
 export interface AnomalyEvent {
   id: string;
   card_id: string;
@@ -1521,6 +1573,10 @@ export const operations = {
   getAnomalySettings: { method: "GET", path: "/v1/tenants/current/anomaly-settings", status: 200, idempotent: false, public: false, permission: "tenant_settings:read", contentTypes: [] },
   updateAnomalySettings: { method: "PATCH", path: "/v1/tenants/current/anomaly-settings", status: 200, idempotent: true, public: false, permission: "tenant_settings:update", contentTypes: ["application/json"] },
   listAnomalyEvents: { method: "GET", path: "/v1/anomalies", status: 200, idempotent: false, public: false, permission: "card_events:read", contentTypes: [] },
+  listApiKeys: { method: "GET", path: "/v1/api-keys", status: 200, idempotent: false, public: false, permission: "api_key:read", contentTypes: [] },
+  createApiKey: { method: "POST", path: "/v1/api-keys", status: 201, idempotent: true, public: false, permission: "api_key:manage", contentTypes: ["application/json"] },
+  getApiKeyOptions: { method: "GET", path: "/v1/api-keys/options", status: 200, idempotent: false, public: false, permission: "api_key:read", contentTypes: [] },
+  revokeApiKey: { method: "POST", path: "/v1/api-keys/{api_key_id}/revoke", status: 200, idempotent: true, public: false, permission: "api_key:manage", contentTypes: [] },
   getLeavingDate: { method: "GET", path: "/v1/people/{person_id}/leaving-date", status: 200, idempotent: false, public: false, permission: "person:read", contentTypes: [] },
   setLeavingDate: { method: "PUT", path: "/v1/people/{person_id}/leaving-date", status: 200, idempotent: true, public: false, permission: "person:update", contentTypes: ["application/json"] },
   clearLeavingDate: { method: "DELETE", path: "/v1/people/{person_id}/leaving-date", status: 204, idempotent: true, public: false, permission: "person:update", contentTypes: [] },
@@ -2573,6 +2629,33 @@ export interface OperationTypes {
       items: AnomalyEvent[];
       next_cursor: string | null;
     };
+  };
+  listApiKeys: {
+    path: undefined;
+    query: { limit?: number; cursor?: string };
+    body: undefined;
+    response: {
+      items: ApiKey[];
+      next_cursor: string | null;
+    };
+  };
+  createApiKey: {
+    path: undefined;
+    query: undefined;
+    body: NewApiKeyRequest;
+    response: ApiKeyCreated;
+  };
+  getApiKeyOptions: {
+    path: undefined;
+    query: undefined;
+    body: undefined;
+    response: ApiKeyOptions;
+  };
+  revokeApiKey: {
+    path: { api_key_id: string };
+    query: undefined;
+    body: undefined;
+    response: ApiKey;
   };
   getLeavingDate: {
     path: { person_id: string };

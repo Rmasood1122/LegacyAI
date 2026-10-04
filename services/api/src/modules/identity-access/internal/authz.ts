@@ -1,15 +1,15 @@
 // Glue between the pure policy functions and the database: loads the data a decision
 // needs, calls decide(), honours usage counters, and writes EVERY decision to the audit log.
-import type { Decision, RequestContext, ResourceRef, Subject } from '../../../shared/policy-types.ts';
+import { actingCardId, type CardSubject, type Decision, type RequestContext, type ResourceRef, type Subject } from '../../../shared/policy-types.ts';
 import type { BillingPort } from '../../billing/index.ts';
 import { getSettings, getTenant, writeAudit, type Tx } from '../../platform/index.ts';
 import { accessPhase } from './lifecycle.ts';
 import {
-  buildResourceFilter, buildResourceFilterSpec, decide, usageKey,
+  buildResourceFilter, buildResourceFilterSpec, decide, heldGrants, usageKey,
   type FilterSpec, type Grant, type Matrix, type PermissionDef, type PolicyContext, type ResourceDescriptor, type ResourceFilter,
   type Restriction,
 } from './policy.ts';
-import { loadCompanyCard, sessionExtras } from './sessions.ts';
+import { loadCompanyCard, sessionExtras, subjectForCard } from './sessions.ts';
 
 const MATRIX_TTL_MS = 60_000;
 const RESTRICTION_DENIALS = new Set(['DENY_CARD_LIMIT', 'DENY_CARD_HOURS', 'DENY_CARD_NETWORK', 'DENY_CARD_READ_ONLY']);
@@ -30,6 +30,22 @@ export type KnowledgeSettingsLoader = (tx: Tx, tenantId: string) => Promise<{ le
 
 /** Actions whose decisions depend on the knowledge settings. */
 const KNOWLEDGE_NAMESPACES = ['knowledge:', 'source:', 'capture:', 'quiz:', 'expert_question:', 'interview:', 'gap:', 'topic:', 'review:'];
+
+/** What a decision's audit row says besides the decision: the obligations, and the API key that asked (its id only). */
+function recordDetails(subject: Subject, decision: Decision): Record<string, string> | undefined {
+  const details: Record<string, string> = { ...auditDetailsOf(subject) };
+  if (decision.obligations.length > 0) details.obligations = decision.obligations.map((o) => o.type).sort().join(',');
+  return Object.keys(details).length > 0 ? details : undefined;
+}
+
+/**
+ * How the audit trail names who asked. The actor column holds a CARD: the card itself, or - for a key - the card the
+ * key acts for, with the key's id in the details. (The audit writer knows the actor kinds "card" and "service"; a
+ * third kind would mean changing the rules of the tamper-evident table, which a rollback could not undo.)
+ */
+export function auditDetailsOf(subject: Subject): Record<string, string> {
+  return subject.kind === 'api_key' ? { api_key_id: subject.key_id } : {};
+}
 
 export class Authorizer {
   readonly #billing: BillingPort;
@@ -53,6 +69,7 @@ export class Authorizer {
   }
 
   async policyContext(tx: Tx, subject: Subject, action: string, ctx: RequestContext): Promise<PolicyContext> {
+    if (subject.kind === 'api_key') return this.#keyContext(tx, subject.tenant_id, subject.acts_for.card_id, action, ctx);
     const extras = sessionExtras(subject);
     const tenant = extras?.tenant ?? (await getTenant(tx, subject.tenant_id));
     if (!tenant) throw new Error('authorize: tenant not found');
@@ -87,6 +104,24 @@ export class Authorizer {
     };
   }
 
+  /**
+   * What a decision about an API key needs: the card that made it as it is NOW (its state, expiry and roles decide
+   * what the key may do), and nothing that belongs to a card's own use - no card restrictions, no usage cap.
+   */
+  async #keyContext(tx: Tx, tenantId: string, makerCardId: string, action: string, ctx: RequestContext): Promise<PolicyContext> {
+    const tenant = await getTenant(tx, tenantId);
+    if (!tenant) throw new Error('authorize: tenant not found');
+    const plan = await this.#billing.checkLimit({ tx, tenantId, planCode: tenant.plan_code, action });
+    const knowledge = this.#knowledgeSettings !== null && KNOWLEDGE_NAMESPACES.some((n) => action.startsWith(n))
+      ? await this.#knowledgeSettings(tx, tenantId)
+      : {};
+    return {
+      now: ctx.now, ip: ctx.ip, tenant: { status: tenant.status }, settings: { ...(await getSettings(tx, tenantId)), ...knowledge },
+      matrix: await this.matrix(tx), companyCard: await loadCompanyCard(tx, tenantId), restrictions: [], usage: new Map(),
+      planAllows: plan.allowed === true, keyMaker: await subjectForCard(tx, tenantId, makerCardId),
+    };
+  }
+
   /** Decides without writing anything. Used only where the caller records the outcome itself (login). */
   async decideOnly(tx: Tx, subject: Subject, action: string, resource: ResourceRef, ctx: RequestContext): Promise<Decision> {
     try {
@@ -99,6 +134,8 @@ export class Authorizer {
   /** The policy decision point as the HTTP layer sees it: decide and count usage. The HTTP layer then calls record(). */
   async authorize(tx: Tx, subject: Subject, action: string, resource: ResourceRef, ctx: RequestContext): Promise<Decision> {
     const decision = await this.decideOnly(tx, subject, action, resource, ctx);
+    // usage caps and restriction events belong to a CARD: a key has neither and writes nothing on its maker's card
+    if (subject.kind !== 'card') return decision;
 
     if (decision.effect === 'allow') {
       for (const o of decision.obligations) {
@@ -130,7 +167,7 @@ export class Authorizer {
   ): Promise<void> {
     await writeAudit(tx, {
       tenantId: subject.tenant_id,
-      actorCardId: subject.card_id,
+      actorCardId: actingCardId(subject),
       actorKind,
       action,
       resourceType: resource.type,
@@ -139,7 +176,7 @@ export class Authorizer {
       reasonCode: decision.reason_code,
       requestId: ctx.requestId,
       ip: ctx.ip,
-      details: decision.obligations.length > 0 ? { obligations: decision.obligations.map((o) => o.type).sort().join(',') } : undefined,
+      details: recordDetails(subject, decision),
     });
   }
 
@@ -163,18 +200,24 @@ export class Authorizer {
     }
   }
 
-  /** What the session endpoint reports: permission keys held, and whether the card is read-only / export-only. */
-  async describe(tx: Tx, subject: Subject, ctx: RequestContext): Promise<{ permissions: string[]; read_only: boolean; export_only: boolean }> {
+  /**
+   * Every permission the card holds through its roles, with the highest level it holds it at. Used when a card
+   * makes an API key: the key may name only what its maker holds, and no level above its maker's. A card only:
+   * a key holds nothing in its own right and cannot make keys.
+   */
+  async heldLevels(tx: Tx, subject: CardSubject, ctx: RequestContext): Promise<Map<string, number>> {
     const pc = await this.policyContext(tx, subject, 'self:read', ctx);
-    const enabled = new Set<string>(pc.settings.enabled_roles);
-    const roleKeys = new Set(subject.roles.filter((r) => enabled.has(r.role_key)).map((r) => r.role_key as string));
-    const permissions = new Set<string>();
-    for (const g of pc.matrix.grants) {
-      if (!roleKeys.has(g.role_key)) continue;
-      if (g.grant_source === 'pilot_reviewer' && !pc.settings.pilot_reviewer_grant) continue;
-      if (pc.matrix.permissions.get(g.permission_key)?.platform_only === true && !subject.is_platform_tenant) continue;
-      permissions.add(g.permission_key);
+    const held = new Map<string, number>();
+    for (const g of heldGrants(subject.roles, subject.is_platform_tenant, pc)) {
+      held.set(g.permission_key, Math.max(held.get(g.permission_key) ?? 0, g.max_sensitivity));
     }
+    return held;
+  }
+
+  /** What the session endpoint reports: permission keys held, and whether the card is read-only / export-only. */
+  async describe(tx: Tx, subject: CardSubject, ctx: RequestContext): Promise<{ permissions: string[]; read_only: boolean; export_only: boolean }> {
+    const pc = await this.policyContext(tx, subject, 'self:read', ctx);
+    const permissions = new Set(heldGrants(subject.roles, subject.is_platform_tenant, pc).map((g) => g.permission_key));
     const phases = [accessPhase(subject, ctx.now), pc.companyCard ? accessPhase(pc.companyCard, ctx.now) : 'normal'];
     return {
       permissions: [...permissions].sort(),

@@ -95,6 +95,8 @@ export const ROUTES = {
   settings: { path: '/settings', label: 'Settings', requiredOperation: 'getTenantSettings', menu: 'manage' },
   // The renewal center. Only an Owner holds the right to read the subscription.
   billing: { path: '/billing', label: 'Billing and renewal', requiredOperation: 'getSubscription', menu: 'manage' },
+  // Keys for machines. Only an Owner holds the right to list them.
+  apiKeys: { path: '/api-keys', label: 'API keys', requiredOperation: 'listApiKeys', menu: 'manage' },
   audit: { path: '/audit', label: 'Audit log', requiredOperation: 'listAuditEvents', menu: 'manage' },
   operator: { path: '/operator', label: 'Operator console', requiredOperation: 'listTenants', menu: 'manage' },
 } as const satisfies Record<string, RouteDef>;

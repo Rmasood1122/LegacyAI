@@ -27,9 +27,9 @@ afterAll(async () => t.close());
 const PHASE2_PATH = /^\/v1\/(sources|knowledge|interviews|gaps|topics|job-roles|expert-questions|readiness|consents|review|redaction|quality|ai|me\/(consents|contributions)|people\/\{person_id\}\/consent-withdrawals|tenants\/\{tenant_id\}\/ai-budget|platform\/(ai|storage)|topic-templates|analytics|scenarios|scenario-offers|scenario-attempts|scenario-answers|scenario-rubric-proposals|billing|tenants\/\{tenant_id\}\/billing)(\/|$)/;   // billing: walked by test/integration/billing.test.ts
 
 describe('the contract file', () => {
-  it('is OpenAPI 3.1 with 165 operations (46 from Phase 1, 78 from Phase 2, 41 from Phase 4), all under /v1, each with a unique operationId', () => {
+  it('is OpenAPI 3.1 with 169 operations (46 from Phase 1, 78 from Phase 2, 45 from Phase 4), all under /v1, each with a unique operationId', () => {
     const c = loadContract(CONTRACT_PATH);
-    expect(c.operations.size).toBe(165);
+    expect(c.operations.size).toBe(169);
     for (const op of c.operations.values()) {
       expect(op.path.startsWith('/v1/')).toBe(true);
       expect(op.responses.size).toBeGreaterThanOrEqual(2);
@@ -43,17 +43,19 @@ describe('the contract file', () => {
     const { readFileSync } = await import('node:fs');
     const yaml = readFileSync(CONTRACT_PATH, 'utf8');
     const count = (needle: string): number => yaml.split(needle).length - 1;
-    expect(count('$ref: "#/components/parameters/Limit"')).toBe(9);   // + getTenantBilling;   // + listInvoices;   // + listAnomalyEvents
-    expect(count('$ref: "#/components/parameters/Cursor"')).toBe(23);   // + getTenantBilling;   // + listInvoices;   // + listScenarios, listScenarioAttempts;   // 13 + listReadinessAttempts, listExpertQuestions, listMyConsents (listJobRoles has its own, longer name cursor)
-    expect(count('$ref: "#/components/parameters/IdempotencyKey"')).toBe(90);   // + setTenantSeatLimit;   // + updateSubscription, startRenewal, recordManualPayment;   // + the nine scenario writes;   // + anomaly settings, leaving date (set, clear), apply a template
-    expect(count('$ref: "#/components/responses/TooManyRequests"')).toBe(165);
+    expect(count('$ref: "#/components/parameters/Limit"')).toBe(10);   // + listApiKeys   // + getTenantBilling;   // + listInvoices;   // + listAnomalyEvents
+    expect(count('$ref: "#/components/parameters/Cursor"')).toBe(24);   // + listApiKeys   // + getTenantBilling;   // + listInvoices;   // + listScenarios, listScenarioAttempts;   // 13 + listReadinessAttempts, listExpertQuestions, listMyConsents (listJobRoles has its own, longer name cursor)
+    expect(count('$ref: "#/components/parameters/IdempotencyKey"')).toBe(92);   // + createApiKey, revokeApiKey   // + setTenantSeatLimit;   // + updateSubscription, startRenewal, recordManualPayment;   // + the nine scenario writes;   // + anomaly settings, leaving date (set, clear), apply a template
+    expect(count('$ref: "#/components/responses/TooManyRequests"')).toBe(169);   // + getApiKeyOptions
+    // the one operation where the key is optional (a retried question is answered once): askKnowledge
+    expect(count('$ref: "#/components/parameters/IdempotencyKeyOptional"')).toBe(1);
     expect(yaml).toContain('openapi: 3.1.0');
   });
 });
 
 describe('response validation really fires (seen firing)', () => {
   const server = async (body: unknown, status = 200) => {
-    const auth: AuthPort = { tenantOfToken: () => null, resolveSession: async () => null, authorize: async () => ({ effect: 'deny', reason_code: 'X', obligations: [] }), recordDecision: async () => undefined };
+    const auth: AuthPort = { tenantOf: () => null, resolveCredential: async () => ({ kind: 'refused' }), auditDetails: () => ({}), authorize: async () => ({ effect: 'deny', reason_code: 'X', obligations: [] }), recordDecision: async () => undefined };
     const s = await createHttpServer({
       config: loadConfig(testEnv()), db: t.app.db, log: createLogger('silent'), clock: systemClock, auth,
       rateLimiter: { hit: async () => ({ allowed: true, retryAfterSeconds: 0 }) }, idempotency: new PostgresIdempotencyStore(), contractPath: CONTRACT_PATH,
@@ -78,7 +80,7 @@ describe('response validation really fires (seen firing)', () => {
   });
 
   it('with validation switched off the same bad response would go out - which is why tests run with it on', async () => {
-    const auth: AuthPort = { tenantOfToken: () => null, resolveSession: async () => null, authorize: async () => ({ effect: 'deny', reason_code: 'X', obligations: [] }), recordDecision: async () => undefined };
+    const auth: AuthPort = { tenantOf: () => null, resolveCredential: async () => ({ kind: 'refused' }), auditDetails: () => ({}), authorize: async () => ({ effect: 'deny', reason_code: 'X', obligations: [] }), recordDecision: async () => undefined };
     const s = await createHttpServer({
       config: loadConfig(testEnv({ VALIDATE_RESPONSES: 'false' })), db: t.app.db, log: createLogger('silent'), clock: systemClock, auth,
       rateLimiter: { hit: async () => ({ allowed: true, retryAfterSeconds: 0 }) }, idempotency: new PostgresIdempotencyStore(), contractPath: CONTRACT_PATH,
@@ -284,6 +286,12 @@ describe('every one of the 47 operations returns a contract-conforming success',
     const exp = ok('createExport', await o.post('/v1/exports'), 202);
     ok('getExport', await o.get(`/v1/exports/${exp.body.id}`), 200);
 
+    // API keys (Phase 4): make one, list, revoke. (What a key itself may do is tested in test/integration/api-keys.test.ts.)
+    const apiKey = ok('createApiKey', await o.post('/v1/api-keys', { name: 'Walk key', scope: ['topic:read'], max_sensitivity: 0, expires_in_days: 30 }), 201);
+    ok('listApiKeys', await o.get('/v1/api-keys?limit=5'), 200);
+    ok('getApiKeyOptions', await o.get('/v1/api-keys/options'), 200);
+    ok('revokeApiKey', await o.post(`/v1/api-keys/${apiKey.body.id}/revoke`), 200);
+
     ok('logout', await member.request('POST', '/v1/auth/logout'), 401); // the member's session ended when the card was replaced...
     hit.delete('logout');
     const fresh = await addMember(t, o, [{ role_key: 'expert' }]);
@@ -292,8 +300,8 @@ describe('every one of the 47 operations returns a contract-conforming success',
     // Phase 2 operations need the AI service: they are walked, with the real service, by test/contract/phase2-walk.test.ts.
     const all = [...t.app.http.contract.operations.values()].filter((op) => !PHASE2_PATH.test(op.path)).map((op) => op.operationId).sort();
     expect([...hit].sort()).toEqual(all);
-    expect(hit.size).toBe(46 + 7);   // Phase 1, plus the seven anomaly-lock and retirement-radar operations of Phase 4
-    expect(t.app.http.contract.operations.size).toBe(46 + 78 + 5 + 7 + 2 + 3 + 15 + 9);   // + the nine billing operations (seven, then getInvoice and setTenantSeatLimit);   // + the fifteen scenario operations (fourteen, and the step a grader reads);   // + the three insight operations (activity, map, map export)
+    expect(hit.size).toBe(46 + 7 + 3);   // ... and the three API-key operations   // Phase 1, plus the seven anomaly-lock and retirement-radar operations of Phase 4
+    expect(t.app.http.contract.operations.size).toBe(46 + 78 + 5 + 7 + 2 + 3 + 15 + 9 + 4);   // + the four API-key operations (three, and the options for the form);   // + the nine billing operations (seven, then getInvoice and setTenantSeatLimit);   // + the fifteen scenario operations (fourteen, and the step a grader reads);   // + the three insight operations (activity, map, map export)
   });
 });
 

@@ -54,20 +54,19 @@ export class PostgresRateLimiter implements RateLimiter {
 
 // ---------------------------------------------------------------- idempotency keys
 
-const ONE_TIME_SECRET_KEYS = new Set(['sc', 'enrollment_token', 'enrollment_token_expires_at']);
-
 /**
- * Removes one-time secrets before a response is stored for replay. A replayed response
- * therefore never contains an SC or enrollment token; `secret_already_shown` tells the caller.
+ * Removes one-time secrets before a response is stored for replay. WHICH fields those are is said by the operation's
+ * contract (`x-one-time-secrets`), not known here. A replayed response therefore never contains them;
+ * `secret_already_shown` tells the caller.
  */
-export function stripOneTimeSecrets(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stripOneTimeSecrets);
+export function stripOneTimeSecrets(value: unknown, secretFields: readonly string[]): unknown {
+  if (Array.isArray(value)) return value.map((v) => stripOneTimeSecrets(v, secretFields));
   if (typeof value === 'object' && value !== null) {
     const out: Record<string, unknown> = {};
     let stripped = false;
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (ONE_TIME_SECRET_KEYS.has(k)) stripped = true;
-      else out[k] = stripOneTimeSecrets(v);
+      if (secretFields.includes(k)) stripped = true;
+      else out[k] = stripOneTimeSecrets(v, secretFields);
     }
     if (stripped || 'secret_already_shown' in out) out.secret_already_shown = true;
     return out;
@@ -79,37 +78,62 @@ export type IdempotencyStart =
   | { kind: 'new' }
   | { kind: 'replay'; status: number; body: unknown };
 
+/**
+ * Whose records these are: a card's, or an API key's. All this file knows about a key is that it is not a card:
+ * the two are stored in different columns, each with its own foreign key, so a key never shares records with the
+ * card that made it or with another key.
+ */
+export type IdempotencyActor = { kind: 'card'; id: string } | { kind: 'api_key'; id: string };
+
 export interface IdempotencyStore {
-  begin(tx: Tx, p: { tenantId: string; actorCardId: string; key: string; operationId: string; requestHash: Buffer; now: Date }): Promise<IdempotencyStart>;
-  complete(tx: Tx, p: { tenantId: string; actorCardId: string; key: string; status: number; body: unknown }): Promise<void>;
+  begin(tx: Tx, p: { tenantId: string; actor: IdempotencyActor; key: string; operationId: string; requestHash: Buffer; now: Date }): Promise<IdempotencyStart>;
+  complete(tx: Tx, p: { tenantId: string; actor: IdempotencyActor; key: string; status: number; body: unknown; secretFields: readonly string[] }): Promise<void>;
+  /** Frees a key whose work did not complete, so the caller can try again. */
+  release(tx: Tx, p: { tenantId: string; actor: IdempotencyActor; key: string }): Promise<void>;
 }
+
+// The statements exist once per actor column. They are written out in full (not built from a column name), because
+// "no SQL built from pieces" is one of the lint rules this project proves in CI.
+const STATEMENTS = {
+  card: {
+    purge: 'DELETE FROM idempotency_keys WHERE tenant_id = $1 AND actor_card_id = $2 AND key = $3 AND expires_at < $4',
+    insert: `INSERT INTO idempotency_keys (tenant_id, actor_card_id, key, operation_id, request_hash, status, expires_at)
+       VALUES ($1, $2, $3, $4, $5, 'in_progress', $6)
+       ON CONFLICT (tenant_id, actor_card_id, key) WHERE actor_card_id IS NOT NULL DO NOTHING RETURNING key`,
+    read: 'SELECT operation_id, request_hash, status, response_status, response_body FROM idempotency_keys WHERE tenant_id = $1 AND actor_card_id = $2 AND key = $3',
+    release: 'DELETE FROM idempotency_keys WHERE tenant_id = $1 AND actor_card_id = $2 AND key = $3 AND status = $4',
+    complete: `UPDATE idempotency_keys SET status = 'done', response_status = $4, response_body = $5
+        WHERE tenant_id = $1 AND actor_card_id = $2 AND key = $3`,
+  },
+  api_key: {
+    purge: 'DELETE FROM idempotency_keys WHERE tenant_id = $1 AND actor_api_key_id = $2 AND key = $3 AND expires_at < $4',
+    insert: `INSERT INTO idempotency_keys (tenant_id, actor_api_key_id, key, operation_id, request_hash, status, expires_at)
+       VALUES ($1, $2, $3, $4, $5, 'in_progress', $6)
+       ON CONFLICT (tenant_id, actor_api_key_id, key) WHERE actor_api_key_id IS NOT NULL DO NOTHING RETURNING key`,
+    read: 'SELECT operation_id, request_hash, status, response_status, response_body FROM idempotency_keys WHERE tenant_id = $1 AND actor_api_key_id = $2 AND key = $3',
+    release: 'DELETE FROM idempotency_keys WHERE tenant_id = $1 AND actor_api_key_id = $2 AND key = $3 AND status = $4',
+    complete: `UPDATE idempotency_keys SET status = 'done', response_status = $4, response_body = $5
+        WHERE tenant_id = $1 AND actor_api_key_id = $2 AND key = $3`,
+  },
+} as const;
 
 export class PostgresIdempotencyStore implements IdempotencyStore {
   static readonly TTL_HOURS = 24;
 
   async begin(
     tx: Tx,
-    p: { tenantId: string; actorCardId: string; key: string; operationId: string; requestHash: Buffer; now: Date },
+    p: { tenantId: string; actor: IdempotencyActor; key: string; operationId: string; requestHash: Buffer; now: Date },
   ): Promise<IdempotencyStart> {
-    await tx.query('DELETE FROM idempotency_keys WHERE tenant_id = $1 AND actor_card_id = $2 AND key = $3 AND expires_at < $4', [
-      p.tenantId, p.actorCardId, p.key, p.now,
-    ]);
+    const sql = STATEMENTS[p.actor.kind];
+    await tx.query(sql.purge, [p.tenantId, p.actor.id, p.key, p.now]);
     const expires = new Date(p.now.getTime() + PostgresIdempotencyStore.TTL_HOURS * 3600_000);
     // If another request holds the same key, this INSERT waits for it to finish, then sees the conflict.
-    const inserted = await tx.query(
-      `INSERT INTO idempotency_keys (tenant_id, actor_card_id, key, operation_id, request_hash, status, expires_at)
-       VALUES ($1, $2, $3, $4, $5, 'in_progress', $6)
-       ON CONFLICT (tenant_id, actor_card_id, key) DO NOTHING RETURNING key`,
-      [p.tenantId, p.actorCardId, p.key, p.operationId, p.requestHash, expires],
-    );
+    const inserted = await tx.query(sql.insert, [p.tenantId, p.actor.id, p.key, p.operationId, p.requestHash, expires]);
     if (inserted.rowCount === 1) return { kind: 'new' };
 
     const { rows } = await tx.query<{
       operation_id: string; request_hash: Buffer; status: string; response_status: number | null; response_body: unknown;
-    }>(
-      'SELECT operation_id, request_hash, status, response_status, response_body FROM idempotency_keys WHERE tenant_id = $1 AND actor_card_id = $2 AND key = $3',
-      [p.tenantId, p.actorCardId, p.key],
-    );
+    }>(sql.read, [p.tenantId, p.actor.id, p.key]);
     const row = rows[0];
     if (!row) throw problems.conflict('idempotency-key-busy', 'This idempotency key is being processed; retry shortly');
     if (row.operation_id !== p.operationId || !row.request_hash.equals(p.requestHash)) {
@@ -121,12 +145,13 @@ export class PostgresIdempotencyStore implements IdempotencyStore {
     return { kind: 'replay', status: row.response_status, body: row.response_body };
   }
 
-  async complete(tx: Tx, p: { tenantId: string; actorCardId: string; key: string; status: number; body: unknown }): Promise<void> {
-    await tx.query(
-      `UPDATE idempotency_keys SET status = 'done', response_status = $4, response_body = $5
-        WHERE tenant_id = $1 AND actor_card_id = $2 AND key = $3`,
-      [p.tenantId, p.actorCardId, p.key, p.status, JSON.stringify(stripOneTimeSecrets(p.body ?? null))],
-    );
+  async release(tx: Tx, p: { tenantId: string; actor: IdempotencyActor; key: string }): Promise<void> {
+    await tx.query(STATEMENTS[p.actor.kind].release, [p.tenantId, p.actor.id, p.key, 'in_progress']);
+  }
+
+  async complete(tx: Tx, p: { tenantId: string; actor: IdempotencyActor; key: string; status: number; body: unknown; secretFields: readonly string[] }): Promise<void> {
+    await tx.query(STATEMENTS[p.actor.kind].complete,
+      [p.tenantId, p.actor.id, p.key, p.status, JSON.stringify(stripOneTimeSecrets(p.body ?? null, p.secretFields))]);
   }
 }
 
@@ -146,7 +171,11 @@ export interface NotificationEvent {
     // Phase 4, billing: the renewal date comes closer; a payment failed; the term was renewed
     | 'renewal_reminder' | 'payment_failed' | 'subscription_renewed'
     // a payment is on record that changed nothing by itself (late, repeated, unknown invoice, could not be applied)
-    | 'payment_needs_attention';
+    | 'payment_needs_attention'
+    // an API key was made; a key was stopped by the system (suspended, or revoked because its maker's card changed)
+    | 'api_key_created' | 'api_key_stopped'
+    // many wrong secrets were tried against one key (the key keeps working; the Owners should know)
+    | 'api_key_wrong_secrets';
   tenantId: string;
   /** When the notice goes to the platform operator: the company it is about. */
   aboutTenantId?: string;
@@ -154,6 +183,8 @@ export interface NotificationEvent {
   cardId?: string;
   /** Who is told, when that is someone other than the holder of `cardId` (e.g. the other Owners). */
   recipientCardId?: string;
+  /** Who is told, when that is a group and not one cardholder: the company's Owners. */
+  audience?: 'owners';
 }
 
 export interface Notifier {
@@ -169,7 +200,7 @@ export class LogNotifier implements Notifier {
   async notify(event: NotificationEvent): Promise<void> {
     this.#log.info({
       notification: event.type, tenant_id: event.tenantId, card_id: event.cardId, recipient_card_id: event.recipientCardId,
-      about_tenant_id: event.aboutTenantId,
+      about_tenant_id: event.aboutTenantId, audience: event.audience,
     }, 'notification');
   }
 }

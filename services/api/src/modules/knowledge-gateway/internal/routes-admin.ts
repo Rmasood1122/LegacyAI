@@ -1,7 +1,7 @@
 // Consent (feature 19), the review queue (24), the redaction allow-list (18), knowledge settings,
 // AI budget and the operator's AI controls.
 import { problems } from '../../../shared/errors.ts';
-import type { ResourceRef, Subject } from '../../../shared/policy-types.ts';
+import type { ResourceRef, CardSubject } from '../../../shared/policy-types.ts';
 import { decodeIdCursor, encodeCursor, writeAudit, type RouteDef, type Tx } from '../../platform/index.ts';
 import { aiLimits, baseClaims, type GatewayDeps } from './common.ts';
 import { collectionRef, consentRef, newRef, reviewTaskRef } from './resources.ts';
@@ -52,10 +52,10 @@ const toApiTask = (r: TaskRow): Record<string, unknown> => ({
   resolution: r.resolution,
 });
 
-const isOwner = (s: Subject): boolean => s.roles.some((r) => r.role_key === 'company_owner');
+const isOwner = (s: CardSubject): boolean => s.roles.some((r) => r.role_key === 'company_owner');
 
 /** expert_question tasks are seen only by the addressed expert and Owners (docs/phase2/06 §2). */
-async function taskLoader({ tx, subject, params }: { tx: Tx; subject: Subject; params: any }): Promise<ResourceRef | null> {
+async function taskLoader({ tx, subject, params }: { tx: Tx; subject: CardSubject; params: any }): Promise<ResourceRef | null> {
   const ref = await reviewTaskRef(tx, subject.tenant_id, params.task_id);
   if (!ref) return null;
   if (ref.kind === 'expert_question' && ref.visible_to_person_id !== subject.person_id && !isOwner(subject)) return null;
@@ -480,7 +480,7 @@ export function adminRoutes(deps: GatewayDeps): RouteDef[] {
   ];
 }
 
-async function changeTask(tx: Tx, subject: Subject, ctx: { requestId: string; ip: string }, taskId: string, step: string, cardId?: string): Promise<Record<string, unknown>> {
+async function changeTask(tx: Tx, subject: CardSubject, ctx: { requestId: string; ip: string }, taskId: string, step: string, cardId?: string): Promise<Record<string, unknown>> {
   const { rows } = await tx.query<TaskRow>(`SELECT ${TASK_COLUMNS} FROM review_tasks r WHERE r.tenant_id = $1 AND r.id = $2 FOR UPDATE`, [subject.tenant_id, taskId]);
   const task = rows[0];
   if (!task) throw problems.notFound();

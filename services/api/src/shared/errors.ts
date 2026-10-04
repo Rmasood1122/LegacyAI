@@ -34,8 +34,16 @@ export class ProblemError extends Error {
 export const problems = {
   badRequest: (errors?: FieldError[]) =>
     new ProblemError(400, 'bad-request', 'The request does not match the API contract', { errors }),
-  /** No session, or the session is no longer valid. */
-  unauthenticated: () => new ProblemError(401, 'unauthenticated', 'Sign-in required'),
+  /**
+   * No session or key, or it is no longer valid. `bearer`: the operation also takes an API key, so the answer says
+   * how to present one (RFC 6750) - the same answer for every cause.
+   */
+  unauthenticated: (bearer = false) =>
+    new ProblemError(401, 'unauthenticated', 'Sign-in required', bearer ? { headers: { 'www-authenticate': 'Bearer' } } : {}),
+  /** An API key was sent to an operation that takes none (the contract says which do). Nothing was looked up. */
+  apiKeyNotAccepted: () => new ProblemError(403, 'api-key-not-accepted', 'This operation does not take an API key'),
+  /** A working key asked for something it was not made for. Says nothing about what the key does hold. */
+  apiKeyScope: () => new ProblemError(403, 'api-key-scope', 'This API key may not do this'),
   /** Every sign-in / enrollment failure. One message for all causes, on purpose. */
   authFailed: () => new ProblemError(401, 'auth-failed', 'Sign-in failed'),
   forbidden: () => new ProblemError(403, 'forbidden', 'Not allowed'),

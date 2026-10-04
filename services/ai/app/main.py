@@ -394,7 +394,8 @@ def create_app(services: Services | None = None) -> FastAPI:
     @app.post("/internal/sources/{source_id}/continue")
     def source_continue(source_id: str, ctx: Annotated[ServiceContext, Depends(token("source.continue", "source_id"))]) -> dict[str, Any]:
         s = svc()
-        return ingest.continue_embedding(s.db, ctx.tenant_id, ctx.card_id, source_id, s.embedder, deadline(), request_id=ctx.request_id)
+        return ingest.continue_embedding(s.db, ctx.tenant_id, ctx.card_id, source_id, s.embedder, deadline(), request_id=ctx.request_id,
+                                         api_key_id=ctx.api_key_id)
 
     # ------------------------------------------------------------------ answers (features 14, 15, 17)
     @app.post("/internal/knowledge/candidates")

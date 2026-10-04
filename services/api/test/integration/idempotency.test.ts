@@ -139,7 +139,9 @@ describe('idempotency keys', () => {
       'createScenario', 'updateScenario', 'approveScenario', 'retireScenario', 'proposeScenarioRubric', 'startScenarioAttempt',
       'saveScenarioAnswer', 'submitScenarioAttempt', 'overrideScenarioAnswer',
       // Phase 4, billing: a renewal must never be issued or applied twice
-      'updateSubscription', 'startRenewal', 'recordManualPayment', 'setTenantSeatLimit'];
+      'updateSubscription', 'startRenewal', 'recordManualPayment', 'setTenantSeatLimit',
+      // Phase 4, API keys: a retried request must not make a second key
+      'createApiKey', 'revokeApiKey'];
     for (const id of required) expect(t.app.http.contract.operations.get(id)?.idempotent, id).toBe(true);
     const actual = [...t.app.http.contract.operations.values()].filter((o) => o.idempotent).map((o) => o.operationId).sort();
     expect(actual).toEqual([...required].sort());

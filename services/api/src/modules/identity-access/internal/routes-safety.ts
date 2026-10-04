@@ -3,7 +3,7 @@
 //
 // As everywhere: handlers make no access decisions. Each route names what is acted on; the HTTP layer asks the
 // policy decision point before the handler runs.
-import type { ResourceRef, Subject } from '../../../shared/policy-types.ts';
+import type { ResourceRef, CardSubject } from '../../../shared/policy-types.ts';
 import { decodeIdCursor, encodeCursor, pageOf, writeAudit, type RouteDef } from '../../platform/index.ts';
 import type { AnomalyGuard, AnomalySettings } from './anomaly.ts';
 import type { Authorizer } from './authz.ts';
@@ -24,7 +24,7 @@ const EVENT_CARD_DESCRIPTOR: ResourceDescriptor = {
   departmentExpr: '(SELECT p.department_id FROM people p WHERE p.tenant_id = c.tenant_id AND p.id = c.person_id)',
 };
 
-const settingsResource = async ({ subject }: { subject: Subject }): Promise<ResourceRef> => ({
+const settingsResource = async ({ subject }: { subject: CardSubject }): Promise<ResourceRef> => ({
   type: 'tenant_settings', id: subject.tenant_id, tenant_id: subject.tenant_id,
 });
 

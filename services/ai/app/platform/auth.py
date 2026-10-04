@@ -19,6 +19,16 @@ AUDIENCE = "legacyai-ai"
 MAX_LIFETIME_SECONDS = 120
 LEEWAY_SECONDS = 5
 
+# What a token made for a machine's API key may be used for HERE: the internal operations behind the ten API
+# operations that take a key (reading and asking) - and nothing else. The API decides first; this is this service's
+# own check, so that a mistake in the API cannot let a key add, change, review or start anything.
+#   askKnowledge -> knowledge.candidates, knowledge.answer     listKnowledgeItems -> item.list
+#   getKnowledgeItem -> item.read     getGraphNeighbourhood -> graph.read     getGapReport -> gap.report
+# (listSources, getSource, listTopics, listJobRoles and getRoleTopics are answered by the API from the database.)
+API_KEY_ACTIONS: frozenset[str] = frozenset({
+    "knowledge.candidates", "knowledge.answer", "item.list", "item.read", "graph.read", "gap.report",
+})
+
 
 class TokenError(Exception):
     """Any problem with a token. The message is for logs only, never returned to the caller."""
@@ -41,6 +51,10 @@ class ServiceContext:
     # Further access filters, each under the permission it was built for (for example "interview:read"). This module
     # only checks the shape; app.capture.filters turns one into a query condition and checks it is the right permission's.
     filters: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Set when the request was made with a machine's API key (claim `actor`): the key's id. `card_id` is then the
+    # card the key acts for, `roles` is empty (a key has none) and `person_id` is ALWAYS None: a key is not a person,
+    # so nothing here can take it for a contributor, an author, a learner or "the owner". Audit rows name the key.
+    api_key_id: str | None = None
 
 
 def verify_service_token(token: str, key: str, expected_action: str) -> ServiceContext:
@@ -71,6 +85,20 @@ def verify_service_token(token: str, key: str, expected_action: str) -> ServiceC
     roles = claims.get("roles")
     if not isinstance(roles, list) or not all(isinstance(r, str) for r in roles):
         raise TokenError("roles must be a list of strings")
+    api_key_id: str | None = None
+    actor = claims.get("actor")
+    if actor is not None:
+        if not isinstance(actor, dict) or set(actor) != {"kind", "id"} or actor["kind"] != "api_key":
+            raise TokenError("actor is malformed")
+        try:
+            api_key_id = str(uuid.UUID(str(actor["id"])))
+        except ValueError as exc:
+            raise TokenError("actor is malformed") from exc
+        if roles:
+            raise TokenError("an API key carries no roles")
+        if expected_action not in API_KEY_ACTIONS:
+            raise TokenError("an API key may not be used for this operation")
+        person_id = None
     flt = claims.get("filter")
     if flt is not None and not isinstance(flt, dict):
         raise TokenError("filter must be an object")
@@ -95,7 +123,7 @@ def verify_service_token(token: str, key: str, expected_action: str) -> ServiceC
     return ServiceContext(
         tenant_id=tenant_id, card_id=card_id, person_id=person_id, roles=tuple(roles), card_phase=phase,
         action=expected_action, request_id=request_id, filter=flt, approved=tuple(approved), limits=dict(limits),
-        subject=subject, topic_filter=topic_flt, filters=dict(more),
+        subject=subject, topic_filter=topic_flt, filters=dict(more), api_key_id=api_key_id,
     )
 
 

@@ -7,7 +7,7 @@
 // scenarios are offered or started, readable item ids when a result is read.
 import { isUuid } from '../../../shared/crypto.ts';
 import { problems } from '../../../shared/errors.ts';
-import type { ApprovalRef, RequestContext, ResourceRef, Subject } from '../../../shared/policy-types.ts';
+import type { ApprovalRef, RequestContext, ResourceRef, CardSubject } from '../../../shared/policy-types.ts';
 import { decodeIdCursor, encodeCursor, type RouteDef, type Tx } from '../../platform/index.ts';
 import { approvalRoute, gatewayRoute, pick, withListFilter, type GatewayDeps } from './common.ts';
 import { collectionRef, itemRef, newRef } from './resources.ts';
@@ -121,7 +121,7 @@ export function scenarioRoutes(deps: GatewayDeps): RouteDef[] {
    * Of these knowledge items, the ones THIS caller may read and - when `released` - that are verified and released
    * to learners (level 0). Each item is asked of the policy once per request.
    */
-  const readableItems = async (tx: Tx, subject: Subject, ctx: RequestContext, ids: Iterable<string>, released: boolean): Promise<Set<string>> => {
+  const readableItems = async (tx: Tx, subject: CardSubject, ctx: RequestContext, ids: Iterable<string>, released: boolean): Promise<Set<string>> => {
     const ok = new Set<string>();
     for (const id of new Set(ids)) {
       const ref = await itemRef(tx, subject.tenant_id, id);
@@ -133,7 +133,7 @@ export function scenarioRoutes(deps: GatewayDeps): RouteDef[] {
   };
 
   /** The body of a create or an edit, with the items checked against the writer. */
-  const writePlan = async (tx: Tx, subject: Subject, ctx: RequestContext, body: any) => {
+  const writePlan = async (tx: Tx, subject: CardSubject, ctx: RequestContext, body: any) => {
     const steps = (body.steps as Array<{ prompt: string; item_ids: string[]; rubric: string[] }>).map((s) => ({
       prompt: s.prompt, item_ids: [...new Set(s.item_ids.map((i) => i.toLowerCase()))], rubric: s.rubric,
     }));
@@ -157,7 +157,7 @@ export function scenarioRoutes(deps: GatewayDeps): RouteDef[] {
   };
 
   /** Of these approved scenarios, the ones built only from knowledge this caller may read (and that is still verified and released). */
-  const offeredTo = async (tx: Tx, subject: Subject, ctx: RequestContext, scenarioIds: string[]): Promise<string[]> => {
+  const offeredTo = async (tx: Tx, subject: CardSubject, ctx: RequestContext, scenarioIds: string[]): Promise<string[]> => {
     const links = await linkedItems(tx, subject.tenant_id, scenarioIds);
     const readable = await readableItems(tx, subject, ctx, [...links.values()].flat(), true);
     return scenarioIds.filter((id) => {
@@ -166,7 +166,7 @@ export function scenarioRoutes(deps: GatewayDeps): RouteDef[] {
     });
   };
 
-  const asRun = async ({ subject }: { subject: Subject }): Promise<ResourceRef> =>
+  const asRun = async ({ subject }: { subject: CardSubject }): Promise<ResourceRef> =>
     newRef('scenario_attempt', subject.tenant_id, { owner_person_id: subject.person_id, owner_card_id: subject.card_id, sensitivity: 0 });
 
   return [

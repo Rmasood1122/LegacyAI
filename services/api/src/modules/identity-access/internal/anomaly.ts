@@ -77,6 +77,7 @@ export const COUNTED_REASONS: ReadonlySet<string> = new Set([
   'DENY_TENANT_MISMATCH',           // something of another company
   'DENY_UNVERIFIED',                // unverified knowledge asked for by a card that may read verified only
   'DENY_FILTER_NOT_SUPPORTED',      // a whole list asked for by a card that may see only part (D23)
+  'DENY_API_KEY_SCOPE',             // an API key asked for something that was not written into it (counted against the KEY)
 ]);
 /** Refusals that are never counted, each with the reason. Together with COUNTED_REASONS this covers every reason there is. */
 export const UNCOUNTED_REASONS: ReadonlySet<string> = new Set([

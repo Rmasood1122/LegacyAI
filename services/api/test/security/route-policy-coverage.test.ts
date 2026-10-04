@@ -11,7 +11,7 @@ import {
   honoursFilter, type AuthPort, type HttpServer, type ListFilter, type RouteDef,
 } from '../../src/modules/platform/index.ts';
 import { systemClock } from '../../src/shared/clock.ts';
-import type { Decision, Obligation, Subject } from '../../src/shared/policy-types.ts';
+import type { Decision, Obligation, CardSubject } from '../../src/shared/policy-types.ts';
 import { TEST_ORIGIN, testEnv } from '../helpers/env.ts';
 import { addMember, createTenant, startApp, superuser, type TestApp, type TestMember, type TestTenant } from '../helpers/harness.ts';
 
@@ -26,7 +26,7 @@ beforeAll(async () => {
 afterAll(async () => t.close());
 
 const FAKE_TOKEN = `v1.${PLATFORM_TENANT_ID}.${'A'.repeat(43)}`;
-const fakeSubject = (): Subject => ({
+const fakeSubject = (): CardSubject => ({
   kind: 'card', tenant_id: PLATFORM_TENANT_ID, card_id: randomUUID(), card_number: '0000000000000000', person_id: null, department_id: null,
   card_state: 'active', activated_at: new Date(), expires_at: new Date(Date.now() + 1e9), grace_until: new Date(Date.now() + 2e9),
   renewal_due: new Date(), locked: false, roles: [], is_platform_tenant: true, session_id: randomUUID(),
@@ -36,8 +36,9 @@ const fakeSubject = (): Subject => ({
 /** A bare HTTP layer with a scripted policy decision point, to test the layer itself. */
 async function bareServer(decision: Decision, calls: string[] = []): Promise<HttpServer> {
   const auth: AuthPort = {
-    tenantOfToken: () => PLATFORM_TENANT_ID,
-    resolveSession: async () => ({ subject: fakeSubject(), csrfToken: 'csrf' }),
+    tenantOf: () => PLATFORM_TENANT_ID,
+    resolveCredential: async () => ({ kind: 'session', subject: fakeSubject(), csrfToken: 'csrf' }),
+    auditDetails: () => ({}),
     authorize: async (_tx, _s, action) => {
       calls.push(action);
       return decision;
@@ -106,15 +107,15 @@ describe('the list of routes that skip the session check is short and pinned', (
     const known = new Set((await su.query('SELECT permission_key FROM permissions')).rows.map((r) => r.permission_key as string));
     await su.end();
     const session = t.app.http.registeredRoutes().filter((r) => r.kind === 'session' || r.kind === 'gateway');
-    expect(session).toHaveLength(158);
+    expect(session).toHaveLength(162);
     for (const r of session) expect(known.has(r.permission!), `${r.operationId} uses unknown permission ${r.permission}`).toBe(true);
   });
 
-  it('routes registered in the server == operations in openapi.yaml (165, no more, no fewer)', () => {
+  it('routes registered in the server == operations in openapi.yaml (169, no more, no fewer)', () => {
     const registered = t.app.http.registeredRoutes().map((r) => `${r.method} ${r.path}`).sort();
     const contract = [...t.app.http.contract.operations.values()].map((o) => `${o.method} ${o.path}`).sort();
     expect(registered).toEqual(contract);
-    expect(registered).toHaveLength(165);
+    expect(registered).toHaveLength(169);
     // and Fastify itself knows no route beyond those (HEAD/OPTIONS helpers aside)
     const printed = t.app.http.app.printRoutes({ commonPrefix: false });
     expect(printed).not.toMatch(/rogue/);
@@ -165,8 +166,9 @@ describe('the handler never runs unless the policy decision point said allow', (
     (server as any); // same server type; replace authorize via a new server with a throwing port:
     await server.app.close();
     const auth: AuthPort = {
-      tenantOfToken: () => PLATFORM_TENANT_ID,
-      resolveSession: async () => ({ subject: fakeSubject(), csrfToken: 'csrf' }),
+      tenantOf: () => PLATFORM_TENANT_ID,
+      resolveCredential: async () => ({ kind: 'session', subject: fakeSubject(), csrfToken: 'csrf' }),
+      auditDetails: () => ({}),
       authorize: async () => { throw new Error('policy store unavailable'); },
       recordDecision: async () => undefined,
     };
@@ -246,7 +248,7 @@ describe('a read of a whole collection must say how it is narrowed to what the c
       listRoles: 'unfiltered', listDepartments: 'unfiltered', listTenants: 'unfiltered', listAuditEvents: 'unfiltered',
       verifyAuditChain: 'unfiltered', listRedactionAllowlist: 'unfiltered', getKnowledgeSettings: 'unfiltered', getAiBudget: 'unfiltered',
       getPlatformStorage: 'unfiltered', getQualitySummary: 'unfiltered', listAnswerFeedback: 'unfiltered',
-      getActivity: 'unfiltered', listInvoices: 'unfiltered',
+      getActivity: 'unfiltered', listInvoices: 'unfiltered', listApiKeys: 'unfiltered', getApiKeyOptions: 'unfiltered',
     });
     for (const r of t.app.http.registeredRoutes()) {
       if (r.listFilter !== null && typeof r.listFilter !== 'string') expect(r.listFilter.unfiltered.length, r.operationId).toBeGreaterThan(20);
@@ -295,7 +297,7 @@ describe('a read of a whole collection must say how it is narrowed to what the c
 });
 
 describe('real app: a card with almost no permissions cannot get a 2xx from anything it is not granted', () => {
-  it('walks all 158 protected operations as a Successor', async () => {
+  it('walks all 162 protected operations as a Successor', async () => {
     const su = await superuser();
     const granted = new Set((await su.query(`SELECT permission_key FROM role_permissions WHERE role_key = 'successor'`)).rows.map((r) => r.permission_key as string));
     await su.end();
@@ -329,6 +331,8 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
       // Phase 4, step 4 (scenario replay)
       // Phase 4, billing
       updateSubscription: { auto_renew: false }, setTenantSeatLimit: { seat_limit: 5 },
+      // Phase 4, API keys
+      createApiKey: { name: 'x', scope: ['topic:read'], max_sensitivity: 0, expires_in_days: 1 },
       recordManualPayment: { invoice_id: randomUUID(), amount: { amount_minor: 1500, currency: 'USD' }, reference: 'TRANSFER-000001' },
       createScenario: scenarioBody, updateScenario: scenarioBody, proposeScenarioRubric: { item_ids: [randomUUID()] }, overrideScenarioAnswer: { score: 1 },
     };
@@ -361,7 +365,8 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
     // Phase 4 (feature 8): it may see what is offered to it, run a scenario and read its own runs (quiz:take, quiz:read_results);
     // it may not write, read, approve or retire scenarios, ask for proposed points, read a step in order to grade it, or override a grade.
     // Phase 4 (billing): nothing of it - the subscription and invoices are the Owner's, the rest the platform operator's.
-    expect(denied).toBe(28 + 57 + 2 + 6 + 2 + 9 + 8);
+    // Phase 4 (API keys): nothing of it - making, listing and revoking keys, and asking what a key could carry, is the Owner's.
+    expect(denied).toBe(28 + 57 + 2 + 6 + 2 + 9 + 8 + 4);
   });
 });
 

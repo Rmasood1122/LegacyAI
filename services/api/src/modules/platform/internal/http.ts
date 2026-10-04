@@ -18,7 +18,9 @@ import { randomUUID } from 'node:crypto';
 import type { Clock } from '../../../shared/clock.ts';
 import { constantTimeEqual } from '../../../shared/crypto.ts';
 import { ProblemError, problemBody, problems } from '../../../shared/errors.ts';
-import { KNOWN_OBLIGATIONS, type Decision, type RequestContext, type ResourceRef, type Subject } from '../../../shared/policy-types.ts';
+import {
+  KNOWN_OBLIGATIONS, actingCardId, idempotencyActor, type ApiKeySubject, type CardSubject, type Decision, type RequestContext, type ResourceRef, type Subject,
+} from '../../../shared/policy-types.ts';
 import { writeAudit } from './audit.ts';
 import type { Config } from './config.ts';
 import type { Database, Tx } from './db.ts';
@@ -29,12 +31,56 @@ import { hashRequest, type IdempotencyStore, type RateLimiter } from './support.
 
 export const SESSION_COOKIE = '__Host-lai_session';
 
+/** How a machine's API key starts in the Authorization header ("Bearer lak1...."). Anything else there is not a key. */
+export const API_KEY_SCHEME = 'lak1.';
+
+/**
+ * What a request offered to say who is asking - decided from the headers alone, before anything is looked up:
+ *   session              - the session cookie of a signed-in card;
+ *   api_key              - a machine's API key, on an operation whose contract takes keys;
+ *   none                 - neither;
+ *   api_key_not_accepted - a key, on an operation that takes no key;
+ *   ambiguous            - a key AND a cookie: refused, so that a page can never make a browser send a key for it.
+ * An Authorization header that does not carry a key ("Basic ...", a proxy's token) is ignored: this API has no other
+ * use for that header, and a signed-in browser behind such a proxy must keep working.
+ */
+export type Credential =
+  | { kind: 'session'; token: string }
+  | { kind: 'api_key'; token: string }
+  | { kind: 'none' }
+  | { kind: 'api_key_not_accepted' }
+  | { kind: 'ambiguous' };
+
+export type PresentedCredential = Extract<Credential, { token: string }>;
+
+export function credentialOf(
+  headers: { authorization?: string | string[] | undefined }, cookie: string | undefined, op: Pick<Operation, 'apiKey'>,
+): Credential {
+  const authorization = headers.authorization;
+  const key = typeof authorization === 'string' && authorization.startsWith(`Bearer ${API_KEY_SCHEME}`) ? authorization.slice(7) : null;
+  if (key === null) return typeof cookie === 'string' ? { kind: 'session', token: cookie } : { kind: 'none' };
+  if (cookie !== undefined) return { kind: 'ambiguous' };
+  return op.apiKey ? { kind: 'api_key', token: key } : { kind: 'api_key_not_accepted' };
+}
+
+/** Who a presented credential turned out to be. `refused` = it does not work (one answer for every cause). */
+export type ResolvedCredential =
+  | { kind: 'session'; subject: CardSubject; csrfToken: string }
+  | { kind: 'api_key'; subject: ApiKeySubject }
+  | { kind: 'limited'; retryAfterSeconds: number }
+  | { kind: 'refused' };
+
 /** What the HTTP layer needs from the identity module. Implemented there, plugged in by app.ts. */
 export interface AuthPort {
-  /** Extracts the tenant id from an opaque session token, or null if the token is malformed. */
-  tenantOfToken(token: string): string | null;
-  /** Returns the subject for a live session whose card is still allowed to act, else null. */
-  resolveSession(tx: Tx, token: string, ctx: RequestContext): Promise<{ subject: Subject; csrfToken: string } | null>;
+  /** The company a credential says it belongs to, or null if it is malformed. Nothing is looked up. */
+  tenantOf(credential: PresentedCredential): string | null;
+  /**
+   * Who is asking: the card of a live session, or the API key - each only while it is still allowed to act.
+   * `action` is the permission the operation needs (a key has its own limit on some actions).
+   */
+  resolveCredential(tx: Tx, credential: PresentedCredential, action: string, ctx: RequestContext): Promise<ResolvedCredential>;
+  /** What every audit row about this subject's request must say besides the actor (for a key: which key). */
+  auditDetails(subject: Subject): Record<string, string>;
   /** The policy decision point. */
   authorize(tx: Tx, subject: Subject, action: string, resource: ResourceRef, ctx: RequestContext): Promise<Decision>;
   /** Writes a decision to the audit log inside `tx`. The HTTP layer calls this for EVERY decision. */
@@ -61,23 +107,31 @@ export interface PublicHandlerArgs {
   query: any;
 }
 
-export interface SessionHandlerArgs extends Omit<PublicHandlerArgs, 'headers'> {
+/** What a handler gets once the policy allowed the request. `S` says who may be asking. */
+export interface AuthorizedHandlerArgs<S extends Subject> extends Omit<PublicHandlerArgs, 'headers'> {
   /** The request's content type (without parameters), for raw-file uploads. */
   contentType?: string;
   tx: Tx;
-  subject: Subject;
+  subject: S;
   decision: Decision;
   resource: ResourceRef;
+}
+
+/** A handler for a signed-in card: it also gets the session it may act on (sign-out, own credentials). */
+export interface SessionHandlerArgs extends AuthorizedHandlerArgs<CardSubject> {
   sessionToken: string;
   csrfToken: string;
 }
 
-export type PolicySpec =
-  | { public: true; reason: string }
-  | {
-      /** Loads the thing being acted on. Returning null means "not found" (also for other tenants' data). */
-      resource: (args: { tx: Tx; subject: Subject; params: any; body: any; query: any; ctx: RequestContext }) => Promise<ResourceRef | null>;
-    };
+/** A handler of an operation that also takes an API key: the caller is a card OR a key, and there is no session. */
+export type CallerHandlerArgs = AuthorizedHandlerArgs<Subject>;
+
+export interface ResourcePolicy<S extends Subject = CardSubject> {
+  /** Loads the thing being acted on. Returning null means "not found" (also for other tenants' data). */
+  resource: (args: { tx: Tx; subject: S; params: any; body: any; query: any; ctx: RequestContext }) => Promise<ResourceRef | null>;
+}
+
+export type PolicySpec = { public: true; reason: string } | ResourcePolicy;
 
 /**
  * How a route that reads "the set of things of a type" meets the policy's `filter` obligation. The policy allows
@@ -91,17 +145,23 @@ export type PolicySpec =
  */
 export type ListFilter = 'applied' | 'delegated' | { unfiltered: string };
 
-export interface GatewayCallArgs {
+export interface GatewayCallArgs<S extends Subject = CardSubject> {
   ctx: RequestContext;
-  subject: Subject;
+  subject: S;
   resource: ResourceRef;
   /** A short transaction for the subject's tenant, for work between or after AI-service calls. */
   withTx<T>(fn: (tx: Tx) => Promise<T>): Promise<T>;
 }
 
 /** What `prepare` returns: either the final answer, or the call to make once the transaction has committed. */
-export type GatewayPrepared = HandlerResult | { call: (a: GatewayCallArgs) => Promise<HandlerResult> };
+export type GatewayPrepared<S extends Subject = CardSubject> = HandlerResult | { call: (a: GatewayCallArgs<S>) => Promise<HandlerResult> };
 
+/**
+ * A 'session' or 'gateway' route is written for a signed-in CARD. Only a route of kind 'session-or-key' /
+ * 'gateway-or-key' may be handed an API key, and its policy loader, handler and gateway call are typed for "a card
+ * or a key" - so code that needs a card (its roles, its session) does not compile there. The contract must say the
+ * same (`x-api-key: true`), or the server refuses to start.
+ */
 export type RouteDef =
   | {
       kind: 'public'; operationId: string; policy: { public: true; reason: string };
@@ -110,17 +170,27 @@ export type RouteDef =
       handler: (a: PublicHandlerArgs) => Promise<HandlerResult>;
     }
   | {
-      kind: 'session'; operationId: string; policy: Extract<PolicySpec, { resource: unknown }>; listFilter?: ListFilter;
+      kind: 'session'; operationId: string; policy: ResourcePolicy; listFilter?: ListFilter;
       handler: (a: SessionHandlerArgs) => Promise<HandlerResult>;
     }
   | {
-      kind: 'gateway'; operationId: string; policy: Extract<PolicySpec, { resource: unknown }>; listFilter?: ListFilter;
+      kind: 'session-or-key'; operationId: string; policy: ResourcePolicy<Subject>; listFilter?: ListFilter;
+      handler: (a: CallerHandlerArgs) => Promise<HandlerResult>;
+    }
+  | {
+      kind: 'gateway'; operationId: string; policy: ResourcePolicy; listFilter?: ListFilter;
       /** Larger request bodies (file uploads). Defaults to the normal limit. */
       bodyLimit?: number;
       prepare: (a: SessionHandlerArgs) => Promise<GatewayPrepared>;
+    }
+  | {
+      kind: 'gateway-or-key'; operationId: string; policy: ResourcePolicy<Subject>; listFilter?: ListFilter;
+      prepare: (a: CallerHandlerArgs) => Promise<GatewayPrepared<Subject>>;
     };
 
-type SessionRouteDef = Extract<RouteDef, { kind: 'session' | 'gateway' }>;
+type SessionRouteDef = Exclude<RouteDef, { kind: 'public' }>;
+/** Does this route's code take "a card or a key"? */
+const takesApiKey = (def: RouteDef): boolean => def.kind === 'session-or-key' || def.kind === 'gateway-or-key';
 
 export interface HttpDeps {
   config: Config;
@@ -334,7 +404,8 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
     let idemKey: string | null = null;
     if (op.validateIdempotencyKey) {
       const header = req.headers['idempotency-key'];
-      if (typeof header !== 'string' || !op.validateIdempotencyKey(header)) {
+      if (header === undefined && !op.idempotencyKeyRequired) idemKey = null; // the contract makes it optional here
+      else if (typeof header !== 'string' || !op.validateIdempotencyKey(header)) {
         errors.push({ path: 'header/Idempotency-Key', message: 'a valid Idempotency-Key header is required' });
       } else idemKey = header;
     }
@@ -387,38 +458,94 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
     return typeof origin !== 'string' || !config.allowedOrigins.includes(origin);
   }
 
-  type Outcome = { result: HandlerResult } | { problem: ProblemError } | { call: Extract<GatewayPrepared, { call: unknown }>['call'] };
+  /** What the transaction ended with. `call` is the gateway's second half, already bound to who asked. */
+  type Outcome =
+    | { result: HandlerResult }
+    | { problem: ProblemError }
+    | { call: (withTx: <T>(fn: (tx: Tx) => Promise<T>) => Promise<T>) => Promise<HandlerResult> };
+  type Loaded = { resource: ResourceRef; decision: Decision };
+  type RequestInput = ReturnType<typeof validateRequest>;
+
+  /**
+   * The route's own code, bound to who is asking. A route that takes API keys is handed "a card or a key"; every
+   * other route is handed the card of the session - and is never reached by a key (credentialOf refuses it first).
+   */
+  interface BoundRoute {
+    load(tx: Tx): Promise<ResourceRef | null>;
+    run(tx: Tx, loaded: Loaded): Promise<HandlerResult | Extract<Outcome, { call: unknown }>>;
+  }
+
+  function bindRoute(def: SessionRouteDef, who: Extract<ResolvedCredential, { subject: unknown }>, token: string, input: RequestInput, ctx: RequestContext): BoundRoute | null {
+    const request = { ctx, body: input.body, params: input.params, query: input.query };
+    const bound = <S extends Subject>(
+      subject: S, policy: ResourcePolicy<S>,
+      invoke: (a: AuthorizedHandlerArgs<S>) => Promise<HandlerResult | GatewayPrepared<S>>,
+    ): BoundRoute => ({
+      load: (tx) => policy.resource({ tx, subject, ...request }),
+      run: async (tx, loaded) => {
+        const out = await invoke({ ...request, tx, subject, decision: loaded.decision, resource: loaded.resource, contentType: input.contentType });
+        if (!('call' in out) || typeof out.call !== 'function') return out as HandlerResult;
+        const call = out.call;
+        return { call: (withTx) => call({ ctx, subject, resource: loaded.resource, withTx }) };
+      },
+    });
+    if (def.kind === 'gateway-or-key') return bound<Subject>(who.subject, def.policy, (a) => def.prepare(a));
+    if (def.kind === 'session-or-key') return bound<Subject>(who.subject, def.policy, (a) => def.handler(a));
+    if (who.kind !== 'session') return null;
+    const session = { sessionToken: token, csrfToken: who.csrfToken };
+    return def.kind === 'gateway'
+      ? bound(who.subject, def.policy, (a) => def.prepare({ ...a, ...session }))
+      : bound(who.subject, def.policy, (a) => def.handler({ ...a, ...session }));
+  }
 
   async function runSessionRoute(
-    op: Operation, def: SessionRouteDef, req: FastifyRequest,
-    input: ReturnType<typeof validateRequest>, ctx: RequestContext,
+    op: Operation, def: SessionRouteDef, req: FastifyRequest, input: RequestInput, ctx: RequestContext,
   ): Promise<HandlerResult> {
-    const token = req.cookies[SESSION_COOKIE];
-    const tenantId = typeof token === 'string' ? auth.tenantOfToken(token) : null;
-    if (typeof token !== 'string' || tenantId === null) throw problems.unauthenticated();
+    // Two ways to say who is asking: the session cookie of a signed-in card, or a machine's API key in the
+    // Authorization header - never both (see credentialOf). A request with a key is not a browser acting for a
+    // person, so the Origin / CSRF-token and fetch-site rules do not apply to it.
+    const unauthenticated = (): ProblemError => problems.unauthenticated(op.apiKey);
+    const credential = credentialOf(req.headers, req.cookies[SESSION_COOKIE], op);
+    if (credential.kind === 'api_key_not_accepted') throw problems.apiKeyNotAccepted();
+    if (credential.kind === 'none' || credential.kind === 'ambiguous') throw unauthenticated();
+    const tenantId = auth.tenantOf(credential);
+    if (tenantId === null) throw unauthenticated();
     const action = op.permission as string;
+    const secrets = op.oneTimeSecrets;
 
-    let allowed: { subject: Subject; resource: ResourceRef; decision: Decision } | null = null;
+    // who asked and what was allowed - kept for the audit rows written when the work itself fails
+    let allowed: (Loaded & { subject: Subject }) | null = null;
+    const failedRow = (tx: Tx, granted: Loaded & { subject: Subject }, status: number): Promise<void> => writeAudit(tx, {
+      tenantId, actorCardId: actingCardId(granted.subject), actorKind: 'card', action,
+      resourceType: granted.resource.type, resourceId: granted.resource.id ?? null,
+      decision: 'allow', reasonCode: granted.decision.reason_code, requestId: ctx.requestId, ip: ctx.ip,
+      details: { ...auth.auditDetails(granted.subject), outcome: 'failed', status },
+    });
     try {
       const outcome = await db.withTenantTx<Outcome>(tenantId, async (tx) => {
-        const session = await auth.resolveSession(tx, token, ctx);
-        if (!session) return { problem: problems.unauthenticated() };
-        checkCsrf(req, session.csrfToken);
-        const { subject } = session;
-        if (fromAnotherSite(req, ctx)) {
-          // written directly, like "not found": the policy was never asked, and nothing is counted against the card
-          await writeAudit(tx, {
-            tenantId, actorCardId: subject.card_id, actorKind: 'card', action, decision: 'deny',
-            reasonCode: 'DENY_FETCH_SITE', requestId: ctx.requestId, ip: ctx.ip,
-          });
-          return { problem: problems.forbidden() };
+        const who = await auth.resolveCredential(tx, credential, action, ctx);
+        if (who.kind === 'limited') return { problem: problems.tooManyRequests(who.retryAfterSeconds) };
+        if (who.kind === 'refused') return { problem: unauthenticated() };
+        const route = bindRoute(def, who, credential.token, input, ctx);
+        if (route === null) return { problem: unauthenticated() };
+        const { subject } = who;
+        // the same in every audit row this layer writes for the request (for a key: which key - never its secret)
+        const details = auth.auditDetails(subject);
+        const actor = { tenantId, actorCardId: actingCardId(subject), actorKind: 'card' as const };
+        if (who.kind === 'session') {
+          checkCsrf(req, who.csrfToken);
+          if (fromAnotherSite(req, ctx)) {
+            // written directly, like "not found": the policy was never asked, and nothing is counted against the card
+            await writeAudit(tx, { ...actor, action, decision: 'deny', reasonCode: 'DENY_FETCH_SITE', requestId: ctx.requestId, ip: ctx.ip });
+            return { problem: problems.forbidden() };
+          }
         }
 
-        const loaded = await def.policy.resource({ tx, subject, params: input.params, body: input.body, query: input.query, ctx });
+        const loaded = await route.load(tx);
         if (loaded === null) {
           await writeAudit(tx, {
-            tenantId, actorCardId: subject.card_id, actorKind: 'card', action, decision: 'deny',
-            reasonCode: 'DENY_RESOURCE_NOT_FOUND', requestId: ctx.requestId, ip: ctx.ip,
+            ...actor, action, decision: 'deny', reasonCode: 'DENY_RESOURCE_NOT_FOUND', requestId: ctx.requestId, ip: ctx.ip,
+            ...(Object.keys(details).length > 0 ? { details } : {}),
           });
           return { problem: problems.notFound() };
         }
@@ -432,6 +559,8 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
           if (decision.reason_code === 'DENY_PLAN_LIMIT') {
             return { problem: problems.conflict('seat-limit-reached', 'No seat is free: all seats the company paid for are in use, or an invoice for fewer seats is waiting to be paid; the Owner can add seats or pay the invoice') };
           }
+          // A key that asks for something it was not made for is told so (it says nothing about what the key holds).
+          if (decision.reason_code === 'DENY_API_KEY_SCOPE') return { problem: problems.apiKeyScope() };
           return { problem: problems.forbidden() };
         }
         // An obligation this layer does not understand cannot be honoured, so the request is refused.
@@ -459,7 +588,7 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
 
         if (input.idemKey !== null) {
           const started = await deps.idempotency.begin(tx, {
-            tenantId, actorCardId: subject.card_id, key: input.idemKey, operationId: op.operationId,
+            tenantId, actor: idempotencyActor(subject), key: input.idemKey, operationId: op.operationId,
             requestHash: hashRequest(op.operationId, input.params, input.body), now: ctx.now,
           });
           if (started.kind === 'replay') {
@@ -468,61 +597,37 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
           }
         }
 
-        const handlerArgs: SessionHandlerArgs = {
-          ctx, tx, subject, decision, resource: loaded, body: input.body, params: input.params, query: input.query,
-          sessionToken: token, csrfToken: session.csrfToken, contentType: input.contentType,
-        };
-        if (def.kind === 'gateway') {
-          const prepared = await def.prepare(handlerArgs);
-          if ('call' in prepared && typeof prepared.call === 'function') {
-            // The decision (and anything prepare wrote) is committed BEFORE the AI service is called.
-            await recordAllow();
-            return { call: prepared.call };
-          }
-          if (input.idemKey !== null) {
-            await deps.idempotency.complete(tx, {
-              tenantId, actorCardId: subject.card_id, key: input.idemKey, status: (prepared as HandlerResult).status ?? 200,
-              body: (prepared as HandlerResult).body,
-            });
-          }
+        const out = await route.run(tx, { resource: loaded, decision });
+        if ('call' in out) {
+          // The decision (and anything prepare wrote) is committed BEFORE the AI service is called.
           await recordAllow();
-          return { result: prepared as HandlerResult };
+          return out;
         }
-        const result = await def.handler(handlerArgs);
-
         if (input.idemKey !== null) {
           await deps.idempotency.complete(tx, {
-            tenantId, actorCardId: subject.card_id, key: input.idemKey, status: result.status ?? 200, body: result.body,
+            tenantId, actor: idempotencyActor(subject), key: input.idemKey, status: out.status ?? 200, body: out.body, secretFields: secrets,
           });
         }
         await recordAllow();
-        return { result };
+        return { result: out };
       });
       // the transaction has committed: a refusal's audit row, and anything that refusal set off, is now real
       await flushAfterCommit(req, ctx);
       if ('problem' in outcome) throw outcome.problem;
       if ('result' in outcome) return outcome.result;
-      const granted = allowed as unknown as { subject: Subject; resource: ResourceRef; decision: Decision };
+      const granted = allowed as unknown as Loaded & { subject: Subject };
       const withTx = <T>(fn: (tx: Tx) => Promise<T>): Promise<T> => db.withTenantTx(tenantId, fn);
       let result: HandlerResult;
       try {
-        result = await outcome.call({ ctx, subject: granted.subject, resource: granted.resource, withTx });
+        result = await outcome.call(withTx);
       } catch (callErr) {
         // The allow row is already committed; record that the work did not complete, and free the
         // idempotency key so the caller can try again.
         const status = callErr instanceof ProblemError ? callErr.status : 502;
         try {
           await db.withTenantTx(tenantId, async (tx) => {
-            if (input.idemKey !== null) {
-              await tx.query('DELETE FROM idempotency_keys WHERE tenant_id = $1 AND actor_card_id = $2 AND key = $3 AND status = $4',
-                [tenantId, granted.subject.card_id, input.idemKey, 'in_progress']);
-            }
-            await writeAudit(tx, {
-              tenantId, actorCardId: granted.subject.card_id, actorKind: 'card', action,
-              resourceType: granted.resource.type, resourceId: granted.resource.id ?? null,
-              decision: 'allow', reasonCode: granted.decision.reason_code, requestId: ctx.requestId, ip: ctx.ip,
-              details: { outcome: 'failed', status },
-            });
+            if (input.idemKey !== null) await deps.idempotency.release(tx, { tenantId, actor: idempotencyActor(granted.subject), key: input.idemKey });
+            await failedRow(tx, granted, status);
           });
         } catch (auditErr) {
           req.log.error({ err: auditErr }, 'could not record a failed gateway call in the audit log');
@@ -533,24 +638,19 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
       if (input.idemKey !== null) {
         const key = input.idemKey;
         await db.withTenantTx(tenantId, (tx) => deps.idempotency.complete(tx, {
-          tenantId, actorCardId: granted.subject.card_id, key, status: result.status ?? 200, body: result.body,
+          tenantId, actor: idempotencyActor(granted.subject), key, status: result.status ?? 200, body: result.body, secretFields: secrets,
         }));
       }
       return result;
     } catch (err) {
       // The transaction rolled back, taking the "allow" audit row with it. Record that the
       // request was allowed but did not complete, so the trail has no silent gap.
-      const granted = allowed as { subject: Subject; resource: ResourceRef; decision: Decision } | null;
+      const granted = allowed as (Loaded & { subject: Subject }) | null;
       if (granted !== null) {
         const pgCode = (err as { code?: unknown }).code;
         const status = err instanceof ProblemError ? err.status : pgCode === '40P01' || pgCode === '40001' ? 409 : 500;
         try {
-          await db.withTenantTx(tenantId, (tx) => writeAudit(tx, {
-            tenantId, actorCardId: granted.subject.card_id, actorKind: 'card', action,
-            resourceType: granted.resource.type, resourceId: granted.resource.id ?? null,
-            decision: 'allow', reasonCode: granted.decision.reason_code, requestId: ctx.requestId, ip: ctx.ip,
-            details: { outcome: 'failed', status },
-          }));
+          await db.withTenantTx(tenantId, (tx) => failedRow(tx, granted, status));
         } catch (auditErr) {
           req.log.error({ err: auditErr }, 'could not record a failed request in the audit log');
         }
@@ -564,12 +664,16 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
       const op = contract.operations.get(def.operationId);
       if (!op) throw new Error(`defineRoutes: "${def.operationId}" is not an operation in openapi.yaml`);
       if (registry.some((r) => r.operationId === def.operationId)) throw new Error(`defineRoutes: "${def.operationId}" registered twice`);
-      const kind = def.kind;
+      const kind: RegisteredRoute['kind'] = def.kind === 'session-or-key' ? 'session' : def.kind === 'gateway-or-key' ? 'gateway' : def.kind;
       // The contract and the code must agree about which routes are public. There are no
       // service-only routes any more (Phase 2 removed the internal policy endpoint): an operation
       // marked x-service cannot be registered.
       if ((kind === 'public') !== op.isPublic || op.isService) {
         throw new Error(`defineRoutes: "${def.operationId}" public/service flag differs from openapi.yaml`);
+      }
+      // ... and about which operations take a machine's API key: the code of such a route is typed for it.
+      if (takesApiKey(def) !== op.apiKey) {
+        throw new Error(`defineRoutes: "${def.operationId}" and openapi.yaml disagree about taking an API key (x-api-key)`);
       }
       if (def.kind === 'public' && def.policy.reason.trim().length < 10) {
         throw new Error(`defineRoutes: public route "${def.operationId}" needs a written reason`);

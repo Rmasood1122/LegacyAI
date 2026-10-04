@@ -29,6 +29,16 @@ def test_a_correct_token_is_accepted() -> None:
     assert len(ctx.approved) == 1
 
 
+def test_a_token_for_an_api_key_names_the_key_and_carries_no_roles() -> None:
+    key_id = str(uuid.uuid4())
+    ctx = verify_service_token(good(roles=[], actor={"kind": "api_key", "id": key_id}), TEST_KEY, "knowledge.answer")
+    # the card is the one the key acts for; the key itself is named, it has no roles - and it is nobody's person,
+    # whatever the token says (so it can never be taken for a contributor or an author)
+    assert (ctx.card_id, ctx.person_id, ctx.api_key_id, ctx.roles) == (C, None, key_id, ())
+    assert verify_service_token(good(), TEST_KEY, "knowledge.answer").person_id == P
+    assert verify_service_token(good(), TEST_KEY, "knowledge.answer").api_key_id is None
+
+
 @pytest.mark.parametrize("token_factory, why", [
     (lambda: good(lifetime=-30), "expired"),
     (lambda: good(aud="someone-else"), "wrong audience"),
@@ -36,6 +46,10 @@ def test_a_correct_token_is_accepted() -> None:
     (lambda: good(lifetime=600), "lifetime too long"),
     (lambda: good(card_phase="suspended"), "suspended card"),
     (lambda: good(roles="owner"), "roles not a list"),
+    (lambda: good(actor={"kind": "api_key", "id": str(uuid.uuid4())}), "an API key that carries roles"),
+    (lambda: good(roles=[], actor={"kind": "api_key", "id": "not-a-uuid"}), "malformed key id"),
+    (lambda: good(roles=[], actor={"kind": "operator", "id": str(uuid.uuid4())}), "unknown actor kind"),
+    (lambda: good(roles=[], actor="api_key"), "actor as text"),
     (lambda: good(approved=[1, 2]), "approved not ids"),
     (lambda: good(limits={"calls_per_hour": "many"}), "limits not numbers"),
     (lambda: good(tenant_id="not-a-uuid"), "malformed tenant"),
@@ -130,3 +144,38 @@ def test_named_filters_travel_in_the_token_and_must_map_a_permission_to_an_objec
         with pytest.raises(TokenError):
             verify_service_token(good(filters=bad), TEST_KEY, "knowledge.answer")
 
+
+
+def _internal_actions() -> set[str]:
+    """Every operation name this service accepts a token for: read from app/main.py, so a new one cannot be missed."""
+    import re
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[2] / "app" / "main.py").read_text(encoding="utf-8")
+    return set(re.findall(r"""Depends\(token\(\s*["']([a-z_.]+)["']""", text))
+
+
+def test_a_token_for_an_api_key_is_accepted_only_for_reading_and_asking() -> None:
+    from app.platform.auth import API_KEY_ACTIONS
+
+    allowed = set(API_KEY_ACTIONS)
+    assert allowed == {"knowledge.candidates", "knowledge.answer", "item.list", "item.read", "graph.read", "gap.report"}
+    actions = _internal_actions()
+    assert len(actions) > 40 and allowed <= actions      # the list names real operations, and the scan found them
+    key = {"kind": "api_key", "id": str(uuid.uuid4())}
+    for action in sorted(actions):
+        token = mint(action, tenant_id=T, card_id=C, person_id=P, roles=[], actor=key)
+        if action in allowed:
+            assert verify_service_token(token, TEST_KEY, action).person_id is None
+        else:
+            with pytest.raises(TokenError):
+                verify_service_token(token, TEST_KEY, action)
+        # the same operation with a card's token is not affected
+        assert verify_service_token(mint(action, tenant_id=T, card_id=C, person_id=P), TEST_KEY, action).person_id == P
+
+
+@pytest.mark.parametrize("action", ["source.create", "source.continue", "source.confirm", "item.create", "label.change", "topic.embed"])
+def test_a_key_token_cannot_add_change_or_start_anything(action: str) -> None:
+    with pytest.raises(TokenError, match="API key"):
+        key = {"kind": "api_key", "id": str(uuid.uuid4())}
+        verify_service_token(mint(action, tenant_id=T, card_id=C, person_id=P, roles=[], actor=key), TEST_KEY, action)

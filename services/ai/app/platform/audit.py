@@ -17,8 +17,12 @@ DetailValue = str | int | float | bool | None
 def write_audit(
     cur: psycopg.Cursor[Any], *, tenant_id: str, card_id: str | None, action: str, reason_code: str,
     resource_type: str | None = None, resource_id: str | None = None, request_id: str | None = None,
-    details: dict[str, DetailValue] | None = None,
+    details: dict[str, DetailValue] | None = None, api_key_id: str | None = None,
 ) -> None:
+    # `api_key_id`: the request was made with a machine's API key; `card_id` is then the card the key acts for and
+    # the row names the key (its id, never its secret).
+    if api_key_id is not None:
+        details = {**(details or {}), "api_key_id": api_key_id}
     canonical = json.dumps(details or {}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     cur.execute(
         "SELECT audit_write(%s, %s, 'service', %s, %s, %s, 'event', %s, %s, NULL, %s)",

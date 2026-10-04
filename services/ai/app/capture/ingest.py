@@ -225,11 +225,12 @@ def process_upload(db: Database, ctx: ServiceContext, embedder: Embedder, source
         # the consent gate in the database (sources_guard) refused: consent withdrawn or contributor not confirmed
         _fail(db, ctx.tenant_id, source_id, "consent_missing")
         return {"status": "failed", "failure_code": "consent_missing"}
-    return continue_embedding(db, ctx.tenant_id, ctx.card_id, source_id, embedder, deadline, request_id=ctx.request_id)
+    return continue_embedding(db, ctx.tenant_id, ctx.card_id, source_id, embedder, deadline, request_id=ctx.request_id,
+                              api_key_id=ctx.api_key_id)
 
 
 def continue_embedding(db: Database, tenant_id: str, card_id: str | None, source_id: str, embedder: Embedder, deadline: float,
-                       request_id: str | None = None) -> dict[str, Any]:
+                       request_id: str | None = None, api_key_id: str | None = None) -> dict[str, Any]:
     """Embeds pending chunks in batches until done or out of time; then marks the source ready."""
     while time.monotonic() < deadline:
         with db.tenant_tx(tenant_id) as cur:
@@ -267,7 +268,7 @@ def continue_embedding(db: Database, tenant_id: str, card_id: str | None, source
         redactions = int(one(cur)["n"])
         write_audit(cur, tenant_id=tenant_id, card_id=card_id, action="capture:document_ready", reason_code="SOURCE_READY",
                     resource_type="source", resource_id=source_id, request_id=request_id,
-                    details={"source_id": source_id, "chunk_count": total, "redactions": redactions})
+                    details={"source_id": source_id, "chunk_count": total, "redactions": redactions}, api_key_id=api_key_id)
     return {"status": "ready", "chunk_count": total}
 
 

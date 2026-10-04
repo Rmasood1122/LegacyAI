@@ -254,6 +254,30 @@ export interface ShownSecrets {
 }
 
 /**
+ * ONE value the API returns exactly once (for example a machine's API key). Shown until the person says they copied
+ * it; the caller holds it in screen state only, so leaving the screen removes it. `value` undefined = the request
+ * was already carried out earlier and the value was shown then (`replayText` says what to do about it).
+ */
+export function ShownOnce({ title, label, value, replayText, doneLabel, onDone }: {
+  title: string; label: string; value: string | undefined; replayText: string; doneLabel: string; onDone: () => void;
+}) {
+  return (
+    <div className="secrets" role="alert">
+      <h3>{title}</h3>
+      {value !== undefined ? (
+        <>
+          <p><strong>This is shown only once.</strong> Copy it now; it cannot be shown again. Leaving this screen removes it.</p>
+          <dl className="facts"><dt>{label}</dt><dd data-testid="shown-once">{value}</dd></dl>
+        </>
+      ) : (
+        <p><strong>This request was already carried out, and the value was shown then.</strong> {replayText}</p>
+      )}
+      <Button variant="primary" onClick={onDone}>{value !== undefined ? doneLabel : 'Close'}</Button>
+    </div>
+  );
+}
+
+/**
  * Secrets the API returns exactly once (a card's 3-digit code, a set-up token). They are shown until
  * the person says they wrote them down; the caller then forgets them (they live in screen state only,
  * so leaving the screen removes them too).

@@ -5,9 +5,10 @@
 // and no other INSERT INTO sessions in the codebase (a test checks both). That is what makes
 // "card number + SC alone" unable to authenticate, by construction.
 import { hmacSha256, isUuid, randomToken, sha256 } from '../../../shared/crypto.ts';
-import type { CardState, RequestContext, RoleKey, Subject, SubjectRole } from '../../../shared/policy-types.ts';
+import type { CardState, RequestContext, RoleKey, CardSubject, SubjectRole } from '../../../shared/policy-types.ts';
 import { getSettings, getTenant, type TenantRow, type TenantSettings, type Tx } from '../../platform/index.ts';
 import { StrongFactorProof } from './factors.ts';
+import { keyRevocationReason, revokeKeysOfCard } from './key-revocation.ts';
 import { effectiveState } from './lifecycle.ts';
 import { ScProof } from './secret-code.ts';
 
@@ -64,12 +65,26 @@ export async function createSession(
   return { token, sessionId: (rows[0] as { id: string }).id };
 }
 
-export async function revokeSessionsForCard(tx: Tx, tenantId: string, cardId: string, reason: SessionRevokeReason, now: Date): Promise<number> {
-  const res = await tx.query(
-    'UPDATE sessions SET revoked_at = $4, revoked_reason = $3 WHERE tenant_id = $1 AND card_id = $2 AND revoked_at IS NULL',
-    [tenantId, cardId, reason, now],
+/**
+ * Ends every session of the card - and, when the reason is a change of the card's sign-in or rights, REVOKES every
+ * API key the card made, in the same transaction (key-revocation.ts). One function for both, so that no path can
+ * end the sessions and leave the keys. Returns the ids of the keys this call revoked.
+ */
+export async function revokeSessionsForCard(
+  tx: Tx, tenantId: string, cardId: string, reason: SessionRevokeReason, now: Date,
+  /**
+   * Narrows WHICH SESSIONS end: only those opened with this sign-in factor (the holder removed that factor and stays
+   * signed in with another). It never narrows the keys: nothing records which session made a key, so all of them go.
+   */
+  only?: { openedWithCredentialId: string },
+): Promise<{ revokedKeyIds: string[] }> {
+  await tx.query(
+    `UPDATE sessions SET revoked_at = $4, revoked_reason = $3
+      WHERE tenant_id = $1 AND card_id = $2 AND revoked_at IS NULL AND ($5::uuid IS NULL OR credential_id = $5::uuid)`,
+    [tenantId, cardId, reason, now, only?.openedWithCredentialId ?? null],
   );
-  return res.rowCount;
+  const keyReason = keyRevocationReason(reason);
+  return { revokedKeyIds: keyReason === null ? [] : await revokeKeysOfCard(tx, tenantId, cardId, keyReason, now) };
 }
 
 export async function revokeSession(tx: Tx, sessionId: string, reason: SessionRevokeReason, now: Date): Promise<void> {
@@ -107,8 +122,8 @@ export interface SessionExtras {
   companyCard: CompanyCardInfo | null;
 }
 
-const extras = new WeakMap<Subject, SessionExtras>();
-export function sessionExtras(subject: Subject): SessionExtras | undefined {
+const extras = new WeakMap<CardSubject, SessionExtras>();
+export function sessionExtras(subject: CardSubject): SessionExtras | undefined {
   return extras.get(subject);
 }
 
@@ -136,7 +151,7 @@ export async function loadRoles(tx: Tx, tenantId: string, cardId: string): Promi
  */
 export async function resolveSession(
   tx: Tx, token: string, ctx: RequestContext,
-): Promise<{ subject: Subject; csrfToken: string } | null> {
+): Promise<{ subject: CardSubject; csrfToken: string } | null> {
   const tenantId = tenantOfToken(token);
   if (tenantId === null) return null;
   const { rows } = await tx.query<SessionJoinRow>(
@@ -175,7 +190,7 @@ export async function resolveSession(
   const idle = new Date(Math.min(now + settings.session_idle_minutes * 60_000, row.absolute_expires_at.getTime()));
   await tx.query('UPDATE sessions SET last_seen_at = $2, idle_expires_at = $3 WHERE id = $1', [row.session_id, ctx.now, idle]);
 
-  const subject: Subject = {
+  const subject: CardSubject = {
     kind: 'card',
     tenant_id: tenantId,
     card_id: row.card_id,
@@ -199,7 +214,7 @@ export async function resolveSession(
 }
 
 /** New token for the same session (old one stops working). Used when the caller's own privileges change. */
-export async function rotateSession(tx: Tx, subject: Subject): Promise<string> {
+export async function rotateSession(tx: Tx, subject: CardSubject): Promise<string> {
   const token = `v1.${subject.tenant_id}.${randomToken(32)}`;
   await tx.query('UPDATE sessions SET token_hash = $2, csrf_hash = $3 WHERE id = $1 AND revoked_at IS NULL', [
     subject.session_id, sha256(token), sha256(csrfTokenFor(token)),
@@ -208,7 +223,7 @@ export async function rotateSession(tx: Tx, subject: Subject): Promise<string> {
 }
 
 /** Builds a subject for a card WITHOUT a session. Used only by the internal, service-to-service policy check. */
-export async function subjectForCard(tx: Tx, tenantId: string, cardId: string): Promise<Subject | null> {
+export async function subjectForCard(tx: Tx, tenantId: string, cardId: string): Promise<CardSubject | null> {
   const { rows } = await tx.query<Omit<SessionJoinRow, 'session_id' | 'idle_expires_at' | 'absolute_expires_at' | 'revoked_at'>>(
     `SELECT c.id AS card_id, c.card_number, c.kind, c.person_id, c.state, c.activated_at, c.expires_at, c.grace_until,
             c.renewal_due, a.locked_at, p.department_id

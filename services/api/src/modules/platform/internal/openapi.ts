@@ -14,9 +14,18 @@ export interface Operation {
   path: string;
   fastifyPath: string;
   permission: string | null;
+  /** The contract says `x-api-key: true`: a machine's API key is accepted here as well as a signed-in session. */
+  apiKey: boolean;
   isPublic: boolean;
   isService: boolean;
   idempotent: boolean;
+  /** False where the contract lists the Idempotency-Key header as optional: it is honoured when sent. */
+  idempotencyKeyRequired: boolean;
+  /**
+   * `x-one-time-secrets`: the fields of this operation's answer that are shown ONCE (a secret code, an enrollment
+   * token, an API key). They are removed before the answer is kept for a retried request.
+   */
+  oneTimeSecrets: readonly string[];
   hasBody: boolean;
   /** The contract says `requestBody.required: false` in so many words: a request with NO body is then accepted as it is. */
   bodyOptional: boolean;
@@ -57,6 +66,19 @@ function deref(node: unknown, root: Json, seen: string[] = []): unknown {
   return out;
 }
 
+/** Every property name anywhere in a (dereferenced) schema. */
+function propertyNames(node: unknown, into: Set<string>): void {
+  if (Array.isArray(node)) {
+    for (const n of node) propertyNames(n, into);
+    return;
+  }
+  if (typeof node !== 'object' || node === null) return;
+  for (const [k, v] of Object.entries(node as Json)) {
+    if (k === 'properties' && typeof v === 'object' && v !== null) for (const name of Object.keys(v)) into.add(name);
+    propertyNames(v, into);
+  }
+}
+
 export function loadContract(filePath: string): Contract {
   const root = parse(readFileSync(filePath, 'utf8')) as Json;
   const doc = deref(root, root) as Json;
@@ -73,6 +95,7 @@ export function loadContract(filePath: string): Contract {
   coercing.addFormat('uuid', canonicalUuid);
 
   const operations = new Map<string, Operation>();
+  const answerFieldsOf = new Map<string, Set<string>>();
   const paths = (doc.paths ?? {}) as Record<string, Record<string, Json>>;
   for (const [path, item] of Object.entries(paths)) {
     for (const [method, op] of Object.entries(item)) {
@@ -103,9 +126,21 @@ export function loadContract(filePath: string): Contract {
         responses.set(Number(status), schema === undefined ? null : strict.compile(schema as Json));
       }
 
+      const declaredSecrets = op['x-one-time-secrets'] ?? [];
+      if (!Array.isArray(declaredSecrets) || !declaredSecrets.every((f) => typeof f === 'string' && /^[a-z_]{1,60}$/.test(f))) {
+        throw new Error(`openapi: ${operationId} has a malformed x-one-time-secrets list`);
+      }
+      const answerFields = new Set<string>();
+      for (const res of Object.values((op.responses ?? {}) as Record<string, Json>)) propertyNames((res.content as Json | undefined)?.['application/json'], answerFields);
+      for (const f of declaredSecrets as string[]) {
+        if (!answerFields.has(f)) throw new Error(`openapi: ${operationId} lists the one-time secret "${f}", which its answers do not contain`);
+      }
+      answerFieldsOf.set(operationId, answerFields);
+
       const isPublic = op['x-public'] === true;
       const isService = op['x-service'] === true;
       const permission = typeof op['x-permission'] === 'string' ? op['x-permission'] : null;
+      if (op['x-api-key'] === true && (isPublic || isService)) throw new Error(`openapi: ${operationId} is public and cannot take an API key`);
       if (!isPublic && permission === null) {
         throw new Error(`openapi: ${operationId} is not public and declares no x-permission`);
       }
@@ -115,9 +150,12 @@ export function loadContract(filePath: string): Contract {
         path,
         fastifyPath: path.replace(/\{([a-z_]+)\}/g, ':$1'),
         permission,
+        apiKey: op['x-api-key'] === true,
         isPublic,
         isService,
         idempotent: op['x-idempotent'] === true,
+        idempotencyKeyRequired: idemParam?.required === true,
+        oneTimeSecrets: declaredSecrets as string[],
         hasBody: bodySchema !== undefined || binaryTypes.length > 0,
         bodyOptional: (op.requestBody as Json | undefined)?.required === false,
         binaryTypes,
@@ -127,6 +165,18 @@ export function loadContract(filePath: string): Contract {
         validateIdempotencyKey: idemParam ? strict.compile(idemParam.schema as Json) : null,
         responses,
       });
+    }
+  }
+
+  // A field that is a one-time secret in ONE operation is one wherever an answer is kept for a retry: an operation
+  // that returns it and takes an Idempotency-Key must list it too, or the secret would be stored and shown again.
+  const everySecret = new Set([...operations.values()].flatMap((o) => o.oneTimeSecrets));
+  for (const o of operations.values()) {
+    if (o.validateIdempotencyKey === null) continue;
+    for (const f of answerFieldsOf.get(o.operationId) ?? []) {
+      if (everySecret.has(f) && !o.oneTimeSecrets.includes(f)) {
+        throw new Error(`openapi: ${o.operationId} returns "${f}" and can be retried; list it under x-one-time-secrets`);
+      }
     }
   }
 

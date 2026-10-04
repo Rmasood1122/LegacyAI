@@ -4,7 +4,7 @@
 // /v1/tenants/current/...: billing is its own area with its own rights, and the provider's endpoint belongs to it
 // (docs/phase4/05-billing.md). The operator's side follows the usual /v1/tenants/{tenant_id}/... form.
 import { ProblemError, problems } from '../../../shared/errors.ts';
-import type { RequestContext, ResourceRef, Subject } from '../../../shared/policy-types.ts';
+import type { RequestContext, ResourceRef, CardSubject } from '../../../shared/policy-types.ts';
 import {
   decodeIdCursor, encodeCursor, getTenant, pageOf, PLATFORM_TENANT_ID, writeAudit, type Database, type RateLimiter, type RouteDef, type Tx,
 } from '../../platform/index.ts';
@@ -13,14 +13,14 @@ import { notAppliedReason, toApiInvoice, type Billing, type EventResult, type In
 import type { PaymentEvent } from './provider.ts';
 
 /** The company's own subscription. Only the Company Owner holds the rights (migration 20261004000400). */
-const ownBilling = async ({ subject }: { subject: Subject }): Promise<ResourceRef> => ({
+const ownBilling = async ({ subject }: { subject: CardSubject }): Promise<ResourceRef> => ({
   type: 'subscription', id: subject.tenant_id, tenant_id: subject.tenant_id,
 });
-const ownInvoices = async ({ subject }: { subject: Subject }): Promise<ResourceRef> => ({
+const ownInvoices = async ({ subject }: { subject: CardSubject }): Promise<ResourceRef> => ({
   type: 'invoice', tenant_id: subject.tenant_id, collection: true,
 });
 /** What the platform operator acts on: a customer company, named by id. */
-const targetTenant = async ({ subject, params }: { subject: Subject; params: { tenant_id: string } }): Promise<ResourceRef> => ({
+const targetTenant = async ({ subject, params }: { subject: CardSubject; params: { tenant_id: string } }): Promise<ResourceRef> => ({
   type: 'tenant', id: params.tenant_id, tenant_id: subject.tenant_id,
 });
 

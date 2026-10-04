@@ -22,6 +22,8 @@ const doc = parse(readFileSync(contractPath, 'utf8'));
 const KNOWN = new Set([
   'type', 'format', 'additionalProperties', 'required', 'properties', 'items', 'enum', 'anyOf', 'oneOf', 'allOf', 'description', 'minimum', 'maximum',
   'maxLength', 'minLength', 'pattern', '$ref', 'const', 'minItems', 'maxItems', 'default', 'uniqueItems', 'title', 'examples', 'example', 'minProperties', 'maxProperties',
+  // closes a schema built with allOf (the server refuses unknown fields); it says nothing about the fields themselves
+  'unevaluatedProperties',
 ]);
 const lit = (v) => (v === null ? 'null' : JSON.stringify(v));
 const key = (k) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : JSON.stringify(k));
@@ -104,10 +106,12 @@ for (const [route, methods] of Object.entries(doc.paths)) {
       if (list.length === 0) return 'undefined';
       return `{ ${list.map((p) => `${key(p.name)}${p.required ? '' : '?'}: ${typeOf(p.schema)}`).join('; ')} }`;
     };
-    // The only header parameter the contract has is the Idempotency-Key, on exactly the operations marked x-idempotent.
+    // The only header parameter the contract has is the Idempotency-Key: REQUIRED on exactly the operations marked
+    // x-idempotent. Where the contract makes it optional (a machine may send it to make a retry safe), this
+    // application sends none.
     const headers = params.filter((p) => p.in !== 'path' && p.in !== 'query');
     const wantsKey = op['x-idempotent'] === true;
-    if (headers.some((p) => p.in !== 'header' || p.name !== 'Idempotency-Key') || (headers.length === 1) !== wantsKey) {
+    if (headers.length > 1 || headers.some((p) => p.in !== 'header' || p.name !== 'Idempotency-Key') || headers.some((p) => p.required === true) !== wantsKey) {
       throw new Error(`${op.operationId}: unsupported parameter, or Idempotency-Key and x-idempotent disagree`);
     }
     const content = op.requestBody?.content ?? {};

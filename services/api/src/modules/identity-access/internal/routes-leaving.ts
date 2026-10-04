@@ -5,7 +5,7 @@
 // policy decision point before the handler runs.
 import { problems } from '../../../shared/errors.ts';
 import { isUuid } from '../../../shared/crypto.ts';
-import type { RequestContext, ResourceRef, Subject } from '../../../shared/policy-types.ts';
+import type { RequestContext, ResourceRef, CardSubject } from '../../../shared/policy-types.ts';
 import { pageOf, writeAudit, type Notifier, type RouteDef, type Tx } from '../../platform/index.ts';
 import type { Authorizer } from './authz.ts';
 import { lockTenantRoles, maxRank } from './cards.ts';
@@ -21,7 +21,7 @@ import { loadRoles } from './sessions.ts';
  * Implemented by the knowledge module and plugged in by app.ts: this module reads no knowledge table.
  */
 export interface PersonHoldings { job_roles: string[] | null; verified_items: number | null; interviews_completed: number | null }
-export type PersonHoldingsLoader = (tx: Tx, subject: Subject, personIds: readonly string[], ctx: RequestContext) => Promise<Map<string, PersonHoldings>>;
+export type PersonHoldingsLoader = (tx: Tx, subject: CardSubject, personIds: readonly string[], ctx: RequestContext) => Promise<Map<string, PersonHoldings>>;
 const NOTHING_KNOWN: PersonHoldings = { job_roles: null, verified_items: null, interviews_completed: null };
 
 export interface LeavingRouteDeps {
@@ -42,13 +42,13 @@ async function findPerson(tx: Tx, personId: string): Promise<PersonLite | null> 
 }
 
 /** For READING a person's leaving date: the person's own access rule (a person may read their own). */
-const personToRead = async ({ tx, subject, params }: { tx: Tx; subject: Subject; params: { person_id: string } }): Promise<ResourceRef | null> => {
+const personToRead = async ({ tx, subject, params }: { tx: Tx; subject: CardSubject; params: { person_id: string } }): Promise<ResourceRef | null> => {
   const p = await findPerson(tx, params.person_id);
   return p ? { type: 'person', id: p.id, tenant_id: subject.tenant_id, owner_person_id: p.id, department_id: p.department_id } : null;
 };
 
 /** For CHANGING it: guarded like every change to a person - not on yourself, not on someone who outranks you. */
-const personToChange = async ({ tx, subject, params }: { tx: Tx; subject: Subject; params: { person_id: string } }): Promise<ResourceRef | null> => {
+const personToChange = async ({ tx, subject, params }: { tx: Tx; subject: CardSubject; params: { person_id: string } }): Promise<ResourceRef | null> => {
   const p = await findPerson(tx, params.person_id);
   if (!p) return null;
   await lockTenantRoles(tx, subject.tenant_id);

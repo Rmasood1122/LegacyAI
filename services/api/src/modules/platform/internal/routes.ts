@@ -1,6 +1,6 @@
 // Platform endpoints: health, readiness, own tenant + settings, audit log, data export.
 import { problems } from '../../../shared/errors.ts';
-import type { ResourceRef, Subject } from '../../../shared/policy-types.ts';
+import type { ResourceRef, CardSubject } from '../../../shared/policy-types.ts';
 import { queryAudit, toApiAuditEvent, verifyChain, writeAudit } from './audit.ts';
 import type { Config } from './config.ts';
 import { EXPECTED_SCHEMA_VERSION, type Database } from './db.ts';
@@ -10,10 +10,10 @@ import {
   getExportJob, getSettings, getTenant, runExport, toApiExportJob, toApiTenant, type ExportRegistry,
 } from './tenants.ts';
 
-const tenantResource = (type: string) => async ({ subject }: { subject: Subject }): Promise<ResourceRef> => ({
+const tenantResource = (type: string) => async ({ subject }: { subject: CardSubject }): Promise<ResourceRef> => ({
   type, id: subject.tenant_id, tenant_id: subject.tenant_id,
 });
-const collection = (type: string) => async ({ subject }: { subject: Subject }): Promise<ResourceRef> => ({
+const collection = (type: string) => async ({ subject }: { subject: CardSubject }): Promise<ResourceRef> => ({
   type, tenant_id: subject.tenant_id, collection: true,
 });
 

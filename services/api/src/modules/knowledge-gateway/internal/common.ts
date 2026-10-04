@@ -1,9 +1,11 @@
 // Helpers shared by the knowledge-gateway routes.
 import { isUuid } from '../../../shared/crypto.ts';
 import { problems } from '../../../shared/errors.ts';
-import type { ApprovalRef, Decision, RequestContext, ResourceRef, Subject } from '../../../shared/policy-types.ts';
+import type { ApprovalRef, CardSubject, Decision, RequestContext, ResourceRef, Subject } from '../../../shared/policy-types.ts';
 import type { Authorizer } from '../../identity-access/index.ts';
-import type { Database, GatewayPrepared, ListFilter, Notifier, RateLimiter, RouteDef, SessionHandlerArgs, Tx } from '../../platform/index.ts';
+import type {
+  AuthorizedHandlerArgs, CallerHandlerArgs, Database, GatewayPrepared, ListFilter, Notifier, RateLimiter, RouteDef, SessionHandlerArgs, Tx,
+} from '../../platform/index.ts';
 import type { AiCall, AiServiceClient, TokenClaims } from './client.ts';
 
 export interface GatewayDeps {
@@ -14,15 +16,19 @@ export interface GatewayDeps {
   rateLimiter: RateLimiter;
 }
 
-export type Loader = (args: { tx: Tx; subject: Subject; params: any; body: any; query: any; ctx: RequestContext }) => Promise<ResourceRef | null>;
+export type Loader<S extends Subject = CardSubject> = (args: { tx: Tx; subject: S; params: any; body: any; query: any; ctx: RequestContext }) => Promise<ResourceRef | null>;
 
 export const phaseOf = (decision: Decision): 'normal' | 'grace' => (decision.obligations.some((o) => o.type === 'read_only') ? 'grace' : 'normal');
 
+/**
+ * Who the AI service is told is asking. A card: itself and its roles. An API key: the key (claim `actor`), no roles
+ * at all, and - as card and person - the ones the key acts for, so that "mine" and the audit trail have a card.
+ */
 export function baseClaims(subject: Subject, decision: Decision, ctx: RequestContext): TokenClaims {
-  return {
-    tenant_id: subject.tenant_id, card_id: subject.card_id, person_id: subject.person_id, roles: subject.roles.map((r) => r.role_key),
-    card_phase: phaseOf(decision), request_id: ctx.requestId,
-  };
+  const who = subject.kind === 'card'
+    ? { card_id: subject.card_id, person_id: subject.person_id, roles: subject.roles.map((r) => r.role_key) }
+    : { card_id: subject.acts_for.card_id, person_id: subject.acts_for.person_id, roles: [], actor: { kind: 'api_key' as const, id: subject.key_id } };
+  return { tenant_id: subject.tenant_id, ...who, card_phase: phaseOf(decision), request_id: ctx.requestId };
 }
 
 /**
@@ -108,25 +114,41 @@ export function gatewayRoute(
     kind: 'gateway',
     policy: { resource: load },
     ...(bodyLimit !== undefined ? { bodyLimit } : {}),
-    prepare: async (a): Promise<GatewayPrepared> => {
-      const p = await plan(a);
-      if ('result' in p) return p.result;
-      const claims: TokenClaims = baseClaims(a.subject, a.decision, a.ctx);
-      if (p.filterAction !== undefined) claims.filter = await deps.authorizer.filterSpec(a.tx, a.subject, p.filterAction, a.ctx);
-      if (p.topicFilter === true) claims.topic_filter = await deps.authorizer.filterSpec(a.tx, a.subject, 'topic:read', a.ctx);
-      if (p.moreFilters !== undefined) {
-        claims.filters = {};
-        for (const permission of p.moreFilters) claims.filters[permission] = await deps.authorizer.filterSpec(a.tx, a.subject, permission, a.ctx);
-      }
-      if (p.ai === true) claims.limits = await aiLimits(a.tx, a.subject.tenant_id);
-      if (p.approved !== undefined) claims.approved = p.approved;
-      const call: AiCall = { path: p.path, method: p.method, action: p.action, subject: p.subject, json: p.json, bytes: p.bytes, claims };
-      return {
-        call: async () => {
-          const result = await deps.ai.call(call);
-          return { status: p.status ?? 200, body: p.map(result) };
-        },
-      };
+    prepare: async (a) => prepareCall(deps, a, await plan(a)),
+  };
+}
+
+/**
+ * The same, for an operation that also takes a machine's API key: its loader and its plan are handed "a card or a
+ * key" and so cannot use anything only a card has. Approvals never take a key.
+ */
+export function keyGatewayRoute(
+  deps: GatewayDeps, operationId: string, load: Loader<Subject>,
+  plan: (a: CallerHandlerArgs) => Promise<CallPlan | { result: { status?: number; body?: unknown } }>,
+): RouteDef {
+  if (APPROVAL_OPERATIONS.has(operationId)) throw new Error(`${operationId} approves what somebody wrote: it cannot take an API key`);
+  return { operationId, kind: 'gateway-or-key', policy: { resource: load }, prepare: async (a) => prepareCall(deps, a, await plan(a)) };
+}
+
+/** Builds the service token for the planned call - the access filters are the asking subject's own - and returns the call. */
+async function prepareCall<S extends Subject>(
+  deps: GatewayDeps, a: AuthorizedHandlerArgs<S>, p: CallPlan | { result: { status?: number; body?: unknown } },
+): Promise<GatewayPrepared<S>> {
+  if ('result' in p) return p.result;
+  const claims: TokenClaims = baseClaims(a.subject, a.decision, a.ctx);
+  if (p.filterAction !== undefined) claims.filter = await deps.authorizer.filterSpec(a.tx, a.subject, p.filterAction, a.ctx);
+  if (p.topicFilter === true) claims.topic_filter = await deps.authorizer.filterSpec(a.tx, a.subject, 'topic:read', a.ctx);
+  if (p.moreFilters !== undefined) {
+    claims.filters = {};
+    for (const permission of p.moreFilters) claims.filters[permission] = await deps.authorizer.filterSpec(a.tx, a.subject, permission, a.ctx);
+  }
+  if (p.ai === true) claims.limits = await aiLimits(a.tx, a.subject.tenant_id);
+  if (p.approved !== undefined) claims.approved = p.approved;
+  const call: AiCall = { path: p.path, method: p.method, action: p.action, subject: p.subject, json: p.json, bytes: p.bytes, claims };
+  return {
+    call: async () => {
+      const result = await deps.ai.call(call);
+      return { status: p.status ?? 200, body: p.map(result) };
     },
   };
 }

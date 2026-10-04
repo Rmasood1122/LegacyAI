@@ -325,7 +325,7 @@ export class CardService {
   async suspend(tx: Tx, card: CardRow, reason: string, actorCardId: string, ctx: RequestContext): Promise<CardRow> {
     const current = await this.materializeExpiry(tx, card, ctx);
     const updated = await this.transition(tx, current, 'suspended', 'suspended', actorCardId, ctx, { reasonColumn: 'suspended_reason', reason });
-    await revokeSessionsForCard(tx, card.tenant_id, card.id, 'card_suspended', ctx.now);
+    await this.revokeSessions(tx, card, 'card_suspended', ctx.now);
     await this.#notifier.notify({ type: 'card_suspended', tenantId: card.tenant_id, cardId: card.id });
     return updated;
   }
@@ -337,7 +337,7 @@ export class CardService {
   async revoke(tx: Tx, card: CardRow, reason: string, actorCardId: string | null, ctx: RequestContext): Promise<CardRow> {
     const current = await this.materializeExpiry(tx, card, ctx);
     const updated = await this.transition(tx, current, 'revoked', 'revoked', actorCardId, ctx, { reasonColumn: 'revoked_reason', reason });
-    await revokeSessionsForCard(tx, card.tenant_id, card.id, 'card_revoked', ctx.now);
+    await this.revokeSessions(tx, card, 'card_revoked', ctx.now);
     await tx.query(`UPDATE card_secrets SET status = 'retired', sc_hash = NULL, retired_at = $2 WHERE card_id = $1 AND status = 'current'`, [card.id, ctx.now]);
     await this.#notifier.notify({ type: 'card_revoked', tenantId: card.tenant_id, cardId: card.id });
     return updated;
@@ -368,7 +368,7 @@ export class CardService {
     await tx.query(
       'UPDATE card_auth_state SET sc_failed_count = 0, locked_at = NULL, lock_reason = NULL WHERE tenant_id = $1 AND card_id = $2',
       [card.tenant_id, card.id]);
-    await revokeSessionsForCard(tx, card.tenant_id, card.id, 'sc_rotated', ctx.now);
+    await this.revokeSessions(tx, card, 'sc_rotated', ctx.now);
     await this.#audit(tx, card, 'card:renew', 'CARD_RENEWED_SC_ROTATED', actor, ctx);
     await this.#notifier.notify({ type: 'card_renewed', tenantId: card.tenant_id, cardId: card.id });
     return { card: renewed, sc };
@@ -397,7 +397,7 @@ export class CardService {
 
     await tx.query(`UPDATE credentials SET status = 'revoked' WHERE tenant_id = $1 AND card_id = $2`, [card.tenant_id, card.id]);
     await tx.query('UPDATE enrollment_tokens SET used_at = $3 WHERE tenant_id = $1 AND card_id = $2 AND used_at IS NULL', [card.tenant_id, card.id, ctx.now]);
-    await revokeSessionsForCard(tx, card.tenant_id, card.id, 'credentials_reset', ctx.now);
+    await this.revokeSessions(tx, card, 'credentials_reset', ctx.now);
     const sc = await this.rotateSecret(tx, card, null, ctx.now);
     await tx.query(
       `UPDATE card_auth_state SET sc_failed_count = 0, locked_at = NULL, lock_reason = NULL, factor_failed_count = 0,
@@ -427,7 +427,7 @@ export class CardService {
       'UPDATE card_auth_state SET locked_at = $3, lock_reason = $4 WHERE tenant_id = $1 AND card_id = $2 AND locked_at IS NULL',
       [card.tenant_id, card.id, ctx.now, how.reason]);
     if (locked.rowCount === 0) return false;
-    await revokeSessionsForCard(tx, card.tenant_id, card.id, 'card_locked', ctx.now);
+    await this.revokeSessions(tx, card, 'card_locked', ctx.now);
     await this.event(tx, card, how.event, null, ctx, how.details);
     await this.#audit(tx, card, 'card:lock', how.auditReason, null, ctx, how.details);
     return true;
@@ -446,7 +446,7 @@ export class CardService {
     await tx.query(
       'UPDATE card_auth_state SET sc_failed_count = 0, locked_at = NULL, lock_reason = NULL WHERE tenant_id = $1 AND card_id = $2',
       [card.tenant_id, card.id]);
-    await revokeSessionsForCard(tx, card.tenant_id, card.id, 'sc_rotated', ctx.now);
+    await this.revokeSessions(tx, card, 'sc_rotated', ctx.now);
     // an anomaly rule starts counting from nothing again
     await tx.query('DELETE FROM card_anomaly_counters WHERE tenant_id = $1 AND card_id = $2', [card.tenant_id, card.id]);
     await this.event(tx, card, 'unlocked', actorCardId, ctx);
@@ -464,7 +464,7 @@ export class CardService {
     // 1. Kill the old card first: its number, SC and sessions stop working immediately.
     //    (A suspended card cannot be replaced - the state machine refuses - so replacing can never undo a suspension.)
     await this.transition(tx, current, 'replaced', 'replaced', actorCardId, ctx);
-    await revokeSessionsForCard(tx, card.tenant_id, card.id, 'card_replaced', ctx.now);
+    await this.revokeSessions(tx, card, 'card_replaced', ctx.now);
     await tx.query(`UPDATE card_secrets SET status = 'retired', sc_hash = NULL, retired_at = $2 WHERE card_id = $1 AND status = 'current'`, [card.id, ctx.now]);
 
     // 2. New card: new number, new SC, same person, same roles and restrictions.
@@ -511,7 +511,7 @@ export class CardService {
     await tx.query('UPDATE enrollment_tokens SET used_at = $3 WHERE tenant_id = $1 AND card_id = $2 AND used_at IS NULL', [card.tenant_id, card.id, ctx.now]);
     if (revokeExisting) {
       await tx.query(`UPDATE credentials SET status = 'revoked' WHERE tenant_id = $1 AND card_id = $2`, [card.tenant_id, card.id]);
-      await revokeSessionsForCard(tx, card.tenant_id, card.id, 'credentials_reset', ctx.now);
+      await this.revokeSessions(tx, card, 'credentials_reset', ctx.now);
     }
     const enrollment = await this.#newEnrollmentToken(tx, card, card.activated_at === null ? 'initial' : 'reset', actorCardId, ctx.now);
     // The cardholder is always told that someone can now add a sign-in factor to their card.
@@ -521,8 +521,15 @@ export class CardService {
     return enrollment;
   }
 
-  async revokeSessions(tx: Tx, card: Pick<CardRow, 'id' | 'tenant_id'>, reason: SessionRevokeReason, now: Date): Promise<void> {
-    await revokeSessionsForCard(tx, card.tenant_id, card.id, reason, now);
+  /**
+   * Ends the card's sessions and, with them, the API keys it made (sessions.ts). Every change of a card's sign-in
+   * or rights in this module goes through here. When keys were revoked, the company's Owners are told.
+   */
+  async revokeSessions(
+    tx: Tx, card: Pick<CardRow, 'id' | 'tenant_id'>, reason: SessionRevokeReason, now: Date, only?: { openedWithCredentialId: string },
+  ): Promise<void> {
+    const { revokedKeyIds } = await revokeSessionsForCard(tx, card.tenant_id, card.id, reason, now, only);
+    if (revokedKeyIds.length > 0) await this.#notifier.notify({ type: 'api_key_stopped', tenantId: card.tenant_id, cardId: card.id, audience: 'owners' });
   }
 }
 

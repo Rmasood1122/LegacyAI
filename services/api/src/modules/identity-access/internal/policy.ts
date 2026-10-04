@@ -9,7 +9,10 @@
 // Policy is data: the role -> permission matrix comes from the database; the state, grace
 // and guard rules are the small declarative tables below.
 import { BlockList, isIP } from 'node:net';
-import type { CardState, Decision, Obligation, ResourceRef, RoleKey, Subject } from '../../../shared/policy-types.ts';
+import {
+  actingCardId, actingPersonId, type ApiKeySubject, type CardState, type CardSubject, type Decision, type Obligation, type ResourceRef,
+  type RoleKey, type Subject, type SubjectRole,
+} from '../../../shared/policy-types.ts';
 import { accessPhase, type AccessPhase } from './lifecycle.ts';
 
 // ------------------------------------------------------------------ policy data
@@ -62,6 +65,11 @@ export interface PolicyContext {
   usage: ReadonlyMap<string, number>;
   /** Answer from the billing module's plan-limit hook. */
   planAllows: boolean;
+  /**
+   * Only for an API key: the card that made it, as it is NOW (loaded by the authorizer). Its state, its expiry and
+   * its roles decide what the key may do at all; a key whose maker cannot be loaded is refused.
+   */
+  keyMaker?: CardSubject | null;
 }
 
 /** Writes that stay possible during the read-only grace window. "Data export is always free." */
@@ -73,6 +81,15 @@ const LAPSED_ALLOWED: ReadonlySet<string> = new Set(['export:create', 'export:re
 // expired on its own account (while the company is fine, or further gone than the company) gets nothing from it,
 // and a locked, suspended, revoked or never-activated card was refused before any phase is looked at.
 const COMPANY_TERM_ACTIONS: ReadonlySet<string> = new Set(['billing:read', 'billing:manage']);
+/**
+ * The ONLY permissions an API key may ever carry (decision D30): reading knowledge, topics, the gap report and
+ * documents' labels, and asking a question. Read and ask, nothing else: nothing that adds or changes anything (a
+ * machine must not make a person's attestation about a document), nothing that manages people, cards, roles, keys,
+ * settings, consent, billing or the audit log, nothing that verifies or approves, and no platform permission.
+ */
+export const API_KEY_PERMISSIONS: ReadonlySet<string> = new Set([
+  'knowledge:read', 'knowledge:ask', 'topic:read', 'gap:read', 'source:read',
+]);
 /** Nobody may do these to their own card. */
 const SELF_FORBIDDEN: ReadonlySet<string> = new Set([
   'card:suspend', 'card:revoke', 'card:replace', 'card:unlock', 'card:reset_credentials',
@@ -137,9 +154,60 @@ function worstPhase(a: AccessPhase, b: AccessPhase): AccessPhase {
   return order[Math.max(order.indexOf(a), order.indexOf(b))] as AccessPhase;
 }
 
+/**
+ * The role -> permission matrix, read ONE way for everything that asks "what does this card hold?": the decision,
+ * the list filters, what the session endpoint reports, and what a card may write into an API key.
+ * Roles the company switched off count for nothing; the pilot grant counts only while the company has it on;
+ * platform-only permissions count only in the operator's own tenant.
+ */
+export function heldGrants(
+  roles: readonly SubjectRole[], isPlatformTenant: boolean, ctx: Pick<PolicyContext, 'matrix' | 'settings'>,
+): Array<Grant & { role_department_id: string | null }> {
+  const enabled = new Set<string>(ctx.settings.enabled_roles);
+  const out: Array<Grant & { role_department_id: string | null }> = [];
+  for (const role of roles) {
+    if (!enabled.has(role.role_key)) continue;
+    for (const g of ctx.matrix.grants) {
+      if (g.role_key !== role.role_key) continue;
+      if (g.grant_source === 'pilot_reviewer' && ctx.settings.pilot_reviewer_grant !== true) continue;
+      if (ctx.matrix.permissions.get(g.permission_key)?.platform_only === true && isPlatformTenant !== true) continue;
+      out.push({ ...g, role_department_id: role.department_id });
+    }
+  }
+  return out;
+}
+
+/**
+ * What a KEY holds for one action: the grants its maker holds for that action right now, if the action is on the
+ * short list a key may carry AND was written into the key - each cut down to the key's level. Pure.
+ * 'outside-scope' = the key may not do this at all; 'malformed' = the key's own data cannot be read (refuse).
+ */
+export function grantsForKey<G extends { max_sensitivity: number }>(
+  makerGrants: readonly G[], key: Pick<ApiKeySubject, 'scope' | 'max_sensitivity'>, action: string,
+): G[] | 'outside-scope' | 'malformed' {
+  if (key === null || typeof key !== 'object' || !Array.isArray(key.scope) || !key.scope.every((p) => typeof p === 'string')) return 'malformed';
+  const level = key.max_sensitivity;
+  if (typeof level !== 'number' || !Number.isInteger(level) || level < 0 || level > 3) return 'malformed';
+  if (!API_KEY_PERMISSIONS.has(action) || !key.scope.includes(action)) return 'outside-scope';
+  return makerGrants.map((g) => ({ ...g, max_sensitivity: Math.min(g.max_sensitivity, level) }));
+}
+
+/** The card whose state, expiry and roles decide: the card itself, or - for a key - the card that made it. */
+function cardBehind(subject: Subject, ctx: PolicyContext): CardSubject | null {
+  if (subject === null || typeof subject !== 'object') return null;
+  if (subject.kind === 'card') return subject;
+  if (subject.kind !== 'api_key') return null;
+  const maker = ctx.keyMaker;
+  if (maker === undefined || maker === null || maker.kind !== 'card') return null;
+  if (subject.acts_for === null || typeof subject.acts_for !== 'object') return null;
+  return maker.card_id === subject.acts_for.card_id && maker.tenant_id === subject.tenant_id ? maker : null;
+}
+
 /** Steps that depend only on who is asking and what action - shared by decide() and buildResourceFilter(). */
-function evaluateSubject(subject: Subject, action: string, ctx: PolicyContext): Decision | SubjectEvaluation {
-  if (subject === null || typeof subject !== 'object' || subject.kind !== 'card') return deny('DENY_UNAUTHENTICATED');
+function evaluateSubject(asking: Subject, action: string, ctx: PolicyContext): Decision | SubjectEvaluation {
+  // For a card: the card. For a key: the card that made it - the key has no state, expiry or roles of its own.
+  const subject = cardBehind(asking, ctx);
+  if (subject === null) return deny('DENY_UNAUTHENTICATED');
   const permission = typeof action === 'string' ? ctx.matrix.permissions.get(action) : undefined;
   if (!permission) return deny('DENY_UNKNOWN_ACTION');
 
@@ -185,15 +253,18 @@ function evaluateSubject(subject: Subject, action: string, ctx: PolicyContext): 
 
   // The role -> permission matrix.
   if (permission.platform_only && subject.is_platform_tenant !== true) return deny('DENY_PLATFORM_ONLY');
-  const grants: SubjectEvaluation['grants'] = [];
-  for (const role of roles) {
-    for (const g of ctx.matrix.grants) {
-      if (g.role_key !== role.role_key || g.permission_key !== action) continue;
-      if (g.grant_source === 'pilot_reviewer' && ctx.settings.pilot_reviewer_grant !== true) continue;
-      grants.push({ ...g, role_department_id: role.department_id });
-    }
-  }
+  let grants: SubjectEvaluation['grants'] = heldGrants(subject.roles, subject.is_platform_tenant, ctx).filter((g) => g.permission_key === action);
   if (grants.length === 0) return deny('DENY_DEFAULT');
+
+  if (asking.kind === 'api_key') {
+    // A key holds what its maker holds for this action, cut down to the key (grantsForKey). It has no rank and is
+    // nobody's Owner: the rank guards and the Owner's exceptions never apply to it.
+    const forKey = grantsForKey(grants, asking, action);
+    if (forKey === 'malformed') return deny('DENY_PDP_ERROR');
+    if (forKey === 'outside-scope') return deny('DENY_API_KEY_SCOPE');
+    grants = forKey;
+    return { permission, grants, obligations, subjectRank: 0, isOwner: false };
+  }
 
   const subjectRank = roles.reduce((max, r) => (Number.isFinite(r.rank) && r.rank > max ? r.rank : max), 0);
   return { permission, grants, obligations, subjectRank, isOwner: roles.some((r) => r.role_key === 'company_owner') };
@@ -233,13 +304,14 @@ function withinTimeWindow(config: Record<string, unknown>, now: Date): boolean {
   return start <= end ? minutes >= start && minutes < end : minutes >= start || minutes < end;
 }
 
-function networkAllowed(config: Record<string, unknown>, ip: string): boolean {
-  if (!Array.isArray(config.cidrs) || config.cidrs.length === 0) return false;
+/** Is `ip` inside one of these networks (CIDR notation)? Anything malformed means "no" (fail closed). */
+export function cidrsAllow(cidrs: unknown, ip: string): boolean {
+  if (!Array.isArray(cidrs) || cidrs.length === 0) return false;
   const address = ip.startsWith('::ffff:') && isIP(ip.slice(7)) === 4 ? ip.slice(7) : ip;
   const family = isIP(address);
   if (family === 0) return false;
   const list = new BlockList();
-  for (const cidr of config.cidrs) {
+  for (const cidr of cidrs) {
     if (typeof cidr !== 'string') return false;
     const [net, prefixText] = cidr.split('/');
     const netFamily = isIP(net ?? '');
@@ -249,6 +321,23 @@ function networkAllowed(config: Record<string, unknown>, ip: string): boolean {
     list.addSubnet(net as string, prefix, netFamily === 4 ? 'ipv4' : 'ipv6');
   }
   return list.check(address, family === 4 ? 'ipv4' : 'ipv6');
+}
+
+/** Can every entry be read as a network? (The same reading as cidrsAllow, so a stored list is never unreadable later.) */
+export function validCidrs(cidrs: unknown): boolean {
+  if (!Array.isArray(cidrs) || cidrs.length === 0 || cidrs.length > 20) return false;
+  return cidrs.every((cidr) => {
+    if (typeof cidr !== 'string' || cidr.length > 50) return false;
+    const [net, prefixText, extra] = cidr.split('/');
+    const family = isIP(net ?? '');
+    if (family === 0 || extra !== undefined) return false;
+    if (prefixText === undefined) return true;
+    return /^[0-9]{1,3}$/.test(prefixText) && Number(prefixText) <= (family === 4 ? 32 : 128);
+  });
+}
+
+function networkAllowed(config: Record<string, unknown>, ip: string): boolean {
+  return cidrsAllow(config.cidrs, ip);
 }
 
 /** Returns a denial, or the usage obligations to honour. Malformed restrictions deny (fail closed). */
@@ -308,6 +397,10 @@ function decideUnsafe(subject: Subject, action: string, resource: ResourceRef, c
   if ('effect' in ev) return ev;
   const { permission, grants } = ev;
   const obligations = [...ev.obligations];
+  // "Mine" - for a grant that covers one's own things, and for the rules about acting on what one wrote or on one's
+  // own card: a card is itself; a key stands for the card and the person that made it.
+  const myCard = actingCardId(subject);
+  const myPerson = actingPersonId(subject);
 
   // Scope of each grant.
   let inScope: typeof grants;
@@ -325,8 +418,8 @@ function decideUnsafe(subject: Subject, action: string, resource: ResourceRef, c
         return typeof g.role_department_id === 'string' && resource.department_id === g.role_department_id;
       }
       return (
-        (typeof resource.owner_card_id === 'string' && resource.owner_card_id === subject.card_id) ||
-        (typeof resource.owner_person_id === 'string' && subject.person_id !== null && resource.owner_person_id === subject.person_id)
+        (typeof resource.owner_card_id === 'string' && resource.owner_card_id === myCard) ||
+        (typeof resource.owner_person_id === 'string' && myPerson !== null && resource.owner_person_id === myPerson)
       );
     });
   }
@@ -337,7 +430,7 @@ function decideUnsafe(subject: Subject, action: string, resource: ResourceRef, c
   if (sensitivity === null || !inScope.some((g) => sensitivity <= g.max_sensitivity)) return deny('DENY_SENSITIVITY');
 
   // Guard rules.
-  if (SELF_FORBIDDEN.has(action) && resource.owner_card_id === subject.card_id) return deny('DENY_SELF_ACTION');
+  if (SELF_FORBIDDEN.has(action) && resource.owner_card_id === myCard) return deny('DENY_SELF_ACTION');
   if (resource.card_kind === 'company' && COMPANY_CARD_FORBIDDEN.has(action)) return deny('DENY_COMPANY_CARD');
   if (RANK_GUARDED.has(action)) {
     // The rank of what is being acted on MUST be known. A caller that does not supply it is
@@ -352,7 +445,7 @@ function decideUnsafe(subject: Subject, action: string, resource: ResourceRef, c
       // The target's rank must be known here too (for card:issue: the person's rank history).
       if (typeof resource.target_rank !== 'number') return deny('DENY_RANK');
       if (resource.target_rank >= ev.subjectRank) {
-        const ownRenewal = ev.isOwner && action === 'card:renew' && resource.owner_card_id === subject.card_id;
+        const ownRenewal = ev.isOwner && action === 'card:renew' && resource.owner_card_id === myCard;
         if (!ownRenewal) return deny('DENY_RANK');
       }
     }
@@ -371,7 +464,8 @@ function decideUnsafe(subject: Subject, action: string, resource: ResourceRef, c
       && typeof resource.releases_to_learners !== 'boolean' && typeof resource.changes_released_knowledge !== 'boolean') return deny('DENY_PDP_ERROR');
   if (FOUR_EYES.has(action) && (action === 'knowledge:verify' || resource.releases_to_learners === true || resource.changes_released_knowledge === true)) {
     if (resource.owner_person_id === undefined || resource.author_person_id === undefined) return deny('DENY_SELF_REVIEW');
-    const me = subject.person_id;
+    // a key counts as its maker: it may not verify or release what its maker wrote
+    const me = myPerson;
     const mine = me !== null && (resource.owner_person_id === me || resource.author_person_id === me);
     if (mine && ctx.settings.second_reviewer_required !== false) return deny('DENY_SELF_REVIEW');
   }
@@ -382,15 +476,19 @@ function decideUnsafe(subject: Subject, action: string, resource: ResourceRef, c
   if (resource.not_by !== undefined) {
     const by = resource.not_by;
     if (by === null || typeof by !== 'object' || !Array.isArray(by.person_ids) || !Array.isArray(by.card_ids)) return deny('DENY_PDP_ERROR');
-    const mine = by.card_ids.includes(subject.card_id) || (subject.person_id !== null && by.person_ids.includes(subject.person_id));
+    const mine = by.card_ids.includes(myCard) || (myPerson !== null && by.person_ids.includes(myPerson));
     if (mine && ctx.settings.second_reviewer_required !== false) return deny('DENY_SELF_REVIEW');
   }
 
   // Plan limits (billing hook) and card-level restrictions (feature 5).
   if (ctx.planAllows !== true) return deny('DENY_PLAN_LIMIT');
-  const restrictionResult = checkRestrictions(action, permission, ctx);
-  if (!Array.isArray(restrictionResult)) return restrictionResult;
-  obligations.push(...restrictionResult);
+  // Restrictions are set on a CARD (its hours, its networks, its usage cap). They do not bind a key its holder made:
+  // a key has its own network list and its own limits, checked before the policy is asked.
+  if (subject.kind === 'card') {
+    const restrictionResult = checkRestrictions(action, permission, ctx);
+    if (!Array.isArray(restrictionResult)) return restrictionResult;
+    obligations.push(...restrictionResult);
+  }
 
   return { effect: 'allow', reason_code: 'ALLOW', obligations };
 }
@@ -459,7 +557,7 @@ export function buildResourceFilterSpec(subject: Subject, action: string, ctx: P
     if ('effect' in ev) return nothing;
     if (ev.permission.is_write) return nothing; // filters are for reading
     if (ctx.planAllows !== true) return nothing;
-    if (!Array.isArray(checkRestrictions(action, ev.permission, ctx))) return nothing;
+    if (subject.kind === 'card' && !Array.isArray(checkRestrictions(action, ev.permission, ctx))) return nothing;
     const anyOf: FilterGrant[] = [];
     for (const g of ev.grants) {
       if (!Number.isInteger(g.max_sensitivity) || g.max_sensitivity < 0 || g.max_sensitivity > 3) return nothing;
@@ -469,8 +567,8 @@ export function buildResourceFilterSpec(subject: Subject, action: string, ctx: P
         anyOf.push({ scope: 'department', department_id: g.role_department_id, max_sensitivity: g.max_sensitivity });
       } else {
         anyOf.push({
-          scope: 'own', owner_card_id: subject.card_id, max_sensitivity: g.max_sensitivity,
-          ...(subject.person_id !== null ? { owner_person_id: subject.person_id } : {}),
+          scope: 'own', owner_card_id: actingCardId(subject), max_sensitivity: g.max_sensitivity,
+          ...(actingPersonId(subject) !== null ? { owner_person_id: actingPersonId(subject) as string } : {}),
         });
       }
     }

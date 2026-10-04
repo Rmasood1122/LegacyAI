@@ -9,9 +9,13 @@ info:
   description: |-
     Phase 1 - identity, cards, access and platform. Phase 2 - capture, knowledge, verification, readiness tests (through the knowledge gateway). This file is the source of truth: the server validates every request against it and the test suite validates every response against it.
 
-    Conventions: JSON only; snake_case; ISO-8601 UTC times; errors are RFC 9457 problem details; list endpoints use `limit` + `cursor` and return `{ items, next_cursor }`; state-changing admin endpoints require `Idempotency-Key`; state-changing session requests require `X-CSRF-Token` and an allowed `Origin`.
+    Conventions: JSON (two upload operations take a file instead); snake_case; ISO-8601 UTC times; errors are RFC 9457 problem details whose `type` is `urn:legacyai:problem:<code>`; list endpoints use `limit` + `cursor` and return `{ items, next_cursor }`; state-changing admin endpoints require `Idempotency-Key`; state-changing requests made with a session cookie require `X-CSRF-Token` and an allowed `Origin` (a request made with an API key needs neither: it is not a browser).
 
-    Extensions: `x-permission` is the permission the policy decision point checks; `x-public` marks the short allow-list of endpoints without a session; `x-idempotent` marks endpoints that require an idempotency key.
+    Who may call: a signed-in card (session cookie), or - on the operations marked `x-api-key: true` only - a machine's API key (see the `apiKey` security scheme). API keys are for server-to-server use: no browser origin is allowed to send one (CORS does not allow the `Authorization` header), so never put a key into a web page or an app that runs on somebody's device.
+
+    Stability of `/v1`: within `/v1` an operation, a field or an enum value that a key-enabled operation returns is not removed or renamed, and no new required request field is added. Fields, optional request fields, enum values and operations may be ADDED, so a client must ignore fields it does not know and must not fail on an enum value it does not know. Anything else would be a `/v2`. (This is a promise about the contract; no deprecation process has been exercised yet.)
+
+    Extensions: `x-permission` is the permission the policy decision point checks; `x-public` marks the short allow-list of endpoints without a session; `x-idempotent` marks endpoints that require an idempotency key; `x-api-key` marks the operations that also accept a machine's API key; `x-one-time-secrets` lists the fields of an answer that are shown once and are left out when the answer is replayed for a repeated `Idempotency-Key` (`secret_already_shown` is then true).
 servers:
   - url: /
 tags:
@@ -30,6 +34,8 @@ tags:
   - name: consent
   - name: ai
   - name: billing
+  - name: api-keys
+    description: API keys for machines. These operations never accept a key themselves.
 paths:
   /v1/health:
     get:
@@ -275,6 +281,10 @@ paths:
       security:
         - sessionCookie: []
       x-idempotent: true
+      x-one-time-secrets:
+        - sc
+        - enrollment_token
+        - enrollment_token_expires_at
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -492,6 +502,10 @@ paths:
       security:
         - sessionCookie: []
       x-idempotent: true
+      x-one-time-secrets:
+        - sc
+        - enrollment_token
+        - enrollment_token_expires_at
       parameters:
         - $ref: "#/components/parameters/CardId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -530,6 +544,10 @@ paths:
       security:
         - sessionCookie: []
       x-idempotent: true
+      x-one-time-secrets:
+        - sc
+        - enrollment_token
+        - enrollment_token_expires_at
       parameters:
         - $ref: "#/components/parameters/CardId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -570,6 +588,10 @@ paths:
       security:
         - sessionCookie: []
       x-idempotent: true
+      x-one-time-secrets:
+        - sc
+        - enrollment_token
+        - enrollment_token_expires_at
       parameters:
         - $ref: "#/components/parameters/CardId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -602,6 +624,9 @@ paths:
       security:
         - sessionCookie: []
       x-idempotent: true
+      x-one-time-secrets:
+        - enrollment_token
+        - enrollment_token_expires_at
       parameters:
         - $ref: "#/components/parameters/CardId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1159,6 +1184,10 @@ paths:
       security:
         - sessionCookie: []
       x-idempotent: true
+      x-one-time-secrets:
+        - sc
+        - enrollment_token
+        - enrollment_token_expires_at
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -1235,6 +1264,10 @@ paths:
       security:
         - sessionCookie: []
       x-idempotent: true
+      x-one-time-secrets:
+        - sc
+        - enrollment_token
+        - enrollment_token_expires_at
       parameters:
         - $ref: "#/components/parameters/TenantId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1275,6 +1308,10 @@ paths:
       security:
         - sessionCookie: []
       x-idempotent: true
+      x-one-time-secrets:
+        - sc
+        - enrollment_token
+        - enrollment_token_expires_at
       parameters:
         - $ref: "#/components/parameters/TenantId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1619,8 +1656,10 @@ paths:
       tags:
         - "capture"
       x-permission: "source:read"
+      x-api-key: true
       security:
         - sessionCookie: []
+        - apiKey: []
       parameters:
         - name: "status"
           in: "query"
@@ -1739,8 +1778,10 @@ paths:
       tags:
         - "capture"
       x-permission: "source:read"
+      x-api-key: true
       security:
         - sessionCookie: []
+        - apiKey: []
       parameters:
         - $ref: "#/components/parameters/SourceId"
       responses:
@@ -1900,8 +1941,12 @@ paths:
       tags:
         - "knowledge"
       x-permission: "knowledge:ask"
+      x-api-key: true
       security:
         - sessionCookie: []
+        - apiKey: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyOptional"
       requestBody:
         required: true
         content:
@@ -1951,8 +1996,10 @@ paths:
       tags:
         - "knowledge"
       x-permission: "knowledge:read"
+      x-api-key: true
       security:
         - sessionCookie: []
+        - apiKey: []
       parameters:
         - name: "status"
           in: "query"
@@ -2091,8 +2138,10 @@ paths:
       tags:
         - "knowledge"
       x-permission: "knowledge:read"
+      x-api-key: true
       security:
         - sessionCookie: []
+        - apiKey: []
       parameters:
         - $ref: "#/components/parameters/ItemId"
       responses:
@@ -2627,8 +2676,10 @@ paths:
       tags:
         - "knowledge"
       x-permission: "knowledge:read"
+      x-api-key: true
       security:
         - sessionCookie: []
+        - apiKey: []
       parameters:
         - name: "kind"
           in: "query"
@@ -3324,8 +3375,10 @@ paths:
       tags:
         - "knowledge"
       x-permission: "gap:read"
+      x-api-key: true
       security:
         - sessionCookie: []
+        - apiKey: []
       parameters:
         - name: "job_role"
           in: "query"
@@ -3362,8 +3415,10 @@ paths:
       tags:
         - "knowledge"
       x-permission: "topic:read"
+      x-api-key: true
       security:
         - sessionCookie: []
+        - apiKey: []
       parameters:
         - name: "status"
           in: "query"
@@ -3543,8 +3598,10 @@ paths:
       tags:
         - "knowledge"
       x-permission: "topic:read"
+      x-api-key: true
       security:
         - sessionCookie: []
+        - apiKey: []
       parameters:
         - name: "limit"
           in: "query"
@@ -3612,8 +3669,10 @@ paths:
       tags:
         - "knowledge"
       x-permission: "topic:read"
+      x-api-key: true
       security:
         - sessionCookie: []
+        - apiKey: []
       parameters:
         - $ref: "#/components/parameters/JobRole"
       responses:
@@ -5813,6 +5872,149 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+  /v1/api-keys:
+    get:
+      operationId: listApiKeys
+      summary: The company's API keys, newest first - never their secrets.
+      tags:
+        - api-keys
+      x-permission: api_key:read
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                  - next_cursor
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ApiKey"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    post:
+      operationId: createApiKey
+      summary: Make an API key. The answer holds the key - the ONLY time it is shown; the server keeps a hash. The key acts for the card that makes it and can never do more than that card. The company's Owners are told.
+      tags:
+        - api-keys
+      x-permission: api_key:manage
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      x-one-time-secrets:
+        - api_key
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewApiKeyRequest"
+      responses:
+        "201":
+          description: Created. `api_key` is shown this once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: "Conflict. `too-many-keys`: the company already has 50 live keys."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The key asks for a permission keys may not carry, one its maker does not hold, a level above its maker's, an expiry of more than 366 days, more questions per hour than a key may have, or networks that cannot be read.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/api-keys/options:
+    get:
+      operationId: getApiKeyOptions
+      summary: What a key made by the asking card could carry, and the limits a key may have - so a screen offers nothing the API would refuse.
+      tags:
+        - api-keys
+      x-permission: api_key:read
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyOptions"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/api-keys/{api_key_id}/revoke:
+    post:
+      operationId: revokeApiKey
+      summary: Revoke a key for good. It stops working on the next request. Revoking a revoked key changes nothing.
+      tags:
+        - api-keys
+      x-permission: api_key:manage
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - name: api_key_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKey"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
   /v1/people/{person_id}/leaving-date:
     get:
       operationId: getLeavingDate
@@ -7104,6 +7306,24 @@ components:
       type: apiKey
       in: cookie
       name: __Host-lai_session
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: "lak1.<company id>.<key id>.<secret> (schema ApiKeyToken)"
+      description: >-
+        A machine's API key, made by a Company Owner (POST /v1/api-keys) and sent as "Authorization: Bearer <key>".
+        For server-to-server use only. Accepted ONLY by operations marked `x-api-key: true`: reading knowledge,
+        topics, the gap report and documents' labels, and asking a question - a key changes nothing. A key has no
+        roles of its own: it may do what the card that made it may do at that moment, narrowed to the permissions and
+        the level written into the key. It is REVOKED for good when that card's secret code is rotated, its sign-in
+        factors are reset, its roles change, or the card is replaced, revoked, suspended or locked.
+        Answers: 401 `unauthenticated` (with `WWW-Authenticate: Bearer`) for a key that is malformed, unknown,
+        revoked, suspended, expired, sent from a network it is not allowed from, sent together with a session cookie,
+        or whose maker's card can no longer act - one answer for all of these; 403 `api-key-not-accepted` on an
+        operation that takes no key; 403 `api-key-scope` when a working key asks for something it was not made for;
+        429 `rate-limited` with `Retry-After` beyond 120 requests per minute per key or, for POST /v1/knowledge/ask,
+        beyond the key's `asks_per_hour`. The company's hourly and monthly AI allowance is shared by everyone in
+        the company, keys included: a key can use it up for the people too, which is why `asks_per_hour` exists.
   parameters:
     SourceId:
       name: source_id
@@ -7220,6 +7440,16 @@ components:
         maxLength: 128
         pattern: ^[A-Za-z0-9_.:-]+$
       description: Client-chosen key. Same key + same request replays the stored response; same key + different request is a 409.
+    IdempotencyKeyOptional:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+        pattern: ^[A-Za-z0-9_.:-]+$
+      description: Optional. A client that may send the same request twice (a retry after a timeout) sends the same key - the stored answer is returned and nothing is done or charged a second time. Kept for 24 hours, per card or per API key. Same key + different request is a 409.
     Limit:
       name: limit
       in: query
@@ -7404,13 +7634,18 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
     Unauthorized:
-      description: Not signed in, or sign-in failed. Deliberately generic.
+      description: Not signed in, or sign-in failed - or the API key does not work. Deliberately generic.
+      headers:
+        WWW-Authenticate:
+          description: "`Bearer`, on operations that accept an API key (RFC 6750). Absent elsewhere."
+          schema:
+            type: string
       content:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/Problem"
     Forbidden:
-      description: Not allowed. Deliberately generic.
+      description: "Not allowed. Deliberately generic (`forbidden`). Two more precise types exist for API keys only: `api-key-not-accepted` (this operation takes no key) and `api-key-scope` (the key was not made for this; which permission it lacks is not said)."
       content:
         application/problem+json:
           schema:
@@ -10884,6 +11119,225 @@ components:
           minimum: 1
           maximum: 120
           description: How recently, in minutes, another session of the card must have been used from a different address for the rule to fire.
+    ApiKeyPermission:
+      description: "The only permissions an API key may carry: read and ask. A key changes nothing."
+      type: string
+      enum:
+        - "knowledge:read"
+        - "knowledge:ask"
+        - "topic:read"
+        - "gap:read"
+        - "source:read"
+    SensitivityLevel:
+      description: "How closely held something is: 0 = public, 1 = internal (the default for new documents), 2 = confidential, 3 = restricted."
+      type: integer
+      minimum: 0
+      maximum: 3
+    ApiKeyToken:
+      description: "A whole API key: `lak1.`, the company's id, the key's id and 43 characters of secret, joined by dots. Sent as `Authorization: Bearer <key>`. The example is made up and does not work."
+      type: string
+      pattern: "^lak1\\.[0-9a-f-]{36}\\.[0-9a-f-]{36}\\.[A-Za-z0-9_-]{43}$"
+      example: "lak1.00000000-0000-7000-8000-000000000001.00000000-0000-7000-8000-000000000002.EXAMPLE-ONLY-NOT-A-REAL-KEY-EXAMPLE-ONLY-00"
+    ApiKeyFields:
+      description: What is shown of an API key. Its secret is never part of this.
+      type: object
+      required:
+        - id
+        - name
+        - created_by_card_id
+        - secret_hint
+        - scope
+        - max_sensitivity
+        - asks_per_hour
+        - allowed_cidrs
+        - status
+        - created_at
+        - expires_at
+        - last_used_at
+        - revoked_at
+        - revoked_reason
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        created_by_card_id:
+          description: The card the key acts for. The key does what this card may do at that moment (narrowed by `scope` and `max_sensitivity`), and is revoked when this card's sign-in or rights change.
+          type: string
+          format: uuid
+        secret_hint:
+          description: The last four characters of the key, to tell keys apart on a screen. Not enough to use or to guess the key.
+          type: string
+        scope:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApiKeyPermission"
+        max_sensitivity:
+          description: The key reads nothing labelled above this level, whatever its maker may read.
+          allOf:
+            - $ref: "#/components/schemas/SensitivityLevel"
+        asks_per_hour:
+          description: How many questions the key may ask per hour.
+          type: integer
+          minimum: 1
+          maximum: 600
+        allowed_cidrs:
+          description: If set, the key works only from these networks. Null = from anywhere.
+          type:
+            - "array"
+            - "null"
+          items:
+            type: string
+        status:
+          description: "`suspended`: the system stopped the key - it asked too often for things it may not have (the company's anomaly rule). Wrong secrets tried against a key never suspend it; the Owners are told instead. A suspended key can only be revoked. `revoked` and `suspended` are final."
+          type: string
+          enum:
+            - active
+            - expired
+            - revoked
+            - suspended
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        last_used_at:
+          description: When the key was last used, to the minute. Null if never.
+          type:
+            - "string"
+            - "null"
+          format: date-time
+        revoked_at:
+          description: When the key was revoked. Null if it is not.
+          type:
+            - "string"
+            - "null"
+          format: date-time
+        revoked_reason:
+          description: "Why: `by_owner` (revoked by hand), or one of the changes of its maker's card that end a key - the secret code was rotated (also by a renewal or an unlock), the sign-in factors were reset or the holder removed one of them, the roles changed, or the card was replaced, revoked, suspended or locked. Null if the key is not revoked."
+          type:
+            - "string"
+            - "null"
+          enum:
+            - by_owner
+            - maker_code_rotated
+            - maker_credentials_reset
+            - maker_privilege_change
+            - maker_card_replaced
+            - maker_card_revoked
+            - maker_card_suspended
+            - maker_card_locked
+            - null
+    ApiKey:
+      description: An API key as it is listed.
+      allOf:
+        - $ref: "#/components/schemas/ApiKeyFields"
+      unevaluatedProperties: false
+    ApiKeyCreated:
+      description: A new key WITH the key itself, which is shown only here.
+      allOf:
+        - $ref: "#/components/schemas/ApiKeyFields"
+        - type: object
+          required:
+            - secret_already_shown
+          properties:
+            api_key:
+              description: The whole key. Shown ONCE - store it now. Absent on an idempotent replay.
+              allOf:
+                - $ref: "#/components/schemas/ApiKeyToken"
+            secret_already_shown:
+              type: boolean
+              description: "True on an idempotent replay: the key is not repeated."
+      unevaluatedProperties: false
+    ApiKeyOptions:
+      type: object
+      additionalProperties: false
+      required:
+        - grantable
+        - limits
+      properties:
+        grantable:
+          description: The permissions a key made by the asking card may carry, each with the highest level that card holds it at. A new key may name only these, and no level above the lowest of the ones it names.
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - permission
+              - max_sensitivity
+            properties:
+              permission:
+                $ref: "#/components/schemas/ApiKeyPermission"
+              max_sensitivity:
+                $ref: "#/components/schemas/SensitivityLevel"
+        limits:
+          type: object
+          additionalProperties: false
+          required:
+            - max_expires_in_days
+            - requests_per_minute
+            - default_asks_per_hour
+            - max_asks_per_hour
+          properties:
+            max_expires_in_days:
+              type: integer
+            requests_per_minute:
+              description: Per key, for every operation together. Fixed.
+              type: integer
+            default_asks_per_hour:
+              type: integer
+            max_asks_per_hour:
+              type: integer
+    NewApiKeyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - scope
+        - max_sensitivity
+        - expires_in_days
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: "^[^\\u0000-\\u001f\\u007f]+$"
+        asks_per_hour:
+          description: How many questions (POST /v1/knowledge/ask) the key may ask per hour. Default 30. Beyond it the key gets 429 with `Retry-After`. Every question also counts against the company's shared AI allowance.
+          type: integer
+          minimum: 1
+          maximum: 600
+          default: 30
+        scope:
+          description: What the key may do. Only permissions the making card holds.
+          type: array
+          minItems: 1
+          maxItems: 6
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ApiKeyPermission"
+        max_sensitivity:
+          description: The highest label level the key reads (0-3). Not above the making card's level for any permission in `scope`.
+          type: integer
+          minimum: 0
+          maximum: 3
+        expires_in_days:
+          description: Every key expires. At most 366 days.
+          type: integer
+          minimum: 1
+          maximum: 366
+        allowed_cidrs:
+          description: Optional. Networks (CIDR notation) the key works from. Left out or null = from anywhere.
+          type:
+            - "array"
+            - "null"
+          minItems: 1
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 50
     AnomalyEvent:
       type: object
       additionalProperties: false

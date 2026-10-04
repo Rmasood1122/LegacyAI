@@ -3,7 +3,7 @@
 // decision D27). Nothing from the AI service reaches the caller unpicked.
 import { problems } from '../../../shared/errors.ts';
 import type { RouteDef } from '../../platform/index.ts';
-import { gatewayRoute, pick, withListFilter, type GatewayDeps } from './common.ts';
+import { gatewayRoute, keyGatewayRoute, pick, withListFilter, type GatewayDeps } from './common.ts';
 import { collectionRef } from './resources.ts';
 
 const MONTH = ['month_start', 'documents_added', 'items_captured', 'items_verified', 'median_hours_to_verify', 'interviews_completed', 'tests_handed_in'] as const;
@@ -47,7 +47,7 @@ export function insightRoutes(deps: GatewayDeps): RouteDef[] {
       }))),
     // The map is read with the right to read knowledge; both filters go along (items and documents by
     // knowledge:read, topics by topic:read), so the list is narrowed where the data lives.
-    withListFilter('delegated', gatewayRoute(deps, 'getGraphNeighbourhood',
+    withListFilter('delegated', keyGatewayRoute(deps, 'getGraphNeighbourhood',
       async ({ subject }) => collectionRef('knowledge_item', subject.tenant_id),
       async ({ query }) => ({
         path: '/internal/graph/neighbours', action: 'graph.read', filterAction: 'knowledge:read', topicFilter: true,

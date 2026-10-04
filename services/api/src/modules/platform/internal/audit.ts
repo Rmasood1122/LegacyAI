@@ -41,6 +41,8 @@ export const ALLOWED_DETAIL_KEYS: ReadonlySet<string> = new Set([
   // Phase 4 (billing): which invoice, how much (a whole number), which currency, how many seats, what was switched,
   // what the provider reported - never anything about a payment card (none is stored)
   'invoice_id', 'amount_minor', 'currency', 'seats', 'auto_renew', 'payment_outcome',
+  // Phase 4 (API keys): which key made the request - its id, never its secret
+  'api_key_id',
 ]);
 
 const FORBIDDEN_VALUE = /\b\d{16}\b/;

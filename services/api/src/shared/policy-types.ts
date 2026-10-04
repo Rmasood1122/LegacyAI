@@ -1,5 +1,5 @@
 // Types shared by the HTTP layer (platform) and the policy decision point (identity-access).
-// Types only: no behaviour lives here.
+// Types (and two one-line accessors over them): no behaviour lives here.
 
 export type RoleKey =
   | 'company_owner'
@@ -19,8 +19,8 @@ export interface SubjectRole {
   rank: number;
 }
 
-/** Who is asking. Built ONLY by the session layer from database rows, never from request input. */
-export interface Subject {
+/** A signed-in card. Built ONLY by the session layer from database rows, never from request input. */
+export interface CardSubject {
   kind: 'card';
   tenant_id: string;
   card_id: string;
@@ -40,6 +40,36 @@ export interface Subject {
   session_idle_expires_at: Date;
   session_absolute_expires_at: Date;
 }
+
+/**
+ * A machine's API key (docs/phase4/06, decision D30). Its OWN kind of subject: it has no roles, no session and no
+ * person, so code written for "a card" does not accept it (the compiler refuses), and nothing can run with the
+ * maker's full rights by forgetting to look for a marker.
+ *
+ * What a key may do is decided by the policy decision point alone: the grants its maker's card holds at that
+ * moment, cut down to the key's scope, to the short list a key may ever carry, and to the key's level.
+ * `acts_for` is the card (and person) that made the key - used for two things only: the second-person rules
+ * (a key may not approve what its maker wrote) and the audit trail.
+ */
+export interface ApiKeySubject {
+  kind: 'api_key';
+  tenant_id: string;
+  key_id: string;
+  scope: readonly string[];
+  max_sensitivity: number;
+  acts_for: { card_id: string; person_id: string | null };
+}
+
+/** Who is asking: a signed-in card, or a machine's API key. Built only by the identity module. */
+export type Subject = CardSubject | ApiKeySubject;
+
+/** The card a database row or an audit entry names as the actor: the card itself, or the card a key acts for. */
+export const actingCardId = (subject: Subject): string => (subject.kind === 'card' ? subject.card_id : subject.acts_for.card_id);
+/** Whose idempotency records a request uses: a card's own, or a key's own (never shared between the two). */
+export const idempotencyActor = (subject: Subject): { kind: 'card'; id: string } | { kind: 'api_key'; id: string } =>
+  (subject.kind === 'card' ? { kind: 'card', id: subject.card_id } : { kind: 'api_key', id: subject.key_id });
+/** The person behind the request, for rules about "the same person": the card's person, or the key's maker. */
+export const actingPersonId = (subject: Subject): string | null => (subject.kind === 'card' ? subject.person_id : subject.acts_for.person_id);
 
 /** What is being acted on. `collection: true` means "the set of things of this type" (list / create). */
 export interface ResourceRef {

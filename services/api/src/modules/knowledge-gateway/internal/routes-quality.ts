@@ -4,7 +4,7 @@
 import { decodeIdCursor, encodeCursor, type RouteDef } from '../../platform/index.ts';
 import { gatewayRoute, pick, withListFilter, type GatewayDeps } from './common.ts';
 import { collectionRef, newRef } from './resources.ts';
-import type { Subject } from '../../../shared/policy-types.ts';
+import type { CardSubject } from '../../../shared/policy-types.ts';
 
 // The weekly counters, in the words of the contract (KQualityWeek). The AI service owns the list (quality.py,
 // ANSWER_COUNTERS and FEEDBACK_COUNTERS); a name that is missing there comes out as null and fails response validation.
@@ -28,7 +28,7 @@ const EVERY_READERS_FEEDBACK = {
 };
 
 /** Feedback is about an answer the card itself received: the AI service answers "not found" for anyone else's. */
-const ownAnswer = async ({ subject }: { subject: Subject }) =>
+const ownAnswer = async ({ subject }: { subject: CardSubject }) =>
   newRef('answer', subject.tenant_id, { owner_card_id: subject.card_id, owner_person_id: subject.person_id ?? undefined, sensitivity: 0 });
 const feedback = (r: any) => pick(r, FEEDBACK);
 

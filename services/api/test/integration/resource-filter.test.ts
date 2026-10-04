@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   buildResourceFilter, decide, loadMatrix, type Matrix, type PolicyContext, type ResourceDescriptor, type Restriction,
 } from '../../src/modules/identity-access/index.ts';
-import type { RoleKey, Subject, SubjectRole } from '../../src/shared/policy-types.ts';
+import type { RoleKey, CardSubject, SubjectRole } from '../../src/shared/policy-types.ts';
 import { addMember, createTenant, startApp, superuser, type TestApp, type TestTenant } from '../helpers/harness.ts';
 
 let t: TestApp;
@@ -75,7 +75,7 @@ afterAll(async () => {
   await t.close();
 });
 
-function subject(roles: SubjectRole[], over: Partial<Subject> = {}): Subject {
+function subject(roles: SubjectRole[], over: Partial<CardSubject> = {}): CardSubject {
   return {
     kind: 'card', tenant_id: a.tenantId, card_id: owners[0]!, card_number: '0', person_id: null, department_id: null, card_state: 'active',
     activated_at: new Date(NOW.getTime() - DAY), expires_at: new Date(NOW.getTime() + 30 * DAY), grace_until: new Date(NOW.getTime() + 44 * DAY),
@@ -92,14 +92,14 @@ function ctx(over: Partial<PolicyContext> = {}): PolicyContext {
 const role = (k: RoleKey, department_id: string | null = null): SubjectRole => ({ role_key: k, department_id, rank: RANK[k] });
 
 /** Runs the filter against the real database as the app role and returns the ids it lets through. */
-async function viaFilter(s: Subject, c: PolicyContext, action = 'knowledge:read'): Promise<Set<string>> {
+async function viaFilter(s: CardSubject, c: PolicyContext, action = 'knowledge:read'): Promise<Set<string>> {
   const filter = buildResourceFilter(s, action, DESCRIPTOR, c, 1);
   return t.app.db.withTenantTx(s.tenant_id, async (tx) => {
     const { rows } = await tx.query<{ id: string }>(`SELECT i.id FROM policy_example_items i WHERE ${filter.sql}`, filter.params);
     return new Set(rows.map((r) => r.id));
   });
 }
-function viaDecide(s: Subject, c: PolicyContext, action = 'knowledge:read'): Set<string> {
+function viaDecide(s: CardSubject, c: PolicyContext, action = 'knowledge:read'): Set<string> {
   return new Set(items.filter((i) => decide(s, action, {
     type: 'knowledge', id: i.id, tenant_id: i.tenant_id, owner_card_id: i.owner_card_id, department_id: i.department_id, sensitivity: i.sensitivity,
   }, c).effect === 'allow').map((i) => i.id));
@@ -112,7 +112,7 @@ describe('buildResourceFilter agrees with decide() on every row', () => {
     const readOnly: Restriction = { type: 'read_only', enabled: true, config: {} };
     const offSite: Restriction = { type: 'network_allowlist', enabled: true, config: { cidrs: ['192.0.2.0/24'] } };
 
-    const variants: Array<{ name: string; s: Subject; c: PolicyContext }> = [];
+    const variants: Array<{ name: string; s: CardSubject; c: PolicyContext }> = [];
     for (const r of ALL_ROLES) {
       variants.push({ name: r, s: subject([role(r, depts[0])]), c: ctx() });
       variants.push({ name: `${r} (dept 2)`, s: subject([role(r, depts[1])]), c: ctx() });

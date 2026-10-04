@@ -2,10 +2,12 @@
 // Other modules may import ONLY from this file - never from ./internal/*.
 
 import type { BillingPort, CompanyTermPort } from '../billing/index.ts';
-import type { AuthPort, Config, Database, ExportRegistry, Notifier, RateLimiter, RouteDef, Tx } from '../platform/index.ts';
+import { type AuthPort, type Config, type Database, type ExportRegistry, type Notifier, type RateLimiter, type RouteDef, type Tx } from '../platform/index.ts';
 import { AnomalyGuard, type AnomalySettings } from './internal/anomaly.ts';
+import { ApiKeyService, parseApiKey } from './internal/api-keys.ts';
+import { apiKeyRoutes } from './internal/routes-api-keys.ts';
 import { AuthService, DEFAULT_AUTH_LIMITS, type AuthLimits } from './internal/auth.ts';
-import { Authorizer } from './internal/authz.ts';
+import { auditDetailsOf, Authorizer } from './internal/authz.ts';
 import { CardService } from './internal/cards.ts';
 import { companyTerm } from './internal/company-term.ts';
 import { SeedCipher } from './internal/factors.ts';
@@ -21,6 +23,12 @@ export {
   validateAnomalyPatch, type AnomalySettings,
 } from './internal/anomaly.ts';
 export { shownRule } from './internal/routes-safety.ts';
+export {
+  API_KEY_LIMITS, ApiKeyService, apiKeySubject, formatApiKey, keyRequestProblem, keyStatus, keyUsable, makerCanAct, parseApiKey, type KeyRefusal, type NewKeyRequest,
+} from './internal/api-keys.ts';
+export { keyRevocationReason, type KeyRevocationReason } from './internal/key-revocation.ts';
+export { grantsForKey, heldGrants } from './internal/policy.ts';
+export { heldForKeys } from './internal/routes-api-keys.ts';
 export { DEFAULT_AUTH_LIMITS, type AuthLimits } from './internal/auth.ts';
 export {
   addMonths, isRealDate, monthsLeft, NUDGE_STAGES, RADAR_HORIZON_MONTHS, stageOf, sweepRetirementNudges, validateLeavingDate,
@@ -37,7 +45,7 @@ export {
   accessPhase, canTransition, CARD_STATES, computeDates, effectiveState, LEGAL_TRANSITIONS, TERMINAL_STATES,
 } from './internal/lifecycle.ts';
 export {
-  buildResourceFilter, buildResourceFilterSpec, decide, usageKey,
+  API_KEY_PERMISSIONS, buildResourceFilter, buildResourceFilterSpec, cidrsAllow, decide, usageKey, validCidrs,
   type FilterGrant, type FilterSpec, type Grant, type Matrix, type PermissionDef, type PolicyContext, type ResourceDescriptor,
   type ResourceFilter, type Restriction,
 } from './internal/policy.ts';
@@ -82,6 +90,7 @@ export function createIdentityAccess(deps: IdentityAccessDeps): IdentityAccess {
   const authorizer = new Authorizer(deps.billing);
   let holdings: PersonHoldingsLoader | null = null;
   const anomaly = new AnomalyGuard({ cards, notifier: deps.notifier, hmacKey, defaults: deps.anomalyDefaults });
+  const apiKeys = new ApiKeyService(deps.rateLimiter, deps.notifier);
   const auth = new AuthService({
     db, hasher, cipher, cards, authorizer, anomaly, rateLimiter: deps.rateLimiter, notifier: deps.notifier, hmacKey,
     webauthn: { rpId: config.webauthn.rpId, rpName: config.webauthn.rpName, origins: config.allowedOrigins },
@@ -108,13 +117,24 @@ export function createIdentityAccess(deps: IdentityAccessDeps): IdentityAccess {
       ...identityRoutes({ db, auth, cards, authorizer, notifier: deps.notifier, billing: deps.billing }),
       ...safetyRoutes({ authorizer, anomaly }),
       ...leavingRoutes({ authorizer, notifier: deps.notifier, holdings: () => holdings }),
+      ...apiKeyRoutes({ authorizer, apiKeys }),
     ],
     authPort: {
-      tenantOfToken,
-      resolveSession,
+      tenantOf: (credential) => (credential.kind === 'session' ? tenantOfToken(credential.token) : parseApiKey(credential.token)?.tenantId ?? null),
+      resolveCredential: async (tx, credential, action, ctx) => {
+        if (credential.kind === 'session') {
+          const session = await resolveSession(tx, credential.token, ctx);
+          return session === null ? { kind: 'refused' } : { kind: 'session', ...session };
+        }
+        const key = await apiKeys.resolve(tx, credential.token, action, ctx);
+        if (key === null) return { kind: 'refused' };
+        return 'limited' in key ? { kind: 'limited', retryAfterSeconds: key.limited } : { kind: 'api_key', subject: key.subject };
+      },
+      auditDetails: auditDetailsOf,
       authorize: (tx, subject, action, resource, ctx) => authorizer.authorize(tx, subject, action, resource, ctx),
-      // This is the HTTP layer's decision about a request that carried a live session of the card. A refusal here is
-      // what the anomaly rule "denials" counts (re-checks inside handlers go through the authorizer and are not counted).
+      // This is the HTTP layer's decision about a request that carried a live session of the card (or a working key).
+      // A refusal here is what the anomaly rule "denials" counts (re-checks inside handlers go through the authorizer
+      // and are not counted).
       recordDecision: async (tx, subject, action, resource, decision, ctx) => {
         await authorizer.record(tx, subject, action, resource, decision, ctx);
         if (decision.effect === 'allow') return;
@@ -122,7 +142,10 @@ export function createIdentityAccess(deps: IdentityAccessDeps): IdentityAccess {
         // the deny row above still commits and the caller still gets its 403.
         await tx.query('SAVEPOINT anomaly_count');
         try {
-          await anomaly.denied(tx, subject, decision.reason_code, ctx);
+          // A refusal of a request that came with an API key is counted against the KEY, which is suspended at the
+          // threshold; the card that made the key is never locked for what its key asked, and nothing is written on it.
+          if (subject.kind === 'api_key') await apiKeys.denied(tx, subject, decision.reason_code, await anomaly.settings(tx, subject.tenant_id), ctx);
+          else await anomaly.denied(tx, subject, decision.reason_code, ctx);
           await tx.query('RELEASE SAVEPOINT anomaly_count');
         } catch (err) {
           await tx.query('ROLLBACK TO SAVEPOINT anomaly_count');

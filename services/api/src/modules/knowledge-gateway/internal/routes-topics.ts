@@ -2,7 +2,7 @@
 // the API owns, so these lists are answered here; the gap report itself is computed by the AI service.
 import { problems } from '../../../shared/errors.ts';
 import { decodeIdCursor, decodeNameCursor, encodeCursor, encodeNameCursor, pageOf, writeAudit, type RouteDef, type Tx } from '../../platform/index.ts';
-import { baseClaims, gatewayRoute, pick, uuidOrNull, withListFilter, type GatewayDeps } from './common.ts';
+import { baseClaims, gatewayRoute, keyGatewayRoute, pick, uuidOrNull, withListFilter, type GatewayDeps } from './common.ts';
 import { collectionRef, newRef, sourceRef, topicRef } from './resources.ts';
 import { DEPARTMENT_TEMPLATES, findTemplate, type DepartmentTemplate } from './templates.ts';
 
@@ -69,7 +69,7 @@ export function topicRoutes(deps: GatewayDeps): RouteDef[] {
     await ai.call({ path: `/internal/topics/${topicId}/embed`, action: 'topic.embed', subject: topicId, claims });
   };
   return [
-    withListFilter('delegated', gatewayRoute(deps, 'getGapReport',
+    withListFilter('delegated', keyGatewayRoute(deps, 'getGapReport',
       async ({ subject }) => collectionRef('gap', subject.tenant_id),
       async ({ query }) => ({
         // Counted with what THIS viewer may read: the report is computed for whoever looks at it. The AI service applies
@@ -82,7 +82,7 @@ export function topicRoutes(deps: GatewayDeps): RouteDef[] {
       }))),
     {
       operationId: 'listTopics',
-      kind: 'session',
+      kind: 'session-or-key',   // also takes a machine's API key (openapi.yaml: x-api-key)
       listFilter: 'applied',
       policy: { resource: async ({ subject }) => collectionRef('topic', subject.tenant_id) },
       handler: async ({ tx, subject, query, ctx }) => {
@@ -149,7 +149,7 @@ export function topicRoutes(deps: GatewayDeps): RouteDef[] {
     // caller may read, so a narrower grant sees fewer roles (and smaller counts), never another department's.
     {
       operationId: 'listJobRoles',
-      kind: 'session',
+      kind: 'session-or-key',   // also takes a machine's API key (openapi.yaml: x-api-key)
       listFilter: 'applied',
       policy: { resource: async ({ subject }) => collectionRef('topic', subject.tenant_id) },
       handler: async ({ tx, subject, query, ctx }) => {
@@ -167,7 +167,7 @@ export function topicRoutes(deps: GatewayDeps): RouteDef[] {
     },
     {
       operationId: 'getRoleTopics',
-      kind: 'session',
+      kind: 'session-or-key',   // also takes a machine's API key (openapi.yaml: x-api-key)
       listFilter: 'applied',
       policy: { resource: async ({ subject }) => collectionRef('topic', subject.tenant_id) },
       handler: async ({ tx, subject, params, ctx }) => {

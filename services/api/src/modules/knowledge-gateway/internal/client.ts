@@ -18,6 +18,11 @@ export interface TokenClaims {
   card_id: string;
   person_id: string | null;
   roles: string[];
+  /**
+   * Present when the request was made with a machine's API key: the key's id. `card_id` / `person_id` are then the
+   * card and person the key acts for (for "mine" and for the audit trail) and `roles` is empty - a key has none.
+   */
+  actor?: { kind: 'api_key'; id: string };
   card_phase: 'normal' | 'grace';
   request_id: string;
   filter?: FilterSpec | null;

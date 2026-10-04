@@ -5,7 +5,7 @@ import {
   decide, usageKey, type Grant, type Matrix, type PermissionDef, type PolicyContext, type Restriction,
 } from '../../src/modules/identity-access/index.ts';
 import { forTopicChange } from '../../src/modules/knowledge-gateway/internal/resources.ts';
-import type { ResourceRef, RoleKey, Subject, SubjectRole } from '../../src/shared/policy-types.ts';
+import type { ResourceRef, RoleKey, CardSubject, SubjectRole } from '../../src/shared/policy-types.ts';
 
 const T1 = '11111111-1111-4111-8111-111111111111';
 const T2 = '22222222-2222-4222-8222-222222222222';
@@ -65,7 +65,7 @@ const matrix: Matrix = { permissions: new Map(perms.map((p) => [p.permission_key
 const RANK: Record<string, number> = { company_owner: 100, admin: 80, department_manager: 60, reviewer: 40, expert: 30, successor: 20 };
 const role = (role_key: RoleKey, department_id: string | null = null): SubjectRole => ({ role_key, department_id, rank: RANK[role_key] ?? 0 });
 
-function subject(roles: SubjectRole[], over: Partial<Subject> = {}): Subject {
+function subject(roles: SubjectRole[], over: Partial<CardSubject> = {}): CardSubject {
   return {
     kind: 'card', tenant_id: T1, card_id: CARD, card_number: '0000000000000000', person_id: PERSON, department_id: null,
     card_state: 'active', activated_at: new Date(NOW.getTime() - 10 * DAY), expires_at: new Date(NOW.getTime() + 30 * DAY),
@@ -94,7 +94,7 @@ const allRoles = (): PolicyContext['settings'] => ({ enabled_roles: ['company_ow
 
 interface Row {
   name: string;
-  s: Subject;
+  s: CardSubject;
   action: string;
   r: ResourceRef;
   c?: PolicyContext;

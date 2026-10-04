@@ -192,11 +192,13 @@ describe('audit details allow-list', () => {
 });
 
 describe('idempotency replay never stores one-time secrets', () => {
+  // which fields are one-time secrets is said by each operation's contract (x-one-time-secrets); here: a card's
+  const fields = ['sc', 'enrollment_token', 'enrollment_token_expires_at'];
   it('strips sc and enrollment tokens at any depth and marks the response', () => {
     const stored = stripOneTimeSecrets({
       card: { id: 'c1' }, sc: '123', enrollment_token: 'tok', enrollment_token_expires_at: 'x', secret_already_shown: false,
       nested: { owner_card: { card: { id: 'c2' }, sc: '456', secret_already_shown: false } },
-    }) as any;
+    }, fields) as any;
     expect(JSON.stringify(stored)).not.toMatch(/123|456|tok/);
     expect(stored.secret_already_shown).toBe(true);
     expect(stored.nested.owner_card.secret_already_shown).toBe(true);
@@ -204,8 +206,8 @@ describe('idempotency replay never stores one-time secrets', () => {
   });
 
   it('leaves ordinary responses unchanged', () => {
-    expect(stripOneTimeSecrets({ id: 'x', items: [1, 2] })).toEqual({ id: 'x', items: [1, 2] });
-    expect(stripOneTimeSecrets(null)).toBeNull();
+    expect(stripOneTimeSecrets({ id: 'x', items: [1, 2] }, fields)).toEqual({ id: 'x', items: [1, 2] });
+    expect(stripOneTimeSecrets(null, fields)).toBeNull();
   });
 });
 

@@ -43,7 +43,7 @@ def mint(action: str, *, tenant_id: str, card_id: str, person_id: str | None, ro
     now = int(time.time())
     claims: dict[str, Any] = {
         "iss": "legacyai-api", "aud": "legacyai-ai", "iat": now, "exp": now + lifetime, "jti": str(uuid.uuid4()),
-        "action": action, "tenant_id": tenant_id, "card_id": card_id, "person_id": person_id, "roles": roles or ["learner"],
+        "action": action, "tenant_id": tenant_id, "card_id": card_id, "person_id": person_id, "roles": ["learner"] if roles is None else roles,
         "card_phase": phase, "filter": filter, "approved": approved or [], "limits": limits or {}, "request_id": "test-request",
     }
     if subject is not None:

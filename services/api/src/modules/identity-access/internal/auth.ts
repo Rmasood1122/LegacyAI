@@ -517,7 +517,7 @@ export class AuthService {
 
 /** The Session object of the API contract. */
 export async function sessionBody(
-  tx: Tx, authorizer: Authorizer, subject: import('../../../shared/policy-types.ts').Subject, csrfToken: string, ctx: RequestContext,
+  tx: Tx, authorizer: Authorizer, subject: import('../../../shared/policy-types.ts').CardSubject, csrfToken: string, ctx: RequestContext,
 ): Promise<Record<string, unknown>> {
   const described = await authorizer.describe(tx, subject, ctx);
   return {

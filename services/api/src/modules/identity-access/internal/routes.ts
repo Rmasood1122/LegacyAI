@@ -6,7 +6,7 @@
 import { isIP } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { problems } from '../../../shared/errors.ts';
-import type { RequestContext, ResourceRef, RoleKey, Subject } from '../../../shared/policy-types.ts';
+import type { RequestContext, ResourceRef, RoleKey, CardSubject } from '../../../shared/policy-types.ts';
 import {
   countAuditRows, createTenant, decodeIdCursor, encodeCursor, getPlan, getSettings, getTenant, listTenants, toApiTenant, updateSettings,
   writeAudit,
@@ -22,7 +22,7 @@ import {
 import { normalizeCardNumber } from './card-number.ts';
 import type { ResourceDescriptor } from './policy.ts';
 import { clearLeavingDate } from './leaving.ts';
-import { loadRoles, revokeSession, revokeSessionsForCard, rotateSession } from './sessions.ts';
+import { loadRoles, revokeSession, rotateSession } from './sessions.ts';
 
 export interface IdentityRouteDeps {
   db: Database;
@@ -76,7 +76,7 @@ function rankOf(ranks: Map<string, number>, roleKeys: readonly string[]): number
 
 /** Describes a card to the policy decision point. `lastOwnerCheck` asks "would this leave no active Owner?". */
 async function cardResource(
-  tx: Tx, subject: Subject, cardId: string, now: Date, opts: { lastOwnerCheck?: boolean; serialize?: boolean } = {},
+  tx: Tx, subject: CardSubject, cardId: string, now: Date, opts: { lastOwnerCheck?: boolean; serialize?: boolean } = {},
 ): Promise<{ ref: ResourceRef; card: CardRow } | null> {
   // Changes to who holds which role (and who is the last Owner) are decided one at a time per
   // tenant, so two simultaneous requests cannot each see "there is still another Owner".
@@ -97,13 +97,13 @@ async function cardResource(
 }
 
 const cardLoader = (opts: { lastOwnerCheck?: boolean; serialize?: boolean } = {}) =>
-  async ({ tx, subject, params, ctx }: { tx: Tx; subject: Subject; params: { card_id: string }; ctx: RequestContext }): Promise<ResourceRef | null> =>
+  async ({ tx, subject, params, ctx }: { tx: Tx; subject: CardSubject; params: { card_id: string }; ctx: RequestContext }): Promise<ResourceRef | null> =>
     (await cardResource(tx, subject, params.card_id, ctx.now, opts))?.ref ?? null;
 
-const selfResource = async ({ subject }: { subject: Subject }): Promise<ResourceRef> => ({
+const selfResource = async ({ subject }: { subject: CardSubject }): Promise<ResourceRef> => ({
   type: 'session', id: subject.session_id, tenant_id: subject.tenant_id, owner_card_id: subject.card_id,
 });
-const collection = (type: string) => async ({ subject }: { subject: Subject }): Promise<ResourceRef> => ({
+const collection = (type: string) => async ({ subject }: { subject: CardSubject }): Promise<ResourceRef> => ({
   type, tenant_id: subject.tenant_id, collection: true,
 });
 
@@ -157,7 +157,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
   const { db, auth, cards, authorizer, notifier } = deps;
 
   /** The thing a platform operator acts on when working on a customer tenant: that tenant, named by id. */
-  const targetTenant = async ({ subject, params }: { subject: Subject; params: { tenant_id: string } }): Promise<ResourceRef> => ({
+  const targetTenant = async ({ subject, params }: { subject: CardSubject; params: { tenant_id: string } }): Promise<ResourceRef> => ({
     type: 'tenant', id: params.tenant_id, tenant_id: subject.tenant_id,
   });
   /** Loads a customer tenant inside withinTenant(); the operator tenant itself is never a target. */
@@ -166,7 +166,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
     if (!tenant || tenant.is_platform) throw problems.notFound();
   };
 
-  const roleChangeAudit = async (tx: Tx, subject: Subject, card: CardRow, ctx: { requestId: string; ip: string }, roleKey: string, removed: boolean): Promise<void> => {
+  const roleChangeAudit = async (tx: Tx, subject: CardSubject, card: CardRow, ctx: { requestId: string; ip: string }, roleKey: string, removed: boolean): Promise<void> => {
     await writeAudit(tx, {
       tenantId: subject.tenant_id, actorCardId: subject.card_id, actorKind: 'card',
       action: removed ? 'card_roles:remove' : 'card_roles:assign', resourceType: 'card', resourceId: card.id,
@@ -252,10 +252,12 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
           [subject.tenant_id, subject.card_id]);
         if (Number(rows[0]?.n ?? 0) <= 1) throw problems.conflict('last-credential', 'The last strong factor cannot be removed');
         await tx.query(`UPDATE credentials SET status = 'revoked' WHERE id = $1`, [params.credential_id]);
-        // Sessions that were opened with the removed factor end now.
-        await tx.query(
-          `UPDATE sessions SET revoked_at = $3, revoked_reason = 'credentials_reset'
-            WHERE tenant_id = $1 AND credential_id = $2 AND revoked_at IS NULL`, [subject.tenant_id, params.credential_id, ctx.now]);
+        // Sessions that were opened with the removed factor end now; the others (this one included, if it was opened
+        // with another factor) go on. The API keys this card made are ALL revoked: a factor is removed when it is lost
+        // or no longer trusted, nothing records which session made which key, and a key must not outlive a change of
+        // its maker's sign-in (decision D30). The Owners are told; new keys can be made at once.
+        await cards.revokeSessions(tx, { id: subject.card_id, tenant_id: subject.tenant_id }, 'credentials_reset', ctx.now,
+          { openedWithCredentialId: params.credential_id });
         await cards.event(tx, { id: subject.card_id, tenant_id: subject.tenant_id }, 'credential_removed', subject.card_id, ctx, {}, params.credential_id);
         await writeAudit(tx, {
           tenantId: subject.tenant_id, actorCardId: subject.card_id, actorKind: 'card', action: 'self:credential_remove',
@@ -499,7 +501,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
         await cards.event(tx, card, 'role_assigned', subject.card_id, ctx, { role_key: body.role_key });
         await roleChangeAudit(tx, subject, card, ctx, body.role_key, false);
         // Privilege change: the target card's sessions end and it must sign in again.
-        await revokeSessionsForCard(tx, card.tenant_id, card.id, 'privilege_change', ctx.now);
+        await cards.revokeSessions(tx, card, 'privilege_change', ctx.now);
         const assignment = (await roleAssignments(tx, card)).find((r) => r.role_key === body.role_key);
         return { status: 201, body: assignment };
       },
@@ -537,7 +539,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
           await cards.event(tx, card, 'role_removed', subject.card_id, ctx, { role_key: k });
           await roleChangeAudit(tx, subject, card, ctx, k, true);
         }
-        await revokeSessionsForCard(tx, card.tenant_id, card.id, 'privilege_change', ctx.now);
+        await cards.revokeSessions(tx, card, 'privilege_change', ctx.now);
         return { body: { items: await roleAssignments(tx, card) } };
       },
     },
@@ -564,7 +566,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
         await tx.query('DELETE FROM card_roles WHERE tenant_id = $1 AND card_id = $2 AND role_key = $3', [card.tenant_id, card.id, params.role_key]);
         await cards.event(tx, card, 'role_removed', subject.card_id, ctx, { role_key: params.role_key });
         await roleChangeAudit(tx, subject, card, ctx, params.role_key, true);
-        await revokeSessionsForCard(tx, card.tenant_id, card.id, 'privilege_change', ctx.now);
+        await cards.revokeSessions(tx, card, 'privilege_change', ctx.now);
         return { status: 204 };
       },
     },
