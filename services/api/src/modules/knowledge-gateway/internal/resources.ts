@@ -2,7 +2,7 @@
 // status only (the API's database login cannot read captured text). Row-level security limits every
 // query to the caller's company; a row of another company is simply "not found".
 import { isUuid } from '../../../shared/crypto.ts';
-import type { ResourceRef } from '../../../shared/policy-types.ts';
+import type { ApprovalRef, ResourceRef } from '../../../shared/policy-types.ts';
 import type { Tx } from '../../platform/index.ts';
 
 const isId = isUuid;
@@ -90,6 +90,23 @@ export async function quizItemRef(tx: Tx, tenantId: string, id: unknown): Promis
     tx, 'SELECT id, department_id, sensitivity, owner_person_id FROM quiz_items WHERE tenant_id = $1 AND id = $2', [tenantId, id]);
   if (!r) return null;
   return { type: 'quiz_item', id: r.id, tenant_id: tenantId, department_id: r.department_id, sensitivity: r.sensitivity, owner_person_id: r.owner_person_id };
+}
+
+/**
+ * A test question for APPROVAL: the card or person who generated it, or who last edited it, may not approve it
+ * (the second-person rule; decision D28). Questions written before the rule existed carry no names and can be
+ * approved by anyone who may approve.
+ */
+export async function quizItemForApproval(tx: Tx, tenantId: string, id: unknown): Promise<ApprovalRef | null> {
+  const ref = await quizItemRef(tx, tenantId, id);
+  if (!ref) return null;
+  const w = await first<{ written_by_card_id: string | null; written_by_person_id: string | null; edited_by_card_id: string | null; edited_by_person_id: string | null }>(
+    tx, 'SELECT written_by_card_id, written_by_person_id, edited_by_card_id, edited_by_person_id FROM quiz_items WHERE tenant_id = $1 AND id = $2', [tenantId, id]);
+  if (!w) return null;
+  return {
+    ...ref, approval: true,
+    not_by: { person_ids: [w.written_by_person_id, w.edited_by_person_id].filter((p) => p !== null), card_ids: [w.written_by_card_id, w.edited_by_card_id].filter((c) => c !== null) },
+  };
 }
 
 export async function attemptRef(tx: Tx, tenantId: string, id: unknown): Promise<ResourceRef | null> {

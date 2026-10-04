@@ -85,6 +85,15 @@ Cost $0.0019 per question on these short documents.
    ASSUMPTION: the test's random marker word was itself redacted at upload. The test now uses a fixed marker and
    checks that it survived upload, so a repeat would say so.
 
+Found later, while building scenario replay (Phase 4, decision D28) - both confirmed by reading the Phase 2 code:
+
+8. **Approving a readiness test question had no second-person rule.** The design says a generated question needs a
+   reviewer's approval; nothing stopped the person who generated (or edited) it from approving it. Closed in Phase 4:
+   the policy refuses the generator and the last editor.
+9. **Readiness answers were never deleted.** The setting `quiz_answer_retention_days` existed, but no job applied it.
+   Closed in Phase 4: the housekeeping sweep removes the learners' text after that time and keeps the scores.
+10. **A card that may both take tests and grade could override its own readiness grade.** Now refused ("own attempt"), as scenarios refuse it. Found by a security read of the scenario work.
+
 ## Deviations from the approved design
 
 | Design said | What was done | Why |

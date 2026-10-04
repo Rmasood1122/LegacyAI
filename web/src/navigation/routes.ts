@@ -62,7 +62,18 @@ export const ROUTES = {
   },
   attempt: { path: '/readiness/attempts/:attemptId', requiredOperation: 'getReadinessAttempt' },
   report: { path: '/readiness/reports/:attemptId', requiredOperation: 'getReadinessReport' },
+  // Scenario replay: a learner sees what is offered to it and its runs; the people who write and approve scenarios
+  // have their own list (the right to read the question bank, which learners do not hold).
+  scenarios: {
+    path: '/scenarios', label: 'Scenarios', requiredOperation: 'listOfferedScenarios',
+    home: { title: 'Scenarios', text: 'Work through a situation step by step, in your own words.', linkText: 'Open scenarios' },
+  },
+  scenarioRun: { path: '/scenarios/runs/:attemptId', requiredOperation: 'getScenarioAttempt' },
+  // one step, for the person who grades it (reached from the review task about that step)
+  scenarioGrade: { path: '/scenarios/grade/:answerId', requiredOperation: 'getScenarioAnswer' },
   questionBank: { path: '/readiness/questions', label: 'Test questions', requiredOperation: 'listQuizQuestions', menu: 'manage' },
+  scenarioBank: { path: '/scenario-writing', label: 'Scenario writing', requiredOperation: 'listScenarios', menu: 'manage' },
+  scenarioEdit: { path: '/scenario-writing/:scenarioId', requiredOperation: 'getScenario' },
   topics: { path: '/topics', label: 'Topics', requiredOperation: 'listTopics', alsoRequires: ['createTopic'], menu: 'manage' },
   gaps: { path: '/gaps', label: 'Job roles and gaps', requiredOperation: 'getGapReport', menu: 'manage' },
   people: { path: '/people', label: 'People', requiredOperation: 'listPeople', alsoRequires: ['createPerson'], menu: 'manage' },
@@ -88,7 +99,7 @@ export const ROUTES = {
 
 export type ScreenKey = keyof typeof ROUTES;
 /** Screens that show one thing and so need its id. */
-export type DetailScreenKey = 'document' | 'knowledgeItem' | 'interview' | 'attempt' | 'report' | 'card' | 'graphNode';
+export type DetailScreenKey = 'document' | 'knowledgeItem' | 'interview' | 'attempt' | 'report' | 'card' | 'graphNode' | 'scenarioRun' | 'scenarioGrade' | 'scenarioEdit';
 export type PlainScreenKey = Exclude<ScreenKey, DetailScreenKey>;
 /** A screen to go to: a plain one, or a detail screen together with the id of what it shows. */
 export type ScreenTarget = { screen: PlainScreenKey } | { screen: DetailScreenKey; id: string };

@@ -6043,6 +6043,690 @@ paths:
           $ref: "#/components/responses/TooManyRequests"
         "502":
           $ref: "#/components/responses/BadGateway"
+  "/v1/scenarios":
+    get:
+      operationId: "listScenarios"
+      summary: "Scenarios, for the people who write and approve them (no steps here)."
+      tags:
+        - "readiness"
+      x-permission: "quiz:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "status"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            enum:
+              - "draft"
+              - "approved"
+              - "retired"
+        - name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 25
+          description: "Page size."
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "items"
+                  - "next_cursor"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      $ref: "#/components/schemas/KScenarioSummary"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+    post:
+      operationId: "createScenario"
+      summary: "Write a scenario: a situation with ordered steps, each tied to verified knowledge. It starts as a draft."
+      description: "Every linked item must be verified, released to learners (level 0) and readable by the caller; no expected point may appear in the title, the situation or a step's prompt (answer-leak guard, 422). Free text is redacted before it is stored."
+      tags:
+        - "readiness"
+      x-permission: "quiz:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              $ref: "#/components/schemas/KScenarioWrite"
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  "/v1/scenarios/{scenario_id}":
+    get:
+      operationId: "getScenario"
+      summary: "One scenario with its steps, expected points and linked items. For reviewers; learners never get this."
+      tags:
+        - "readiness"
+      x-permission: "quiz:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ScenarioId"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KScenario"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+    put:
+      operationId: "updateScenario"
+      summary: "Replace a scenario's text and steps. The editor becomes its author; an approved scenario goes back to draft."
+      description: "Every linked item must be verified, released to learners (level 0) and readable by the caller; no expected point may appear in the title, the situation or a step's prompt (answer-leak guard, 422). Free text is redacted before it is stored. A scenario that somebody has already run cannot be edited (409 has-attempts): retire it and write a new one. Refusals, each with ONE status: 422 `bad steps`, `unknown item` (an item id that is not verified, released and readable by the caller), `item not released`, `answer in prompt`, `points not distinct`, `malformed`. Also 409 `has-attempts` (somebody has already run it), 409 `illegal-transition` (retired), 409 `changed-meanwhile` (see `updated_at`)."
+      tags:
+        - "readiness"
+      x-permission: "quiz:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/ScenarioId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              $ref: "#/components/schemas/KScenarioWrite"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  "/v1/scenarios/{scenario_id}/approve":
+    post:
+      operationId: "approveScenario"
+      summary: "Approve a draft so that learners can run it. A second person must do this."
+      description: "The second-person rule: neither the card or person who CREATED the scenario nor the one who LAST EDITED it may approve it (unless the company switched the second-reviewer rule off). Their request is refused by the policy with 403, recorded in the audit log with reason DENY_SELF_REVIEW - the same answer as for a knowledge item verified by its own author. Other refusals, each with ONE status: 409 `item-not-released` (a linked item is no longer verified and released, or a step lost its text), 409 `illegal-transition` (already approved or retired), 409 `changed-meanwhile` (the scenario was changed after the version named in `updated_at` was read: read it again)."
+      tags:
+        - "readiness"
+      x-permission: "quiz:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/ScenarioId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              properties:
+                updated_at:
+                  type: "string"
+                  format: "date-time"
+                  description: "The `updated_at` of the version the approver read. If given and the scenario was changed since, nothing is approved (409 changed-meanwhile). Send it: without it the approval applies to whatever the text is now."
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  "/v1/scenarios/{scenario_id}/retire":
+    post:
+      operationId: "retireScenario"
+      summary: "Retire a scenario for good. Runs still in progress end."
+      tags:
+        - "readiness"
+      x-permission: "quiz:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/ScenarioId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  "/v1/scenarios/{scenario_id}/attempts":
+    post:
+      operationId: "startScenarioAttempt"
+      summary: "Start a run of an approved scenario. The answer holds the steps' prompts, never the expected points."
+      description: "404 unless the scenario is approved and every linked item is verified, released and readable by the caller. At most 3 runs of one scenario per learner in 24 hours (429 afterwards): every hand-in costs up to ten grading calls of the company's AI allowance."
+      tags:
+        - "readiness"
+      x-permission: "quiz:take"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/ScenarioId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KScenarioRun"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  "/v1/scenario-rubric-proposals":
+    post:
+      operationId: "proposeScenarioRubric"
+      summary: "Expected points proposed by the AI from verified items, for the reviewer to edit. Nothing is stored."
+      tags:
+        - "readiness"
+      x-permission: "quiz:manage"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "item_ids"
+              properties:
+                item_ids:
+                  type: "array"
+                  minItems: 1
+                  maxItems: 5
+                  items:
+                    type: "string"
+                    format: "uuid"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KRubricProposal"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+        "503":
+          $ref: "#/components/responses/AiUnavailable"
+  "/v1/scenario-offers":
+    get:
+      operationId: "listOfferedScenarios"
+      summary: "The scenarios the caller may run now: approved, and built only from knowledge the caller may read."
+      tags:
+        - "readiness"
+      x-permission: "quiz:take"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "job_role"
+          in: "query"
+          required: false
+          schema:
+            $ref: "#/components/schemas/JobRoleName"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "items"
+                  - "truncated"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      $ref: "#/components/schemas/KScenarioOffer"
+                  truncated:
+                    type: "boolean"
+                    description: "True when more than 200 approved scenarios exist; only the first 200 were examined."
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  "/v1/scenario-attempts":
+    get:
+      operationId: "listScenarioAttempts"
+      summary: "Scenario runs, newest first: a learner's own, or the company's for those who may read results. Labels only."
+      tags:
+        - "readiness"
+      x-permission: "quiz:read_results"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 25
+          description: "Page size."
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "items"
+                  - "next_cursor"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      $ref: "#/components/schemas/KScenarioAttemptSummary"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  "/v1/scenario-attempts/{scenario_attempt_id}":
+    get:
+      operationId: "getScenarioAttempt"
+      summary: "One run with the learner's answers and, after hand-in, the scores."
+      description: "While the run is in progress the answer holds prompts and the learner's own text only. After hand-in: scores. The expected points are included for reviewers, and for the learner only if the company shows answers after grading."
+      tags:
+        - "readiness"
+      x-permission: "quiz:read_results"
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ScenarioAttemptId"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KScenarioAttempt"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  "/v1/scenario-attempts/{scenario_attempt_id}/answers":
+    post:
+      operationId: "saveScenarioAnswer"
+      summary: "Save the answer to one step of a run in progress."
+      tags:
+        - "readiness"
+      x-permission: "quiz:take"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/ScenarioAttemptId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "position"
+              properties:
+                position:
+                  type: "integer"
+                  minimum: 1
+                  maximum: 10
+                answer_text:
+                  type:
+                    - "string"
+                    - "null"
+                  maxLength: 4000
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "id"
+                  - "position"
+                properties:
+                  id:
+                    type: "string"
+                    format: "uuid"
+                  position:
+                    type: "integer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  "/v1/scenario-attempts/{scenario_attempt_id}/submit":
+    post:
+      operationId: "submitScenarioAttempt"
+      summary: "Hand in a run, once. Each step is graded by its expected points; a step that could not be graded waits for a person."
+      tags:
+        - "readiness"
+      x-permission: "quiz:take"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/ScenarioAttemptId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  "/v1/scenario-answers/{scenario_answer_id}":
+    get:
+      operationId: "getScenarioAnswer"
+      summary: "One step of a handed-in run, for the person who grades it: the question, the learner's words, the expected points."
+      description: "No blind grading: whoever may set a score (`overrideScenarioAnswer`) reads the step here first, under the same rule. The answer exists for a grader only if the run is handed in, is not the grader's own (409 `own-attempt`), and the step either waits for a person or belongs to a run the grader may read anyway (quiz:read_results). The scenario's level and department are checked against the grader (403). Anything else - also an answer of a hidden scenario - is 404. Never offered to the learner whose run it is. `details_removed` is true when the retention period has removed the learner's words; `points[].met` is null when a person decided the score or the details were removed."
+      tags:
+        - "readiness"
+      x-permission: "quiz:grade"
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/ScenarioAnswerId"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KScenarioAnswerForGrading"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  "/v1/scenario-answers/{scenario_answer_id}/override":
+    post:
+      operationId: "overrideScenarioAnswer"
+      summary: "A reviewer sets the final score of one step. Not for one's own run (409 own-attempt)."
+      description: "Closes the open grading task about this answer, if there is one. Refusals: 409 `own-attempt` (the run is the caller's own, by card or by person), 404 when the run is not handed in yet, or when the caller could not read this step through `getScenarioAnswer` (nobody grades blind); 403 when the scenario is above the caller's level."
+      tags:
+        - "readiness"
+      x-permission: "quiz:grade"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/ScenarioAnswerId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "score"
+              properties:
+                score:
+                  type: "number"
+                  minimum: 0
+                  maximum: 1
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KStatus"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
 components:
   securitySchemes:
     sessionCookie:
@@ -6085,6 +6769,27 @@ components:
       schema:
         type: string
         format: uuid
+    ScenarioId:
+      name: "scenario_id"
+      in: "path"
+      required: true
+      schema:
+        type: "string"
+        format: "uuid"
+    ScenarioAttemptId:
+      name: "scenario_attempt_id"
+      in: "path"
+      required: true
+      schema:
+        type: "string"
+        format: "uuid"
+    ScenarioAnswerId:
+      name: "scenario_answer_id"
+      in: "path"
+      required: true
+      schema:
+        type: "string"
+        format: "uuid"
     KnowledgeAnswerId:
       name: "knowledge_answer_id"
       in: "path"
@@ -10010,3 +10715,539 @@ components:
         links_created:
           type: integer
           description: Links between a job role and a topic (the job-role map) this call created.
+    KScenarioStepInput:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "prompt"
+        - "item_ids"
+        - "rubric"
+      properties:
+        prompt:
+          type: "string"
+          minLength: 1
+          maxLength: 1000
+        item_ids:
+          type: "array"
+          minItems: 1
+          maxItems: 5
+          items:
+            type: "string"
+            format: "uuid"
+          description: "Verified, released knowledge items this step expects."
+        rubric:
+          type: "array"
+          minItems: 1
+          maxItems: 6
+          items:
+            type: "string"
+            minLength: 1
+            maxLength: 300
+          description: "The expected points. Never shown to a learner before hand-in."
+    KScenarioWrite:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "title"
+        - "situation"
+        - "job_role"
+        - "steps"
+      properties:
+        title:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        situation:
+          type: "string"
+          minLength: 1
+          maxLength: 2000
+          description: "What happens: \"what would you do if ...\"."
+        job_role:
+          $ref: "#/components/schemas/JobRoleName"
+        steps:
+          type: "array"
+          minItems: 1
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/KScenarioStepInput"
+        updated_at:
+          type: "string"
+          format: "date-time"
+          description: "For an edit: the `updated_at` of the version the editor read. If given and the scenario was changed since, nothing is saved (409 changed-meanwhile). Ignored when a scenario is created."
+    KScenarioSummary:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "title"
+        - "job_role"
+        - "status"
+        - "flag_reason"
+        - "written_by_me"
+        - "created_at"
+        - "updated_at"
+        - "approved_at"
+        - "step_count"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        title:
+          type: "string"
+        job_role:
+          type: "string"
+        status:
+          type: "string"
+          enum:
+            - "draft"
+            - "approved"
+            - "retired"
+        flag_reason:
+          type:
+            - "string"
+            - "null"
+          enum:
+            - "item_changed"
+            - "item_withdrawn"
+            - null
+          description: "Why the scenario left the approved state without a person doing it: a linked item stopped being verified knowledge (back to draft), or was withdrawn (retired, and the texts tied to it erased)."
+        written_by_me:
+          type: "boolean"
+          description: "True for the author of the current text, who cannot approve it."
+        created_at:
+          type: "string"
+          format: "date-time"
+        updated_at:
+          type: "string"
+          format: "date-time"
+        approved_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        step_count:
+          type: "integer"
+    KScenario:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "title"
+        - "job_role"
+        - "status"
+        - "flag_reason"
+        - "written_by_me"
+        - "created_at"
+        - "updated_at"
+        - "approved_at"
+        - "situation"
+        - "has_attempts"
+        - "steps"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        title:
+          type: "string"
+        job_role:
+          type: "string"
+        status:
+          type: "string"
+          enum:
+            - "draft"
+            - "approved"
+            - "retired"
+        flag_reason:
+          type:
+            - "string"
+            - "null"
+          enum:
+            - "item_changed"
+            - "item_withdrawn"
+            - null
+          description: "Why the scenario left the approved state without a person doing it: a linked item stopped being verified knowledge (back to draft), or was withdrawn (retired, and the texts tied to it erased)."
+        written_by_me:
+          type: "boolean"
+          description: "True for the author of the current text, who cannot approve it."
+        created_at:
+          type: "string"
+          format: "date-time"
+        updated_at:
+          type: "string"
+          format: "date-time"
+        approved_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        situation:
+          type: "string"
+        has_attempts:
+          type: "boolean"
+          description: "True once somebody has run it: it can then no longer be edited, only retired."
+        steps:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "position"
+              - "prompt"
+              - "erased"
+              - "rubric"
+              - "items"
+            properties:
+              position:
+                type: "integer"
+              prompt:
+                type: "string"
+              erased:
+                type: "boolean"
+                description: "True when the step's text was erased because a linked item was withdrawn."
+              rubric:
+                type: "array"
+                items:
+                  type: "string"
+              items:
+                type: "array"
+                items:
+                  type: "object"
+                  additionalProperties: false
+                  required:
+                    - "id"
+                    - "title"
+                    - "status"
+                  properties:
+                    id:
+                      type: "string"
+                      format: "uuid"
+                    title:
+                      type:
+                        - "string"
+                        - "null"
+                      description: "Null when the reader may not read this item."
+                    status:
+                      type: "string"
+    KScenarioOffer:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "title"
+        - "situation"
+        - "job_role"
+        - "step_count"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        title:
+          type: "string"
+        situation:
+          type: "string"
+        job_role:
+          type: "string"
+        step_count:
+          type: "integer"
+    KScenarioRun:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "scenario_id"
+        - "title"
+        - "situation"
+        - "expires_at"
+        - "steps"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        scenario_id:
+          type: "string"
+          format: "uuid"
+        title:
+          type: "string"
+        situation:
+          type: "string"
+        expires_at:
+          type: "string"
+          format: "date-time"
+        steps:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "position"
+              - "prompt"
+            properties:
+              position:
+                type: "integer"
+              prompt:
+                type: "string"
+    KRubricProposal:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "rubric"
+      properties:
+        rubric:
+          type: "array"
+          items:
+            type: "string"
+    KScenarioAttemptSummary:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "scenario_id"
+        - "title"
+        - "job_role"
+        - "learner_person_id"
+        - "status"
+        - "started_at"
+        - "submitted_at"
+        - "graded_at"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        scenario_id:
+          type: "string"
+          format: "uuid"
+        title:
+          type: "string"
+        job_role:
+          type: "string"
+        learner_person_id:
+          type: "string"
+          format: "uuid"
+        status:
+          type: "string"
+          enum:
+            - "in_progress"
+            - "submitted"
+            - "graded"
+            - "expired"
+        started_at:
+          type: "string"
+          format: "date-time"
+        submitted_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        graded_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+    KScenarioAnswerForGrading:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "attempt_id"
+        - "scenario_title"
+        - "position"
+        - "prompt"
+        - "answer_text"
+        - "awaiting_person"
+        - "details_removed"
+        - "final_score"
+        - "decided_by"
+        - "ai_score"
+        - "ai_confidence"
+        - "points"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        attempt_id:
+          type: "string"
+          format: "uuid"
+        scenario_title:
+          type: "string"
+        position:
+          type: "integer"
+        prompt:
+          type: "string"
+        answer_text:
+          type:
+            - "string"
+            - "null"
+        awaiting_person:
+          type: "boolean"
+          description: "True while the step has no final score and its run is handed in: a person has to decide."
+        details_removed:
+          type: "boolean"
+          description: "True when the retention period has removed the learner's words and what the model said about them."
+        final_score:
+          type:
+            - "number"
+            - "null"
+        decided_by:
+          type:
+            - "string"
+            - "null"
+          enum:
+            - "auto"
+            - "ai"
+            - "reviewer"
+            - null
+        ai_score:
+          type:
+            - "number"
+            - "null"
+        ai_confidence:
+          type:
+            - "number"
+            - "null"
+        points:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "text"
+              - "met"
+            properties:
+              text:
+                type: "string"
+              met:
+                type:
+                  - "boolean"
+                  - "null"
+    KScenarioAttemptStep:
+      type: "object"
+      description: "One step of a run. What is PRESENT depends on the run's `status` and on who reads. Status `in_progress` (or any status a client does not know): only `answer_id`, `position`, `prompt`, `answer_text` - for everyone. For the LEARNER: `final_score`, `decided_by` and `graded_with_low_confidence` only when the run is `graded`; `points` and `read_these` only when it is `graded` AND the company shows answers after grading. A run that is `submitted` (a step waits for a person) or `expired` shows the learner nothing but their own text. For a reader who may read results and is not the learner: scores, `points` and `read_these` in every finished state (`submitted`, `graded`, `expired`). The expected points are never present while a run is in progress."
+      additionalProperties: false
+      required:
+        - "answer_id"
+        - "position"
+        - "prompt"
+        - "answer_text"
+      properties:
+        answer_id:
+          type: "string"
+          format: "uuid"
+        position:
+          type: "integer"
+        prompt:
+          type: "string"
+        answer_text:
+          type:
+            - "string"
+            - "null"
+        details_removed:
+          type: "boolean"
+          description: "Present and true when the retention period has removed the learner's words and what the model said about them."
+        final_score:
+          type:
+            - "number"
+            - "null"
+          description: "Only when the run is `graded`."
+        decided_by:
+          type:
+            - "string"
+            - "null"
+          enum:
+            - "auto"
+            - "ai"
+            - "reviewer"
+            - null
+        graded_with_low_confidence:
+          type: "boolean"
+          description: "The AI graded this step but was unsure; a reviewer may want to look."
+        read_these:
+          type: "array"
+          description: "Only when the run is `graded` and the points are released to the reader: the linked items the READER may read."
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "id"
+              - "title"
+            properties:
+              id:
+                type: "string"
+                format: "uuid"
+              title:
+                type: "string"
+        points:
+          type: "array"
+          description: "Only when the run is `graded`: for people who may read results; for the learner only if the company shows answers after grading."
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "text"
+              - "met"
+            properties:
+              text:
+                type: "string"
+              met:
+                type:
+                  - "boolean"
+                  - "null"
+                description: "Null when a person, not the AI, decided the score."
+    KScenarioAttempt:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "scenario_id"
+        - "title"
+        - "situation"
+        - "job_role"
+        - "learner_person_id"
+        - "status"
+        - "started_at"
+        - "expires_at"
+        - "submitted_at"
+        - "graded_at"
+        - "steps"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        scenario_id:
+          type: "string"
+          format: "uuid"
+        title:
+          type: "string"
+        situation:
+          type: "string"
+        job_role:
+          type: "string"
+        learner_person_id:
+          type: "string"
+          format: "uuid"
+        status:
+          type: "string"
+          enum:
+            - "in_progress"
+            - "submitted"
+            - "graded"
+            - "expired"
+        started_at:
+          type: "string"
+          format: "date-time"
+        expires_at:
+          type: "string"
+          format: "date-time"
+        submitted_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        graded_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        steps:
+          type: "array"
+          items:
+            $ref: "#/components/schemas/KScenarioAttemptStep"

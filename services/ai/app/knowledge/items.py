@@ -19,7 +19,7 @@ from pgvector import HalfVector
 
 from app.ai_gateway import Caller, DataBlock, Embedder, Gateway, ItemExtractOutput
 from app.capture import consent_family, redact, topic_condition
-from app.knowledge import item_conflicts
+from app.knowledge import item_conflicts, scenario_erasure
 from app.platform import Database, ServiceContext, one, write_audit
 
 BODY_MAX = 2000
@@ -36,6 +36,9 @@ def _settings(cur: psycopg.Cursor[Any], tenant_id: str) -> dict[str, Any]:
     cur.execute("SELECT second_reviewer_required, stale_after_days, review_sla_days FROM knowledge_settings WHERE tenant_id = %s", (tenant_id,))
     row = cur.fetchone()
     return dict(row) if row else {"second_reviewer_required": True, "stale_after_days": 365, "review_sla_days": 5}
+
+
+review_settings = _settings      # the public name, for the other modules of this package
 
 
 def _item(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str, lock: bool = True) -> dict[str, Any]:
@@ -463,6 +466,7 @@ def erase_withdrawn_items(cur: psycopg.Cursor[Any], tenant_id: str, consent_id: 
     # The withdrawal itself is recorded by the database (migration 15), not through _move: the words a stored conflict
     # quotes from the erased text must go here, and the partner item loses its mark and its task.
     item_conflicts.clear_many(cur, tenant_id, erased)
+    scenario_erasure.erase_for_items(cur, tenant_id, erased)     # and what scenarios quote of it (the trigger only hid them)
     sla = int(_settings(cur, tenant_id)["review_sla_days"])
     for item_id in mixed_item_ids:
         item = _item(cur, tenant_id, item_id)
@@ -488,6 +492,7 @@ def withdraw_items(cur: psycopg.Cursor[Any], tenant_id: str, only: list[str], mi
             cur.execute("SELECT erase_version(%s)", (v["id"],))
         cur.execute("UPDATE knowledge_items SET title = '' WHERE tenant_id = %s AND id = %s", (tenant_id, item_id))
         item_conflicts.clear(cur, tenant_id, item_id)        # the stored conflict quotes words of the erased text
+    scenario_erasure.erase_for_items(cur, tenant_id, only)   # and so does a scenario built on it
     sla = int(_settings(cur, tenant_id)["review_sla_days"])
     for item_id in mixed:
         item = _item(cur, tenant_id, item_id)

@@ -28,6 +28,8 @@ function subjectScreen(task: KTask): ScreenTarget | null {
   if (task.subject_type === 'source') return { screen: 'document', id: task.subject_id };
   // A reader marked an answer wrong: what the reader said is on the quality page (for those who may open it).
   if (task.subject_type === 'answer') return { screen: 'quality' };
+  // A step of a scenario run that a person has to grade: the grader reads it and sets the score on its own screen.
+  if (task.subject_type === 'scenario_answer') return { screen: 'scenarioGrade', id: task.subject_id };
   return null;
 }
 

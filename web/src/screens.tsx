@@ -29,6 +29,10 @@ import { ReportScreen } from './features/readiness/ReportScreen.tsx';
 import { ConflictsScreen } from './features/quality/ConflictsScreen.tsx';
 import { QualityScreen } from './features/quality/QualityScreen.tsx';
 import { ReviewScreen } from './features/review/ReviewScreen.tsx';
+import { ScenarioBankScreen, ScenarioEditScreen } from './features/scenarios/ScenarioBankScreen.tsx';
+import { ScenarioGradeScreen } from './features/scenarios/ScenarioGradeScreen.tsx';
+import { ScenarioRunScreen } from './features/scenarios/ScenarioRunScreen.tsx';
+import { ScenariosScreen } from './features/scenarios/ScenariosScreen.tsx';
 import { GapsScreen } from './features/topics/GapsScreen.tsx';
 import { TopicsScreen } from './features/topics/TopicsScreen.tsx';
 import { routeOf, type RouteDef, type ScreenKey } from './navigation/routes.ts';
@@ -54,12 +58,17 @@ const COMPONENTS: Readonly<Record<ScreenKey, ComponentType>> = {
   readiness: ReadinessScreen,
   attempt: AttemptScreen,
   report: ReportScreen,
+  scenarios: ScenariosScreen,
+  scenarioRun: ScenarioRunScreen,
+  scenarioGrade: ScenarioGradeScreen,
   consent: ConsentScreen,
   graph: GraphStartScreen,
   graphNode: GraphNodeScreen,
   topics: TopicsScreen,
   gaps: GapsScreen,
   questionBank: QuestionBankScreen,
+  scenarioBank: ScenarioBankScreen,
+  scenarioEdit: ScenarioEditScreen,
   people: PeopleScreen,
   radar: RadarScreen,
   cards: CardsScreen,

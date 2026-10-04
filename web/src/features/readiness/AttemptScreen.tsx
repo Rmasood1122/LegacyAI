@@ -1,11 +1,12 @@
 // One test. While it runs: the questions, answers saved as the learner goes, then handing in.
 // Afterwards: what was answered and how it was graded. While the test runs NOTHING about the right
 // answers is drawn, whatever the API sends.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router';
 import type { KAttempt } from '../../api/generated.ts';
 import { ScreenLink } from '../../navigation/ScreenLink.tsx';
 import { useSession } from '../../session/session.tsx';
+import { ScoreOverride, useUnsavedPositions } from '../../ui/answers.tsx';
 import { Badge, Banner, Button, Card, ConfirmButton, ErrorNote, Facts, formatDate, Loading, Page, TextArea } from '../../ui/index.tsx';
 import { ATTEMPT_STATUS_TEXT, attemptTone, isFinishedAttempt, percent, useAttempt, useOverrideAnswer, useSaveAnswer, useSubmitAttempt } from './hooks.ts';
 
@@ -23,16 +24,7 @@ export function AttemptScreen() {
   const taking = data !== undefined && data.status === 'in_progress' && data.learner_person_id === myPerson && can('saveAttemptAnswer');
   // Questions whose answer is not saved yet, as each question reports it (see AnswerQuestion). Handing in cannot be
   // undone, so it waits for them.
-  const [unsaved, setUnsaved] = useState<ReadonlySet<number>>(new Set());
-  const markUnsaved = useCallback((position: number, dirty: boolean): void => {
-    setUnsaved((before) => {
-      if (before.has(position) === dirty) return before;
-      const next = new Set(before);
-      if (dirty) next.add(position); else next.delete(position);
-      return next;
-    });
-  }, []);
-  const waitingFor = [...unsaved].sort((a, b) => a - b);
+  const { waitingFor, markUnsaved } = useUnsavedPositions();
   return (
     <Page title="Readiness test">
       {attempt.isPending && <Loading what="the test" />}
@@ -156,7 +148,6 @@ function AnswerQuestion({ attemptId, question, total, onUnsaved }: {
 function GradedQuestion({ question }: { question: Question }) {
   const { can } = useSession();
   const override = useOverrideAnswer();
-  const [score, setScore] = useState('');
   const given = question.kind === 'mcq' && question.options !== null
     ? (question.chosen_option === null ? null : question.options[question.chosen_option] ?? null)
     : question.answer_text;
@@ -170,17 +161,8 @@ function GradedQuestion({ question }: { question: Question }) {
         ['Graded by', question.decided_by === null ? '—' : question.decided_by === 'ai' ? 'AI, against the rubric' : question.decided_by === 'reviewer' ? 'A reviewer' : 'The answer key'],
       ]} />
       {can('overrideQuizAnswer') && (
-        <div className="row">
-          <label>New score <select className="input" value={score} onChange={(e) => setScore(e.target.value)}>
-            <option value="">Choose a score…</option>
-            <option value="1">Right (100 %)</option>
-            <option value="0.5">Half right (50 %)</option>
-            <option value="0">Wrong (0 %)</option>
-          </select></label>
-          <ConfirmButton variant="primary" label="Set the score" confirmLabel="Yes, change the score" busy={override.isPending} disabled={score === ''} resetKey={score}
-            onConfirm={() => override.mutate({ path: { answer_id: question.answer_id }, body: { score: Number(score) } }, { onSuccess: () => setScore('') })} />
-          {override.isSuccess && <span className="muted" role="status">Score changed.</span>}
-        </div>
+        <ScoreOverride busy={override.isPending} changed={override.isSuccess}
+          onSet={(score, done) => override.mutate({ path: { answer_id: question.answer_id }, body: { score } }, { onSuccess: done })} />
       )}
       <ErrorNote error={override.error} />
     </Card>

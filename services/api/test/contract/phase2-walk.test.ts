@@ -11,7 +11,7 @@ import { addMember, createTenant, platformOperator, startApp, superuser, type Re
 
 const REAL = process.env.AI_SERVICE_URL_REAL;
 // Phase 2, plus Phase 4: five quality operations (features 22, 23), two for department templates (26), one for activity numbers (27), two for the graph (30)
-const PHASE2_OPERATIONS = 78 + 5 + 2 + 3;
+const PHASE2_OPERATIONS = 78 + 5 + 2 + 3 + 15;   // + fifteen for scenario replay (feature 8)
 
 describe.skipIf(!REAL)('Phase 2 walk with the real AI service', () => {
   let t: TestApp;
@@ -173,6 +173,53 @@ describe.skipIf(!REAL)('Phase 2 walk with the real AI service', () => {
     const report = ok('getReadinessReport', await o.get(`/v1/readiness/reports/${attempt.body.id}`), 200);
     expect(report.body.statement).toContain('not a certificate');
     ok('retireQuizQuestion', await r2.post(`/v1/readiness/questions/${qid}/retire`), 200);
+
+    // ---- scenario replay (feature 8): written by one reviewer, approved by another, run by the learner
+    const POINT = 'Stop the boiler before touching the valve';
+    const scenarioBody = {
+      title: 'The relief valve lever does not move', situation: 'On the weekly round the lever of the relief valve cannot be lifted.', job_role: role,
+      steps: [{ prompt: 'What is the first thing you do?', item_ids: [itemId], rubric: [POINT] }],
+    };
+    ok('proposeScenarioRubric', await r.post('/v1/scenario-rubric-proposals', { item_ids: [itemId] }), 200);
+    const scenario = ok('createScenario', await r.post('/v1/scenarios', scenarioBody), 201);
+    expect((await r.post('/v1/scenarios', { ...scenarioBody, situation: `${scenarioBody.situation} ${POINT}.` })).status).toBe(422);   // an expected point in what the learner reads
+    ok('updateScenario', await r.put(`/v1/scenarios/${scenario.body.id}`, { ...scenarioBody, title: 'The relief valve lever is stuck' }), 200);
+    expect(ok('listScenarios', await r.get('/v1/scenarios'), 200).body.items.map((s: any) => [s.id, s.status, s.step_count])).toEqual([[scenario.body.id, 'draft', 1]]);
+    expect(ok('getScenario', await r2.get(`/v1/scenarios/${scenario.body.id}`), 200).body.steps[0].items.map((i: any) => i.id)).toEqual([itemId]);
+    expect((await l.get(`/v1/scenarios/${scenario.body.id}`)).status).toBe(403);                                      // a learner never reads the expected points
+    expect((await l.get('/v1/scenario-offers')).body.items).toEqual([]);                                             // a draft is not offered
+    expect((await r.post(`/v1/scenarios/${scenario.body.id}/approve`)).status).toBe(403);                            // not by the person who wrote it (the policy decides)
+    ok('approveScenario', await r2.post(`/v1/scenarios/${scenario.body.id}/approve`), 200);
+    const offers = ok('listOfferedScenarios', await l.get('/v1/scenario-offers'), 200);
+    expect(offers.body.items.map((s: any) => s.id)).toEqual([scenario.body.id]);
+    const run = ok('startScenarioAttempt', await l.post(`/v1/scenarios/${scenario.body.id}/attempts`), 201);
+    expect(run.body.steps).toEqual([{ position: 1, prompt: 'What is the first thing you do?' }]);
+    ok('saveScenarioAnswer', await l.post(`/v1/scenario-attempts/${run.body.id}/answers`, { position: 1, answer_text: 'I stop the boiler before touching the valve.' }), 200);
+    const running = await l.get(`/v1/scenario-attempts/${run.body.id}`);
+    // nothing the learner receives before handing in holds the expected point
+    for (const seen of [offers, run, running]) expect(JSON.stringify(seen.body)).not.toContain(POINT);
+    expect(Object.keys(running.body.steps[0]).sort()).toEqual(['answer_id', 'answer_text', 'position', 'prompt']);
+    ok('submitScenarioAttempt', await l.post(`/v1/scenario-attempts/${run.body.id}/submit`), 200);
+    expect((await l.post(`/v1/scenario-attempts/${run.body.id}/submit`)).status).toBe(409);                           // once
+    const result = ok('getScenarioAttempt', await l.get(`/v1/scenario-attempts/${run.body.id}`), 200);
+    // the company does not show answers after grading: the learner gets neither the expected points nor "read these"
+    expect(result.body.steps[0].points).toBeUndefined();
+    expect(result.body.steps[0].read_these).toBeUndefined();
+    expect(ok('listScenarioAttempts', await l.get('/v1/scenario-attempts'), 200).body.items.map((a: any) => a.id)).toEqual([run.body.id]);
+    expect((await e.get('/v1/scenario-attempts')).status).toBe(403);                                                  // an expert has no right to results
+    const asOwner = await o.get(`/v1/scenario-attempts/${run.body.id}`);                                              // a reader of results sees the expected points
+    expect(asOwner.body.steps[0].points).toHaveLength(1);
+    expect(asOwner.body.steps[0].read_these.map((i: any) => i.id)).toEqual([itemId]);
+    // Nobody grades blind. This run is graded and nothing waits for a person, so a grader who may not read results
+    // (an Expert holds quiz:grade, not quiz:read_results) can neither read the step nor change its score: both answer
+    // "not found". The path where a step waits for a person and the grader reads and scores it is tested in the AI
+    // service (tests/integration/test_scenarios.py), where a run without a model can be made.
+    const stepId = result.body.steps[0].answer_id;
+    ok('getScenarioAnswer', await r.get(`/v1/scenario-answers/${stepId}`), 404);
+    ok('overrideScenarioAnswer', await r.post(`/v1/scenario-answers/${stepId}/override`, { score: 1 }), 404);
+    expect((await l.get(`/v1/scenario-answers/${stepId}`)).status).toBe(403);                                         // never for the learner (no quiz:grade)
+    expect((await r.put(`/v1/scenarios/${scenario.body.id}`, scenarioBody)).status).toBe(409);                        // it has been run: no more edits
+    ok('retireScenario', await r2.post(`/v1/scenarios/${scenario.body.id}/retire`), 200);
 
     // ---- review queue and allow-list
     const tasks = ok('listReviewTasks', await o.get('/v1/review/tasks?limit=50'), 200);

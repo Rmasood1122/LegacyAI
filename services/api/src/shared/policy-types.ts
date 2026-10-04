@@ -67,7 +67,22 @@ export interface ResourceRef {
   releases_to_learners?: boolean;
   /** True when a label change alters how an already verified item is used (its topics: what learners are tested on, what the gap report counts). */
   changes_released_knowledge?: boolean;
+  /**
+   * "A second person must do this": the people and cards who wrote what is being approved and therefore may NOT take
+   * this action on it (a scenario's creator and last editor; a test question's generator and last editor). Refused
+   * with DENY_SELF_REVIEW unless the company switched the second-reviewer rule off.
+   */
+  not_by?: { person_ids: Array<string | null>; card_ids: Array<string | null> };
+  /**
+   * True when the action is an APPROVAL of what somebody wrote (a scenario, a test question). Approval shares its
+   * permission with edit and retire, so the route has to say so; a resource marked like this MUST name its writers
+   * in `not_by`, or the decision is a refusal.
+   */
+  approval?: boolean;
 }
+
+/** A resource description for an approval: it cannot be built without saying who may not approve. */
+export type ApprovalRef = ResourceRef & { approval: true; not_by: NonNullable<ResourceRef['not_by']> };
 
 export type Obligation =
   | { type: 'read_only' }

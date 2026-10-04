@@ -1,7 +1,7 @@
 // Helpers shared by the knowledge-gateway routes.
 import { isUuid } from '../../../shared/crypto.ts';
 import { problems } from '../../../shared/errors.ts';
-import type { Decision, RequestContext, ResourceRef, Subject } from '../../../shared/policy-types.ts';
+import type { ApprovalRef, Decision, RequestContext, ResourceRef, Subject } from '../../../shared/policy-types.ts';
 import type { Authorizer } from '../../identity-access/index.ts';
 import type { Database, GatewayPrepared, ListFilter, Notifier, RateLimiter, RouteDef, SessionHandlerArgs, Tx } from '../../platform/index.ts';
 import type { AiCall, AiServiceClient, TokenClaims } from './client.ts';
@@ -69,11 +69,40 @@ export interface CallPlan extends Omit<AiCall, 'claims'> {
 /** Adds the collection-read declaration (see ListFilter in the platform module) to a route built by gatewayRoute. */
 export const withListFilter = (listFilter: ListFilter, route: RouteDef): RouteDef => (route.kind === 'public' ? route : { ...route, listFilter });
 
+/**
+ * Operations that APPROVE what somebody wrote. They share their permission with edit and retire, so the policy can
+ * only apply the second-person rule if the route names the writers. These operations must therefore be registered
+ * with approvalRoute(), whose loader has to return an ApprovalRef; gatewayRoute() refuses to register them.
+ */
+export const APPROVAL_OPERATIONS: ReadonlySet<string> = new Set(['approveScenario', 'approveQuizQuestion']);
+const viaApprovalRoute = Symbol('approvalRoute');
+
+export type ApprovalLoader = (args: Parameters<Loader>[0]) => Promise<ApprovalRef | null>;
+
+/** A gateway route for an approval: the resource must say who wrote the thing (see APPROVAL_OPERATIONS). */
+export function approvalRoute(
+  deps: GatewayDeps, operationId: string, load: ApprovalLoader,
+  plan: (a: SessionHandlerArgs) => Promise<CallPlan | { result: { status?: number; body?: unknown } }>,
+): RouteDef {
+  if (!APPROVAL_OPERATIONS.has(operationId)) throw new Error(`${operationId} is not listed in APPROVAL_OPERATIONS`);
+  const checked: Loader = async (a) => {
+    const ref = await load(a);
+    // belt and braces for JavaScript callers that get past the type: an approval without its writers is not described at all
+    if (ref !== null && (ref.approval !== true || ref.not_by === undefined)) throw new Error(`${operationId}: an approval must name who may not approve`);
+    return ref;
+  };
+  return gatewayRoute(deps, operationId, checked, plan, undefined, viaApprovalRoute);
+}
+
 export function gatewayRoute(
   deps: GatewayDeps, operationId: string, load: Loader,
   plan: (a: SessionHandlerArgs) => Promise<CallPlan | { result: { status?: number; body?: unknown } }>,
   bodyLimit?: number,
+  via?: symbol,
 ): RouteDef {
+  if (APPROVAL_OPERATIONS.has(operationId) && via !== viaApprovalRoute) {
+    throw new Error(`${operationId} approves what somebody wrote: register it with approvalRoute(), which requires the writers to be named`);
+  }
   return {
     operationId,
     kind: 'gateway',

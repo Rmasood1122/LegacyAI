@@ -1140,6 +1140,147 @@ export interface TopicTemplateResult {
   links_created: number;
 }
 
+export interface KScenarioStepInput {
+  prompt: string;
+  item_ids: string[];
+  rubric: string[];
+}
+
+export interface KScenarioWrite {
+  title: string;
+  situation: string;
+  job_role: JobRoleName;
+  steps: KScenarioStepInput[];
+  updated_at?: string;
+}
+
+export interface KScenarioSummary {
+  id: string;
+  title: string;
+  job_role: string;
+  status: "draft" | "approved" | "retired";
+  flag_reason: "item_changed" | "item_withdrawn" | null;
+  written_by_me: boolean;
+  created_at: string;
+  updated_at: string;
+  approved_at: string | null;
+  step_count: number;
+}
+
+export interface KScenario {
+  id: string;
+  title: string;
+  job_role: string;
+  status: "draft" | "approved" | "retired";
+  flag_reason: "item_changed" | "item_withdrawn" | null;
+  written_by_me: boolean;
+  created_at: string;
+  updated_at: string;
+  approved_at: string | null;
+  situation: string;
+  has_attempts: boolean;
+  steps: Array<{
+    position: number;
+    prompt: string;
+    erased: boolean;
+    rubric: string[];
+    items: Array<{
+      id: string;
+      title: string | null;
+      status: string;
+    }>;
+  }>;
+}
+
+export interface KScenarioOffer {
+  id: string;
+  title: string;
+  situation: string;
+  job_role: string;
+  step_count: number;
+}
+
+export interface KScenarioRun {
+  id: string;
+  scenario_id: string;
+  title: string;
+  situation: string;
+  expires_at: string;
+  steps: {
+    position: number;
+    prompt: string;
+  }[];
+}
+
+export interface KRubricProposal {
+  rubric: string[];
+}
+
+export interface KScenarioAttemptSummary {
+  id: string;
+  scenario_id: string;
+  title: string;
+  job_role: string;
+  learner_person_id: string;
+  status: "in_progress" | "submitted" | "graded" | "expired";
+  started_at: string;
+  submitted_at: string | null;
+  graded_at: string | null;
+}
+
+export interface KScenarioAnswerForGrading {
+  id: string;
+  attempt_id: string;
+  scenario_title: string;
+  position: number;
+  prompt: string;
+  answer_text: string | null;
+  awaiting_person: boolean;
+  details_removed: boolean;
+  final_score: number | null;
+  decided_by: "auto" | "ai" | "reviewer" | null;
+  ai_score: number | null;
+  ai_confidence: number | null;
+  points: Array<{
+    text: string;
+    met: boolean | null;
+  }>;
+}
+
+export interface KScenarioAttemptStep {
+  answer_id: string;
+  position: number;
+  prompt: string;
+  answer_text: string | null;
+  details_removed?: boolean;
+  final_score?: number | null;
+  decided_by?: "auto" | "ai" | "reviewer" | null;
+  graded_with_low_confidence?: boolean;
+  read_these?: {
+    id: string;
+    title: string;
+  }[];
+  points?: Array<{
+    text: string;
+    met: boolean | null;
+  }>;
+}
+
+export interface KScenarioAttempt {
+  id: string;
+  scenario_id: string;
+  title: string;
+  situation: string;
+  job_role: string;
+  learner_person_id: string;
+  status: "in_progress" | "submitted" | "graded" | "expired";
+  started_at: string;
+  expires_at: string;
+  submitted_at: string | null;
+  graded_at: string | null;
+  steps: KScenarioAttemptStep[];
+}
+
 export const operations = {
   getHealth: { method: "GET", path: "/v1/health", status: 200, idempotent: false, public: true, permission: null, contentTypes: [] },
   getReady: { method: "GET", path: "/v1/ready", status: 200, idempotent: false, public: true, permission: null, contentTypes: [] },
@@ -1282,6 +1423,21 @@ export const operations = {
   getRetirementRadar: { method: "GET", path: "/v1/retirement-radar", status: 200, idempotent: false, public: false, permission: "person:read", contentTypes: [] },
   listTopicTemplates: { method: "GET", path: "/v1/topic-templates", status: 200, idempotent: false, public: false, permission: "topic:manage", contentTypes: [] },
   applyTopicTemplate: { method: "POST", path: "/v1/topic-templates/{template_key}/apply", status: 200, idempotent: true, public: false, permission: "topic:manage", contentTypes: [] },
+  listScenarios: { method: "GET", path: "/v1/scenarios", status: 200, idempotent: false, public: false, permission: "quiz:read", contentTypes: [] },
+  createScenario: { method: "POST", path: "/v1/scenarios", status: 201, idempotent: true, public: false, permission: "quiz:manage", contentTypes: ["application/json"] },
+  getScenario: { method: "GET", path: "/v1/scenarios/{scenario_id}", status: 200, idempotent: false, public: false, permission: "quiz:read", contentTypes: [] },
+  updateScenario: { method: "PUT", path: "/v1/scenarios/{scenario_id}", status: 200, idempotent: true, public: false, permission: "quiz:manage", contentTypes: ["application/json"] },
+  approveScenario: { method: "POST", path: "/v1/scenarios/{scenario_id}/approve", status: 200, idempotent: true, public: false, permission: "quiz:manage", contentTypes: ["application/json"] },
+  retireScenario: { method: "POST", path: "/v1/scenarios/{scenario_id}/retire", status: 200, idempotent: true, public: false, permission: "quiz:manage", contentTypes: [] },
+  startScenarioAttempt: { method: "POST", path: "/v1/scenarios/{scenario_id}/attempts", status: 201, idempotent: true, public: false, permission: "quiz:take", contentTypes: [] },
+  proposeScenarioRubric: { method: "POST", path: "/v1/scenario-rubric-proposals", status: 200, idempotent: true, public: false, permission: "quiz:manage", contentTypes: ["application/json"] },
+  listOfferedScenarios: { method: "GET", path: "/v1/scenario-offers", status: 200, idempotent: false, public: false, permission: "quiz:take", contentTypes: [] },
+  listScenarioAttempts: { method: "GET", path: "/v1/scenario-attempts", status: 200, idempotent: false, public: false, permission: "quiz:read_results", contentTypes: [] },
+  getScenarioAttempt: { method: "GET", path: "/v1/scenario-attempts/{scenario_attempt_id}", status: 200, idempotent: false, public: false, permission: "quiz:read_results", contentTypes: [] },
+  saveScenarioAnswer: { method: "POST", path: "/v1/scenario-attempts/{scenario_attempt_id}/answers", status: 200, idempotent: true, public: false, permission: "quiz:take", contentTypes: ["application/json"] },
+  submitScenarioAttempt: { method: "POST", path: "/v1/scenario-attempts/{scenario_attempt_id}/submit", status: 200, idempotent: true, public: false, permission: "quiz:take", contentTypes: [] },
+  getScenarioAnswer: { method: "GET", path: "/v1/scenario-answers/{scenario_answer_id}", status: 200, idempotent: false, public: false, permission: "quiz:grade", contentTypes: [] },
+  overrideScenarioAnswer: { method: "POST", path: "/v1/scenario-answers/{scenario_answer_id}/override", status: 200, idempotent: true, public: false, permission: "quiz:grade", contentTypes: ["application/json"] },
 } as const;
 
 export type OperationId = keyof typeof operations;
@@ -2347,5 +2503,116 @@ export interface OperationTypes {
     query: undefined;
     body: undefined;
     response: TopicTemplateResult;
+  };
+  listScenarios: {
+    path: undefined;
+    query: { status?: "draft" | "approved" | "retired"; limit?: number; cursor?: string };
+    body: undefined;
+    response: {
+      items: KScenarioSummary[];
+      next_cursor: string | null;
+    };
+  };
+  createScenario: {
+    path: undefined;
+    query: undefined;
+    body: KScenarioWrite;
+    response: KStatus;
+  };
+  getScenario: {
+    path: { scenario_id: string };
+    query: undefined;
+    body: undefined;
+    response: KScenario;
+  };
+  updateScenario: {
+    path: { scenario_id: string };
+    query: undefined;
+    body: KScenarioWrite;
+    response: KStatus;
+  };
+  approveScenario: {
+    path: { scenario_id: string };
+    query: undefined;
+    body: {
+      updated_at?: string;
+    };
+    response: KStatus;
+  };
+  retireScenario: {
+    path: { scenario_id: string };
+    query: undefined;
+    body: undefined;
+    response: KStatus;
+  };
+  startScenarioAttempt: {
+    path: { scenario_id: string };
+    query: undefined;
+    body: undefined;
+    response: KScenarioRun;
+  };
+  proposeScenarioRubric: {
+    path: undefined;
+    query: undefined;
+    body: {
+      item_ids: string[];
+    };
+    response: KRubricProposal;
+  };
+  listOfferedScenarios: {
+    path: undefined;
+    query: { job_role?: JobRoleName };
+    body: undefined;
+    response: {
+      items: KScenarioOffer[];
+      truncated: boolean;
+    };
+  };
+  listScenarioAttempts: {
+    path: undefined;
+    query: { limit?: number; cursor?: string };
+    body: undefined;
+    response: {
+      items: KScenarioAttemptSummary[];
+      next_cursor: string | null;
+    };
+  };
+  getScenarioAttempt: {
+    path: { scenario_attempt_id: string };
+    query: undefined;
+    body: undefined;
+    response: KScenarioAttempt;
+  };
+  saveScenarioAnswer: {
+    path: { scenario_attempt_id: string };
+    query: undefined;
+    body: {
+      position: number;
+      answer_text?: string | null;
+    };
+    response: {
+      id: string;
+      position: number;
+    };
+  };
+  submitScenarioAttempt: {
+    path: { scenario_attempt_id: string };
+    query: undefined;
+    body: undefined;
+    response: KStatus;
+  };
+  getScenarioAnswer: {
+    path: { scenario_answer_id: string };
+    query: undefined;
+    body: undefined;
+    response: KScenarioAnswerForGrading;
+  };
+  overrideScenarioAnswer: {
+    path: { scenario_answer_id: string };
+    query: undefined;
+    body: {
+      score: number;
+    };
+    response: KStatus;
   };
 }

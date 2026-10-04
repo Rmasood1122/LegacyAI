@@ -39,6 +39,7 @@ const perms: PermissionDef[] = [
   { permission_key: 'knowledge:read', is_write: false, platform_only: false },
   { permission_key: 'knowledge:verify', is_write: true, platform_only: false },
   { permission_key: 'knowledge:label', is_write: true, platform_only: false },
+  { permission_key: 'quiz:manage', is_write: true, platform_only: false },
 ];
 const g = (role_key: RoleKey, permission_key: string, scope: Grant['scope'], max_sensitivity = 0, grant_source: Grant['grant_source'] = 'base'): Grant =>
   ({ role_key, permission_key, scope, max_sensitivity, grant_source });
@@ -50,6 +51,7 @@ const grants: Grant[] = [
   g('expert', 'card:read', 'own'), g('expert', 'card:list', 'own'), g('expert', 'knowledge:read', 'own', 1),
   g('reviewer', 'knowledge:verify', 'tenant', 1),
   g('reviewer', 'knowledge:label', 'tenant', 1),
+  g('reviewer', 'quiz:manage', 'tenant', 1),
   g('successor', 'knowledge:read', 'tenant', 0),
   g('admin', 'knowledge:verify', 'tenant', 1, 'pilot_reviewer'),
   g('expert', 'knowledge:verify', 'tenant', 1, 'pilot_reviewer'),
@@ -144,6 +146,16 @@ const rows: Row[] = [
   { name: 'four eyes: the contributor may sort their own item into topics while it is not verified', s: subject([role('reviewer')]), action: 'knowledge:label', r: forTopicChange({ ...item({ owner_person_id: PERSON }), status: 'in_review' }), c: ctx({ settings: allRoles() }), effect: 'allow', reason: 'ALLOW' },
   { name: 'four eyes: a verified item described without contributor and author cannot have its topics changed', s: subject([role('reviewer')]), action: 'knowledge:label', r: forTopicChange({ ...res({ type: 'knowledge_item', owner_card_id: null, target_rank: undefined, sensitivity: 1 }), status: 'verified' }), c: ctx({ settings: allRoles() }), effect: 'deny', reason: 'DENY_SELF_REVIEW' },
   { name: 'four eyes: switched off, the contributor may change the topics of their verified item', s: subject([role('reviewer')]), action: 'knowledge:label', r: forTopicChange({ ...item({ owner_person_id: PERSON }), status: 'verified' }), c: ctx({ settings: { ...allRoles(), second_reviewer_required: false } }), effect: 'allow', reason: 'ALLOW' },
+  // The second-person rule for things that are not knowledge items (decision D28): the route names who wrote it.
+  { name: 'second person: whoever wrote a scenario or a test question (named by card) cannot approve it', s: subject([role('reviewer')]), action: 'quiz:manage', r: res({ type: 'scenario', id: OTHER_CARD, owner_card_id: null, target_rank: undefined, sensitivity: 0, not_by: { person_ids: [], card_ids: [CARD] } }), c: ctx({ settings: allRoles() }), effect: 'deny', reason: 'DENY_SELF_REVIEW' },
+  { name: 'second person: nor when named by person (another card of the same person)', s: subject([role('reviewer')]), action: 'quiz:manage', r: res({ type: 'scenario', id: OTHER_CARD, owner_card_id: null, target_rank: undefined, sensitivity: 0, not_by: { person_ids: [PERSON], card_ids: [OTHER_CARD] } }), c: ctx({ settings: allRoles() }), effect: 'deny', reason: 'DENY_SELF_REVIEW' },
+  { name: 'second person: somebody who neither created nor last edited it may approve', s: subject([role('reviewer')]), action: 'quiz:manage', r: res({ type: 'scenario', id: OTHER_CARD, owner_card_id: null, target_rank: undefined, sensitivity: 0, not_by: { person_ids: [null, 'dddddddd-0000-4000-8000-000000000001'], card_ids: [OTHER_CARD] } }), c: ctx({ settings: allRoles() }), effect: 'allow', reason: 'ALLOW' },
+  { name: 'second person: nobody named (written before the rule existed) - anyone with the right may approve', s: subject([role('reviewer')]), action: 'quiz:manage', r: res({ type: 'scenario', id: OTHER_CARD, owner_card_id: null, target_rank: undefined, sensitivity: 0, not_by: { person_ids: [], card_ids: [] } }), c: ctx({ settings: allRoles() }), effect: 'allow', reason: 'ALLOW' },
+  { name: 'second person: switched off by the company, the writer may approve', s: subject([role('reviewer')]), action: 'quiz:manage', r: res({ type: 'scenario', id: OTHER_CARD, owner_card_id: null, target_rank: undefined, sensitivity: 0, not_by: { person_ids: [PERSON], card_ids: [CARD] } }), c: ctx({ settings: { ...allRoles(), second_reviewer_required: false } }), effect: 'allow', reason: 'ALLOW' },
+  { name: 'second person: a malformed list of writers is refused, not ignored', s: subject([role('reviewer')]), action: 'quiz:manage', r: res({ type: 'scenario', id: OTHER_CARD, owner_card_id: null, target_rank: undefined, sensitivity: 0, not_by: { person_ids: 'x', card_ids: [] } as never }), c: ctx({ settings: allRoles() }), effect: 'deny', reason: 'DENY_PDP_ERROR' },
+  { name: 'second person: an approval that does not name its writers is refused (the rule cannot be forgotten)', s: subject([role('reviewer')]), action: 'quiz:manage', r: res({ type: 'scenario', id: OTHER_CARD, owner_card_id: null, target_rank: undefined, sensitivity: 0, approval: true }), c: ctx({ settings: allRoles() }), effect: 'deny', reason: 'DENY_PDP_ERROR' },
+  { name: 'second person: an approval marked with anything but true is refused', s: subject([role('reviewer')]), action: 'quiz:manage', r: res({ type: 'scenario', id: OTHER_CARD, owner_card_id: null, target_rank: undefined, sensitivity: 0, approval: 'yes' as never, not_by: { person_ids: [], card_ids: [] } }), c: ctx({ settings: allRoles() }), effect: 'deny', reason: 'DENY_PDP_ERROR' },
+  { name: 'second person: an approval that names its writers, by somebody else, is allowed', s: subject([role('reviewer')]), action: 'quiz:manage', r: res({ type: 'scenario', id: OTHER_CARD, owner_card_id: null, target_rank: undefined, sensitivity: 0, approval: true, not_by: { person_ids: [], card_ids: [OTHER_CARD] } }), c: ctx({ settings: allRoles() }), effect: 'allow', reason: 'ALLOW' },
   // Verified only (docs/phase2/03): a reader limited to released material sees verified knowledge only.
   { name: 'verified only: a learner is refused unverified material', s: subject([role('successor')]), action: 'knowledge:read', r: item({ sensitivity: 0, verification_status: 'unverified' }), effect: 'deny', reason: 'DENY_UNVERIFIED' },
   { name: 'verified only: a learner may read verified material', s: subject([role('successor')]), action: 'knowledge:read', r: item({ sensitivity: 0, verification_status: 'verified' }), effect: 'allow', reason: 'ALLOW' },

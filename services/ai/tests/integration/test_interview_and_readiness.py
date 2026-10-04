@@ -151,6 +151,11 @@ def test_open_answers_are_graded_against_the_rubric_and_can_be_overridden(db: Da
     readiness.submit_attempt(db, learner, attempt["id"], gateway, world.caller("learner"))
     ans = admin.execute("SELECT id, final_score, decided_by FROM quiz_answers WHERE attempt_id = %s", (attempt["id"],)).fetchone()
     assert ans["decided_by"] == "ai" and ans["final_score"] < 1.0      # the injection earned nothing
+    # nobody sets their own grade, whatever rights the card holds
+    with pytest.raises(readiness.ItemRefused) as own:
+        readiness.override(db, world.ctx("learner", "quiz.override"), str(ans["id"]), 1.0)
+    assert own.value.code == "own_attempt"
+    assert admin.execute("SELECT decided_by FROM quiz_answers WHERE id = %s", (ans["id"],)).fetchone()["decided_by"] == "ai"
     out = readiness.override(db, world.ctx("reviewer", "quiz.override"), str(ans["id"]), 0.5)
     assert out["status"] == "graded"
     final = admin.execute("SELECT final_score, decided_by FROM quiz_answers WHERE id = %s", (ans["id"],)).fetchone()

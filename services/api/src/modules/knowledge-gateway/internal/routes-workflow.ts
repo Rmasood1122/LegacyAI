@@ -2,9 +2,9 @@
 import { problems } from '../../../shared/errors.ts';
 import type { ResourceRef } from '../../../shared/policy-types.ts';
 import { decodeIdCursor, encodeCursor, type RouteDef, type Tx } from '../../platform/index.ts';
-import { gatewayRoute, pick, uuidOrNull, withListFilter, type GatewayDeps } from './common.ts';
+import { approvalRoute, gatewayRoute, pick, uuidOrNull, withListFilter, type GatewayDeps } from './common.ts';
 import {
-  attemptRef, collectionRef, expertQuestionRef, interviewRef, itemRef, newRef, quizItemRef,
+  attemptRef, collectionRef, expertQuestionRef, interviewRef, itemRef, newRef, quizItemForApproval, quizItemRef,
 } from './resources.ts';
 import { topicRoutes } from './routes-topics.ts';
 
@@ -26,6 +26,24 @@ const toApiInterview = (r: InterviewRow): Record<string, unknown> => ({
   id: r.id, expert_person_id: r.expert_person_id, job_role: r.job_role, status: r.status, turn_count: r.turn_count, max_turns: r.max_turns,
   created_at: r.created_at.toISOString(), last_turn_at: r.last_turn_at?.toISOString() ?? null, completed_at: r.completed_at?.toISOString() ?? null,
 });
+
+/**
+ * The questions of a readiness attempt as the API passes them on. The API's OWN rule, not a copy of what the AI
+ * service sent: a score only when the attempt is `graded`; the correct option only when it is `graded` AND the AI
+ * service says in so many words that the answers were released (`answers_released === true`). In any other state -
+ * also one this code does not know - the learner gets the question and their own answer, whatever else arrived.
+ */
+export function attemptQuestions(attempt: any): Array<Record<string, unknown>> {
+  const questions: any[] = Array.isArray(attempt?.questions) ? attempt.questions : [];
+  const graded = attempt?.status === 'graded';
+  const answers = graded && attempt?.answers_released === true;
+  return questions.map((q) => {
+    const out: Record<string, unknown> = pick(q, ['answer_id', 'position', 'kind', 'stem', 'options', 'chosen_option', 'answer_text', 'decided_by']);
+    out.final_score = graded && typeof q.final_score === 'number' ? q.final_score : null;
+    if (answers && typeof q.correct_option === 'number') out.correct_option = q.correct_option;
+    return out;
+  });
+}
 
 export function workflowRoutes(deps: GatewayDeps): RouteDef[] {
   const { authorizer } = deps;
@@ -151,11 +169,16 @@ export function workflowRoutes(deps: GatewayDeps): RouteDef[] {
         json: { stem: body.stem, options: body.options ?? null, correct_option: body.correct_option ?? null, rubric: body.rubric ?? null },
         map: (r) => pick(r, ['id', 'status']),
       })),
-    ...([['approveQuizQuestion', 'approved'], ['retireQuizQuestion', 'retired']] as const).map(([op, target]) =>
-      gatewayRoute(deps, op, ({ tx, subject, params }) => quizItemRef(tx, subject.tenant_id, params.question_id), async ({ params }) => ({
-        path: `/internal/readiness/questions/${params.question_id}/status`, action: 'quiz.status', subject: params.question_id,
-        json: { status: target }, map: (r) => pick(r, ['id', 'status']),
-      }))),
+    // Approval needs a second person: whoever generated or last edited the question is refused by the policy (DENY_SELF_REVIEW).
+    // The AI service checks it again. approvalRoute() makes naming the writers impossible to forget.
+    approvalRoute(deps, 'approveQuizQuestion', ({ tx, subject, params }) => quizItemForApproval(tx, subject.tenant_id, params.question_id), async ({ params }) => ({
+      path: `/internal/readiness/questions/${params.question_id}/status`, action: 'quiz.status', subject: params.question_id,
+      json: { status: 'approved' }, map: (r) => pick(r, ['id', 'status']),
+    })),
+    gatewayRoute(deps, 'retireQuizQuestion', ({ tx, subject, params }) => quizItemRef(tx, subject.tenant_id, params.question_id), async ({ params }) => ({
+      path: `/internal/readiness/questions/${params.question_id}/status`, action: 'quiz.status', subject: params.question_id,
+      json: { status: 'retired' }, map: (r) => pick(r, ['id', 'status']),
+    })),
     gatewayRoute(deps, 'startReadinessAttempt',
       async ({ subject }) => newRef('quiz_attempt', subject.tenant_id, { owner_person_id: subject.person_id, owner_card_id: subject.card_id, sensitivity: 0 }),
       async ({ tx, subject, body, ctx }) => {
@@ -215,10 +238,7 @@ export function workflowRoutes(deps: GatewayDeps): RouteDef[] {
         path: `/internal/readiness/attempts/${params.attempt_id}/read`, action: 'quiz.attempt_read', subject: params.attempt_id,
         map: (r) => ({
           ...pick(r, ['id', 'learner_person_id', 'job_role', 'status', 'started_at', 'expires_at', 'submitted_at', 'graded_at', 'bank_size']),
-          questions: (r.questions ?? []).map((q: any) => {
-            const out = pick(q, ['answer_id', 'position', 'kind', 'stem', 'options', 'chosen_option', 'answer_text', 'final_score', 'decided_by']);
-            return q.correct_option !== undefined ? { ...out, correct_option: q.correct_option } : out;
-          }),
+          questions: attemptQuestions(r),
         }),
       })),
     gatewayRoute(deps, 'saveAttemptAnswer',

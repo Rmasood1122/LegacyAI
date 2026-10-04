@@ -368,6 +368,16 @@ function decideUnsafe(subject: Subject, action: string, resource: ResourceRef, c
     const mine = me !== null && (resource.owner_person_id === me || resource.author_person_id === me);
     if (mine && ctx.settings.second_reviewer_required !== false) return deny('DENY_SELF_REVIEW');
   }
+  // The same rule for things that are not knowledge items (a scenario, a test question): the route names who wrote it.
+  // An approval that does not name them is refused, instead of slipping past the rule.
+  if (resource.approval !== undefined && resource.approval !== true) return deny('DENY_PDP_ERROR');
+  if (resource.approval === true && resource.not_by === undefined) return deny('DENY_PDP_ERROR');
+  if (resource.not_by !== undefined) {
+    const by = resource.not_by;
+    if (by === null || typeof by !== 'object' || !Array.isArray(by.person_ids) || !Array.isArray(by.card_ids)) return deny('DENY_PDP_ERROR');
+    const mine = by.card_ids.includes(subject.card_id) || (subject.person_id !== null && by.person_ids.includes(subject.person_id));
+    if (mine && ctx.settings.second_reviewer_required !== false) return deny('DENY_SELF_REVIEW');
+  }
 
   // Plan limits (billing hook) and card-level restrictions (feature 5).
   if (ctx.planAllows !== true) return deny('DENY_PLAN_LIMIT');

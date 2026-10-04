@@ -41,6 +41,10 @@ DESCRIPTORS: dict[str, Descriptor] = {
     # The same owner columns as the API's ATTEMPT_DESCRIPTOR (routes-workflow.ts). owner_person_id always equals
     # learner_person_id (a CHECK on the table), so the two services cannot disagree about whose attempt it is.
     "quiz_attempts": Descriptor("qa.tenant_id", None, None, ("qa.owner_person_id",), owner_card=("qa.learner_card_id",)),
+    # Scenario replay (feature 8): a scenario is released material (level 0) written by its author; a run belongs to
+    # the learner, exactly like a readiness attempt (same owner columns as the API's descriptor in routes-scenarios.ts).
+    "scenarios": Descriptor("sc.tenant_id", "sc.department_id", "sc.sensitivity", ("sc.owner_person_id",)),
+    "scenario_attempts": Descriptor("sa.tenant_id", None, None, ("sa.owner_person_id",), owner_card=("sa.learner_card_id",)),
     # An interview carries no level of its own; what it captured does (its document). An interview that has no
     # document yet (only invited) holds nothing and counts as level 0.
     "interviews": Descriptor(

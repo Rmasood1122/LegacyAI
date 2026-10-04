@@ -17,7 +17,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from app.ai_gateway import Caller, DataBlock, Gateway, QuizGenerateOutput, QuizGradeOutput
-from app.knowledge.items import ItemRefused, _settings
+from app.knowledge.items import ItemRefused, _settings, review_settings
 from app.platform import Database, ServiceContext, one, write_audit
 
 LOW_GRADING_CONFIDENCE = 0.6
@@ -28,8 +28,12 @@ REPORT_STATEMENT = (
 _NORM = re.compile(r"[^a-z0-9]+")
 
 
-def _norm(text: str) -> str:
+def norm(text: str) -> str:
+    """Text reduced to lower-case letters and digits, for comparisons."""
     return _NORM.sub(" ", text.lower()).strip()
+
+
+_norm = norm
 
 
 def leak_check(q: QuizGenerateOutput) -> str | None:
@@ -74,11 +78,11 @@ def generate(db: Database, ctx: ServiceContext, gateway: Gateway, caller: Caller
         with db.tenant_tx(ctx.tenant_id) as cur:
             cur.execute(
                 """INSERT INTO quiz_items (tenant_id, topic_id, knowledge_item_id, knowledge_version_id, kind, stem, options, correct_option, rubric,
-                                           department_id, sensitivity, owner_person_id, prompt_version)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, 'quiz_generate@v1') RETURNING id::text AS id""",
+                                           department_id, sensitivity, owner_person_id, prompt_version, written_by_card_id, written_by_person_id)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, 'quiz_generate@v1', %s, %s) RETURNING id::text AS id""",
                 (ctx.tenant_id, item["topic_id"], item["id"], item["version_id"], parsed.kind, parsed.stem,
                  Jsonb(parsed.options) if parsed.kind == "mcq" else None, parsed.correct_option if parsed.kind == "mcq" else None,
-                 Jsonb(parsed.rubric) if parsed.kind == "open" else None, item["department_id"], item["owner"]))
+                 Jsonb(parsed.rubric) if parsed.kind == "open" else None, item["department_id"], item["owner"], ctx.card_id, ctx.person_id))
             qid = one(cur)["id"]
             cur.execute(
                 """INSERT INTO review_tasks (tenant_id, kind, subject_type, subject_id, department_id, sensitivity, owner_person_id, priority, due_at)
@@ -90,8 +94,27 @@ def generate(db: Database, ctx: ServiceContext, gateway: Gateway, caller: Caller
     return {"created": created, "refused": refused}
 
 
+def wrote_question(q: dict[str, Any], card_id: str, person_id: str | None) -> bool:
+    """Did this card or person generate the question or write its current text? Pure. Questions written before the
+    rule existed name nobody, so nobody is refused for them."""
+    cards = {q.get("written_by_card_id"), q.get("edited_by_card_id")} - {None}
+    people = {q.get("written_by_person_id"), q.get("edited_by_person_id")} - {None}
+    return card_id in cards or (person_id is not None and person_id in people)
+
+
 def set_question_status(db: Database, ctx: ServiceContext, question_id: str, status: str) -> None:
     with db.tenant_tx(ctx.tenant_id) as cur:
+        if status == "approved":
+            # The second-person rule is decided (and its refusal audited) by the API's policy; it is checked again here,
+            # as for scenarios, so that a route that forgot to ask the policy still cannot approve its own question.
+            cur.execute("""SELECT written_by_card_id::text AS written_by_card_id, written_by_person_id::text AS written_by_person_id,
+                                  edited_by_card_id::text AS edited_by_card_id, edited_by_person_id::text AS edited_by_person_id
+                             FROM quiz_items WHERE tenant_id = %s AND id = %s FOR UPDATE""", (ctx.tenant_id, question_id))
+            q = cur.fetchone()
+            if q is None:
+                raise ItemRefused("not_found", 404)
+            if wrote_question(dict(q), ctx.card_id, ctx.person_id) and review_settings(cur, ctx.tenant_id)["second_reviewer_required"]:
+                raise ItemRefused("second_person_needed")
         try:
             cur.execute(
                 """UPDATE quiz_items SET status = %s, approved_by_card_id = CASE WHEN %s = 'approved' THEN %s ELSE approved_by_card_id END,
@@ -124,9 +147,10 @@ def edit_question(db: Database, ctx: ServiceContext, question_id: str, stem: str
             raise ItemRefused(reason, 422)
         if row["status"] == "approved":
             cur.execute("UPDATE quiz_items SET status = 'draft' WHERE tenant_id = %s AND id = %s", (ctx.tenant_id, question_id))
-        cur.execute("UPDATE quiz_items SET stem = %s, options = %s, correct_option = %s, rubric = %s WHERE tenant_id = %s AND id = %s",
+        cur.execute("""UPDATE quiz_items SET stem = %s, options = %s, correct_option = %s, rubric = %s, edited_by_card_id = %s, edited_by_person_id = %s
+                        WHERE tenant_id = %s AND id = %s""",
                     (stem, Jsonb(options) if row["kind"] == "mcq" else None, correct_option if row["kind"] == "mcq" else None,
-                     Jsonb(rubric) if row["kind"] == "open" else None, ctx.tenant_id, question_id))
+                     Jsonb(rubric) if row["kind"] == "open" else None, ctx.card_id, ctx.person_id, ctx.tenant_id, question_id))
         write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="quiz:edit", reason_code="QUESTION_EDITED",
                     resource_type="quiz_item", resource_id=question_id, request_id=ctx.request_id)
 
@@ -169,11 +193,14 @@ def start_attempt(db: Database, ctx: ServiceContext, job_role: str, seed: int | 
     return {"id": attempt["id"], "expires_at": attempt["expires_at"].isoformat(), "questions": questions}
 
 
-def _settings_full(cur: psycopg.Cursor[Any], tenant_id: str) -> dict[str, Any]:
+def settings_full(cur: psycopg.Cursor[Any], tenant_id: str) -> dict[str, Any]:
     cur.execute("SELECT * FROM knowledge_settings WHERE tenant_id = %s", (tenant_id,))
     row = cur.fetchone()
     return dict(row) if row else {"quiz_questions_per_attempt": 10, "quiz_time_limit_minutes": 45, "quiz_min_questions_per_topic": 3,
                                   "quiz_show_answers_after_grading": False, "review_sla_days": 5}
+
+
+_settings_full = settings_full
 
 
 def _own_attempt(cur: psycopg.Cursor[Any], ctx: ServiceContext, attempt_id: str) -> dict[str, Any]:
@@ -231,36 +258,68 @@ def submit_attempt(db: Database, ctx: ServiceContext, attempt_id: str, gateway: 
     return _maybe_graded(db, ctx.tenant_id, attempt_id)
 
 
+class RubricGrade:
+    """What the model said about one free-text answer, with the score computed in code."""
+
+    def __init__(self, score: float, points: list[dict[str, Any]], confidence: float) -> None:
+        self.score = score
+        self.points = points
+        self.confidence = confidence
+
+
+def grade_by_rubric(gateway: Gateway | None, caller: Caller | None, question: str, rubric: list[str], text: str) -> RubricGrade | None:
+    """Asks the model which rubric points the answer meets; the score is computed HERE: a point counts only if the
+    evidence the model cites is really in the answer. None = no usable grade (no AI allowed, refused, or invalid).
+    Used for open readiness questions and for scenario steps."""
+    if not text.strip() or gateway is None or caller is None:
+        return None
+    blocks = [DataBlock("QUESTION", question), *[DataBlock(f"POINT_{i}", p) for i, p in enumerate(rubric)], DataBlock("LEARNER_ANSWER", text)]
+    outcome = gateway.generate(caller, "quiz_grade", "quiz_grade", blocks)
+    result = outcome.parsed
+    if not isinstance(result, QuizGradeOutput):
+        return None
+    met = {p.point for p in result.points if p.met and 0 <= p.point < len(rubric) and p.evidence and _norm(p.evidence) in _norm(text)}
+    score = len(met) / len(rubric) if rubric else 0.0
+    # what is stored and later shown says "met" only for points the CODE counted, not for every point the model claimed
+    return RubricGrade(score, [{**p.model_dump(), "met": p.point in met} for p in result.points], result.confidence)
+
+
+def open_grading_task(cur: psycopg.Cursor[Any], tenant_id: str, subject_type: str, answer_id: str, department_id: str | None,
+                      owner_person_id: str | None, sla_days: int) -> None:
+    """An answer the model could not grade, or graded with low confidence, waits for a person. One open task per answer."""
+    cur.execute(
+        """INSERT INTO review_tasks (tenant_id, kind, subject_type, subject_id, department_id, sensitivity, owner_person_id, priority, due_at)
+           VALUES (%s, 'grading_override', %s, %s, %s, 0, %s, 30, now() + make_interval(days => %s)) ON CONFLICT DO NOTHING""",
+        (tenant_id, subject_type, answer_id, department_id, owner_person_id, sla_days))
+
+
+def close_grading_task(cur: psycopg.Cursor[Any], tenant_id: str, subject_type: str, answer_id: str, card_id: str) -> None:
+    cur.execute("""UPDATE review_tasks SET status = 'resolved', resolved_at = now(), resolved_by_card_id = %s, resolution = 'overridden',
+                          assigned_to_card_id = NULL WHERE tenant_id = %s AND subject_type = %s AND subject_id = %s
+                      AND status IN ('open', 'assigned')""", (card_id, tenant_id, subject_type, answer_id))
+
+
+def needs_a_person(grade: RubricGrade | None) -> bool:
+    """No usable grade, or one the model itself was unsure about."""
+    return grade is None or grade.confidence < LOW_GRADING_CONFIDENCE
+
+
 def _grade_open(db: Database, ctx: ServiceContext, ans: dict[str, Any], gateway: Gateway | None, caller: Caller | None, sla: int) -> None:
     rubric: list[str] = list(ans["rubric"] or [])
     text = ans["answer_text"] or ""
-    result = None
-    if text.strip() and gateway is not None and caller is not None:
-        blocks = [DataBlock("QUESTION", ans["stem"]), *[DataBlock(f"POINT_{i}", p) for i, p in enumerate(rubric)],
-                  DataBlock("LEARNER_ANSWER", text)]
-        outcome = gateway.generate(caller, "quiz_grade", "quiz_grade", blocks)
-        if isinstance(outcome.parsed, QuizGradeOutput):
-            result = outcome.parsed
+    result = grade_by_rubric(gateway, caller, ans["stem"], rubric, text)
     with db.tenant_tx(ctx.tenant_id) as cur:
         if not text.strip():
             cur.execute("UPDATE quiz_answers SET final_score = 0, decided_by = 'auto', auto_score = 0, graded_at = now() WHERE tenant_id = %s AND id = %s",
                         (ctx.tenant_id, ans["id"]))
             return
-        task = result is None
         if result is not None:
-            # code computes the score; a point counts only if the cited evidence is really in the answer
-            met = {p.point for p in result.points if p.met and 0 <= p.point < len(rubric) and p.evidence and _norm(p.evidence) in _norm(text)}
-            score = len(met) / len(rubric) if rubric else 0.0
             cur.execute(
                 """UPDATE quiz_answers SET ai_score = %s, ai_rubric_result = %s, ai_confidence = %s, final_score = %s, decided_by = 'ai', graded_at = now()
                     WHERE tenant_id = %s AND id = %s""",
-                (score, Jsonb([p.model_dump() for p in result.points]), result.confidence, score, ctx.tenant_id, ans["id"]))
-            task = result.confidence < LOW_GRADING_CONFIDENCE
-        if task:
-            cur.execute(
-                """INSERT INTO review_tasks (tenant_id, kind, subject_type, subject_id, department_id, sensitivity, owner_person_id, priority, due_at)
-                   VALUES (%s, 'grading_override', 'quiz_answer', %s, %s, 0, %s, 30, now() + make_interval(days => %s)) ON CONFLICT DO NOTHING""",
-                (ctx.tenant_id, ans["id"], ans["department_id"], ans["owner"], sla))
+                (result.score, Jsonb(result.points), result.confidence, result.score, ctx.tenant_id, ans["id"]))
+        if needs_a_person(result):
+            open_grading_task(cur, ctx.tenant_id, "quiz_answer", ans["id"], ans["department_id"], ans["owner"], sla)
 
 
 def _maybe_graded(db: Database, tenant_id: str, attempt_id: str) -> dict[str, Any]:
@@ -278,6 +337,13 @@ def override(db: Database, ctx: ServiceContext, answer_id: str, score: float) ->
     if not 0 <= score <= 1:
         raise ItemRefused("bad_score", 400)
     with db.tenant_tx(ctx.tenant_id) as cur:
+        # Nobody decides their own grade (a card may hold both the right to take tests and the right to grade).
+        cur.execute("""SELECT a.learner_card_id::text AS learner_card, a.learner_person_id::text AS learner
+                         FROM quiz_answers qa JOIN quiz_attempts a ON a.tenant_id = qa.tenant_id AND a.id = qa.attempt_id
+                        WHERE qa.tenant_id = %s AND qa.id = %s""", (ctx.tenant_id, answer_id))
+        mine = cur.fetchone()
+        if mine is not None and (mine["learner_card"] == ctx.card_id or (ctx.person_id is not None and mine["learner"] == ctx.person_id)):
+            raise ItemRefused("own_attempt")
         cur.execute("""UPDATE quiz_answers qa SET final_score = %s, decided_by = 'reviewer', overridden_by_card_id = %s, graded_at = now()
                          FROM quiz_attempts a WHERE a.tenant_id = qa.tenant_id AND a.id = qa.attempt_id AND a.status IN ('submitted', 'graded')
                           AND qa.tenant_id = %s AND qa.id = %s RETURNING qa.attempt_id::text AS attempt_id""",
@@ -285,9 +351,7 @@ def override(db: Database, ctx: ServiceContext, answer_id: str, score: float) ->
         row = cur.fetchone()
         if row is None:
             raise ItemRefused("not_found", 404)
-        cur.execute("""UPDATE review_tasks SET status = 'resolved', resolved_at = now(), resolved_by_card_id = %s, resolution = 'overridden',
-                              assigned_to_card_id = NULL WHERE tenant_id = %s AND subject_type = 'quiz_answer' AND subject_id = %s
-                          AND status IN ('open', 'assigned')""", (ctx.card_id, ctx.tenant_id, answer_id))
+        close_grading_task(cur, ctx.tenant_id, "quiz_answer", answer_id, ctx.card_id)
         write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="quiz:override", reason_code="GRADE_OVERRIDDEN",
                     resource_type="quiz_answer", resource_id=answer_id, request_id=ctx.request_id)
     return _maybe_graded(db, ctx.tenant_id, row["attempt_id"])

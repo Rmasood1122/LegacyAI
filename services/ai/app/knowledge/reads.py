@@ -149,6 +149,8 @@ def get_attempt(db: Database, ctx: ServiceContext, attempt_id: str) -> dict[str,
                 q["correct_option"] = order.index(r["correct_option"])
             questions.append(q)
     a["questions"] = questions
+    # said in so many words: the API forwards the correct options only when this is true AND the attempt is graded
+    a["answers_released"] = bool(show and a["status"] == "graded")
     return a
 
 

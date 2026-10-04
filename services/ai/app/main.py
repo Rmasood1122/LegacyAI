@@ -27,7 +27,7 @@ from app.ai_gateway import Caller, ChatProvider, Embedder, FakeProvider, Gateway
 from app.ai_gateway.remote import AnthropicProvider, OpenAIProvider
 from app.capture import ingest, interviews, topics, withdrawal
 from app.capture.gaps import gap_report
-from app.knowledge import analytics, answers, expert, graph, items, quality, readiness, reads, upkeep
+from app.knowledge import analytics, answers, expert, graph, items, quality, readiness, reads, scenarios, upkeep
 from app.platform import (
     ConfigError,
     Database,
@@ -187,6 +187,42 @@ class AnswerSave(Body):
 
 class Override(Body):
     score: float = Field(ge=0, le=1)
+
+
+class ScenarioStepIn(Body):
+    prompt: str = Field(min_length=1, max_length=1000)
+    item_ids: list[Uuid] = Field(min_length=1, max_length=5)
+    rubric: list[Annotated[str, Field(min_length=1, max_length=300)]] = Field(min_length=1, max_length=6)
+
+
+class ScenarioWrite(Body):
+    title: str = Field(min_length=1, max_length=200)
+    situation: str = Field(min_length=1, max_length=2000)
+    job_role: str = Field(min_length=1, max_length=120)
+    steps: list[ScenarioStepIn] = Field(min_length=1, max_length=10)
+    # for an edit: the version the editor read (refused if the scenario changed since)
+    updated_at: str | None = Field(default=None, max_length=40)
+
+
+class ScenarioStatus(Body):
+    status: Literal["approved", "retired"]
+    updated_at: str | None = Field(default=None, max_length=40)      # the version the approver read
+
+
+class ScenarioList(Body):
+    status: Literal["draft", "approved", "retired"] | None = None
+    limit: int = Field(default=50, ge=1, le=50)
+    after: Uuid | None = None
+
+
+class ScenarioAnswerSave(Body):
+    position: int = Field(ge=1, le=10)
+    answer_text: str | None = Field(default=None, max_length=4000)
+
+
+class ScenarioAttemptList(Body):
+    limit: int = Field(default=25, ge=1, le=50)
+    before: Uuid | None = None
 
 
 class ItemList(Body):
@@ -608,6 +644,76 @@ def create_app(services: Services | None = None) -> FastAPI:
     @app.post("/internal/readiness/reports/{attempt_id}")
     def quiz_report(attempt_id: str, ctx: Annotated[ServiceContext, Depends(token("quiz.report", "attempt_id"))]) -> dict[str, Any]:
         return readiness.report(svc().db, ctx, attempt_id)
+
+    # ------------------------------------------------------------------ scenario replay (feature 8)
+    @app.post("/internal/scenarios")
+    def scenario_create(body: ScenarioWrite, ctx: Annotated[ServiceContext, Depends(token("scenario.write"))]) -> dict[str, Any]:
+        return scenarios.create(svc().db, ctx, body.title, body.situation, body.job_role, [s.model_dump() for s in body.steps])
+
+    @app.post("/internal/scenarios/list")
+    def scenario_list(body: ScenarioList, ctx: Annotated[ServiceContext, Depends(token("scenario.list"))]) -> dict[str, Any]:
+        return scenarios.list_scenarios(svc().db, ctx, status=body.status, limit=body.limit, after=body.after)
+
+    @app.post("/internal/scenarios/offered")
+    def scenario_offered(ctx: Annotated[ServiceContext, Depends(token("scenario.offered"))]) -> dict[str, Any]:
+        return scenarios.list_offered(svc().db, ctx)
+
+    @app.post("/internal/scenarios/rubric")
+    def scenario_rubric(ctx: Annotated[ServiceContext, Depends(token("scenario.rubric"))]) -> dict[str, Any]:
+        s = svc()
+        caller = caller_of(ctx)
+        if caller is None:
+            raise Refused("ai_unavailable", 503)
+        return scenarios.propose_rubric(s.db, ctx, s.gateway, caller)
+
+    @app.post("/internal/scenarios/{scenario_id}/read")
+    def scenario_read(scenario_id: str, ctx: Annotated[ServiceContext, Depends(token("scenario.read", "scenario_id"))]) -> dict[str, Any]:
+        return scenarios.get_scenario(svc().db, ctx, scenario_id)
+
+    @app.post("/internal/scenarios/{scenario_id}/edit")
+    def scenario_edit(scenario_id: str, body: ScenarioWrite,
+                      ctx: Annotated[ServiceContext, Depends(token("scenario.edit", "scenario_id"))]) -> dict[str, Any]:
+        return scenarios.update(svc().db, ctx, scenario_id, body.title, body.situation, body.job_role, [s.model_dump() for s in body.steps],
+                                body.updated_at)
+
+    @app.post("/internal/scenarios/{scenario_id}/status")
+    def scenario_status(scenario_id: str, body: ScenarioStatus,
+                        ctx: Annotated[ServiceContext, Depends(token("scenario.status", "scenario_id"))]) -> dict[str, Any]:
+        return scenarios.set_status(svc().db, ctx, scenario_id, body.status, body.updated_at)
+
+    @app.post("/internal/scenarios/{scenario_id}/attempts")
+    def scenario_start(scenario_id: str, ctx: Annotated[ServiceContext, Depends(token("scenario.start", "scenario_id"))]) -> dict[str, Any]:
+        return scenarios.start_attempt(svc().db, ctx, scenario_id)
+
+    @app.post("/internal/scenario-attempts/list")
+    def scenario_attempts(body: ScenarioAttemptList, ctx: Annotated[ServiceContext, Depends(token("scenario.attempts"))]) -> dict[str, Any]:
+        return scenarios.list_attempts(svc().db, ctx, limit=body.limit, before=body.before)
+
+    @app.post("/internal/scenario-attempts/{attempt_id}/read")
+    def scenario_attempt_read(attempt_id: str,
+                              ctx: Annotated[ServiceContext, Depends(token("scenario.attempt_read", "attempt_id"))]) -> dict[str, Any]:
+        return scenarios.get_attempt(svc().db, ctx, attempt_id)
+
+    @app.post("/internal/scenario-attempts/{attempt_id}/answers")
+    def scenario_answer(attempt_id: str, body: ScenarioAnswerSave,
+                        ctx: Annotated[ServiceContext, Depends(token("scenario.answer", "attempt_id"))]) -> dict[str, Any]:
+        scenarios.save_answer(svc().db, ctx, attempt_id, body.position, body.answer_text)
+        return {"id": attempt_id, "position": body.position}
+
+    @app.post("/internal/scenario-attempts/{attempt_id}/submit")
+    def scenario_submit(attempt_id: str, ctx: Annotated[ServiceContext, Depends(token("scenario.submit", "attempt_id"))]) -> dict[str, Any]:
+        s = svc()
+        caller = caller_of(ctx)
+        return scenarios.submit_attempt(s.db, ctx, attempt_id, s.gateway if caller else None, caller)
+
+    @app.post("/internal/scenario-answers/{answer_id}/override")
+    def scenario_override(answer_id: str, body: Override,
+                          ctx: Annotated[ServiceContext, Depends(token("scenario.override", "answer_id"))]) -> dict[str, Any]:
+        return scenarios.override(svc().db, ctx, answer_id, body.score)
+
+    @app.post("/internal/scenario-answers/{answer_id}/read")
+    def scenario_answer_read(answer_id: str, ctx: Annotated[ServiceContext, Depends(token("scenario.answer_read", "answer_id"))]) -> dict[str, Any]:
+        return scenarios.answer_for_grading(svc().db, ctx, answer_id)
 
     # ------------------------------------------------------------------ consent withdrawal, step 2 (feature 19)
     @app.post("/internal/consents/{consent_id}/erase")

@@ -12,6 +12,7 @@ import { adminRoutes, knowledgePolicySettings } from './internal/routes-admin.ts
 import { insightRoutes } from './internal/routes-insight.ts';
 import { knowledgeRoutes } from './internal/routes-knowledge.ts';
 import { qualityRoutes } from './internal/routes-quality.ts';
+import { scenarioRoutes } from './internal/routes-scenarios.ts';
 import { workflowRoutes } from './internal/routes-workflow.ts';
 
 export { TOKEN_LIFETIME_SECONDS } from './internal/client.ts';
@@ -42,7 +43,7 @@ export function createKnowledgeGateway(deps: KnowledgeGatewayDeps): KnowledgeGat
   deps.authorizer.useKnowledgeSettings(knowledgePolicySettings);
   const g = { db: deps.db, authorizer: deps.authorizer, ai, notifier: deps.notifier, rateLimiter: deps.rateLimiter };
   return {
-    routes: [...knowledgeRoutes(g), ...workflowRoutes(g), ...adminRoutes(g), ...qualityRoutes(g), ...insightRoutes(g)],
+    routes: [...knowledgeRoutes(g), ...workflowRoutes(g), ...adminRoutes(g), ...qualityRoutes(g), ...insightRoutes(g), ...scenarioRoutes(g)],
     personHoldings: personHoldingsLoader(deps.authorizer),
   };
 }

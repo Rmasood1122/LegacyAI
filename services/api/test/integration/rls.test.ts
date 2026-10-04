@@ -73,7 +73,7 @@ describe('every tenant table has forced row-level security', () => {
     const scoped = rows.filter((r) => !exempt.has(r.table));
     // 24 from Phase 1 + 25 from Phase 2 (docs/phase2/02) + 6 from Phase 4 (answer_feedback, knowledge_item_conflicts,
     // anomaly_settings, card_anomaly_counters, person_leaving, retirement_nudges)
-    expect(scoped.length).toBe(55);
+    expect(scoped.length).toBe(60);   // + 5 for scenario replay (scenarios, steps, step items, attempts, answers)
     for (const r of scoped) {
       expect(r, `table ${r.table}`).toMatchObject({ enabled: true, forced: true });
       expect(r.policies, `table ${r.table} has no policy`).toBeGreaterThanOrEqual(1);
@@ -236,15 +236,18 @@ const OUR_FUNCTIONS = [
   'ai_usage_ledger_guard', 'app_current_tenant', 'audit_field', 'audit_log_chain', 'audit_log_reject_change',
   'audit_write', 'cards_enforce_lifecycle', 'cards_register_directory', 'chunks_count', 'chunks_guard',
   'citations_guard', 'consent_is_valid', 'consents_guard', 'consents_hide_on_withdrawal', 'erase_version', 'expert_questions_guard',
-  'interviews_guard', 'knowledge_items_end_conflicts', 'knowledge_items_guard', 'knowledge_versions_immutable', 'purge_login_attempts',
-  'quiz_attempts_guard', 'quiz_items_guard', 'relabel', 'resolve_card', 'review_tasks_guard', 'sources_guard',
+  'interviews_guard', 'knowledge_items_end_conflicts', 'knowledge_items_guard', 'knowledge_items_touch_scenarios', 'knowledge_versions_immutable',
+  'purge_login_attempts', 'quiz_attempts_guard', 'quiz_items_guard', 'relabel', 'resolve_card', 'review_tasks_guard',
+  'scenario_attempts_guard', 'scenario_is_hidden', 'scenario_parts_guard', 'scenarios_guard', 'sources_guard',
   'topics_delete_guard', 'topics_guard',
 ];
 const OUR_DEFINER_FUNCTIONS = [
   'audit_log_chain', 'audit_write', 'cards_register_directory', 'chunks_count', 'consents_hide_on_withdrawal', 'erase_version',
   // knowledge_items_end_conflicts: runs with the owner's rights so that a consent withdrawal recorded from any
   // session also removes the conflict excerpts of the items it hides (same reason as consents_hide_on_withdrawal)
-  'knowledge_items_end_conflicts', 'knowledge_items_guard', 'purge_login_attempts', 'resolve_card', 'sources_guard',
+  // knowledge_items_touch_scenarios: the same reason - a withdrawal or a re-labelling recorded from any session also
+  // takes the scenarios built on that item out of use (it hides them; their words are erased by the erasure step)
+  'knowledge_items_end_conflicts', 'knowledge_items_guard', 'knowledge_items_touch_scenarios', 'purge_login_attempts', 'resolve_card', 'sources_guard',
 ];
 
 describe('SECURITY DEFINER functions cannot be hijacked', () => {

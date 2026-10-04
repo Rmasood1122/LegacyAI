@@ -122,6 +122,31 @@ const DEFAULTS: Record<string, Answer> = {
   'quiz.answer': (c) => ({ id: c.claims.subject, position: c.body.position }),
   'quiz.submit': (c) => ({ id: c.claims.subject, status: 'graded' }),
   'quiz.override': () => ({ id: id(), status: 'graded' }),
+  // scenario replay (feature 8)
+  'scenario.write': () => ({ id: id(), status: 'draft' }),
+  'scenario.list': () => ({ items: [], next_cursor: null }),
+  'scenario.offered': () => ({ items: [] }),
+  'scenario.rubric': () => ({ rubric: ['Stop the machine first'] }),
+  'scenario.read': (c) => ({
+    id: c.claims.subject, title: 'Synthetic scenario', situation: 'Synthetic situation', job_role: 'Operator', status: 'draft', flag_reason: null,
+    written_by_me: false, created_at: now(), updated_at: now(), approved_at: null, has_attempts: false, steps: [],
+  }),
+  'scenario.edit': (c) => ({ id: c.claims.subject, status: 'draft' }),
+  'scenario.status': (c) => ({ id: c.claims.subject, status: c.body?.status ?? 'approved' }),
+  'scenario.start': (c) => ({ id: id(), scenario_id: c.claims.subject, title: 'Synthetic scenario', situation: 'Synthetic situation', expires_at: now(), steps: [] }),
+  'scenario.attempts': () => ({ items: [], next_cursor: null }),
+  'scenario.attempt_read': (c) => ({
+    id: c.claims.subject, scenario_id: id(), title: 'Synthetic scenario', situation: 'Synthetic situation', job_role: 'Operator',
+    learner_person_id: c.claims.person_id ?? id(), status: 'in_progress', started_at: now(), expires_at: now(), submitted_at: null, graded_at: null, steps: [],
+  }),
+  'scenario.answer': (c) => ({ id: c.claims.subject, position: c.body?.position ?? 1 }),
+  'scenario.submit': (c) => ({ id: c.claims.subject, status: 'graded' }),
+  'scenario.override': () => ({ id: id(), status: 'graded' }),
+  'scenario.answer_read': (c) => ({
+    id: c.claims.subject, attempt_id: id(), scenario_title: 'Synthetic scenario', position: 1, prompt: 'Synthetic step', answer_text: 'Synthetic answer',
+    awaiting_person: true, details_removed: false, final_score: null, decided_by: null, ai_score: null, ai_confidence: null,
+    points: [{ text: 'Stop the machine first', met: null }],
+  }),
   'quiz.report': (c) => ({
     attempt_id: c.claims.subject, learner_person_id: id(), job_role: 'Synthetic role', status: 'graded', started_at: now(), submitted_at: now(),
     graded_at: now(), bank_size: 1, statement: 'This report shows how one person answered one set of questions on one occasion.', topics: [], coverage_gaps: [],
