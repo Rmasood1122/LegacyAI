@@ -66,6 +66,8 @@ export const ROUTES = {
   topics: { path: '/topics', label: 'Topics', requiredOperation: 'listTopics', alsoRequires: ['createTopic'], menu: 'manage' },
   gaps: { path: '/gaps', label: 'Job roles and gaps', requiredOperation: 'getGapReport', menu: 'manage' },
   people: { path: '/people', label: 'People', requiredOperation: 'listPeople', alsoRequires: ['createPerson'], menu: 'manage' },
+  // Every card may read its OWN radar entry from the API; the screen is for the people who manage people.
+  radar: { path: '/retirement-radar', label: 'Retirement radar', requiredOperation: 'getRetirementRadar', alsoRequires: ['setLeavingDate'], menu: 'manage' },
   cards: { path: '/cards', label: 'Cards', requiredOperation: 'listCards', alsoRequires: ['issueCard'], menu: 'manage' },
   card: { path: '/cards/:cardId', requiredOperation: 'getCard' },
   // Experts and Successors hold the consent-reading right for their OWN records (and may read their own person), so

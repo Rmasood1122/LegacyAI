@@ -1,15 +1,16 @@
 // People, departments and cards: reading and changing them, without any markup.
 import { useActivePeople, useApiList, useApiMutation, useApiQuery } from '../../api/context.tsx';
-import type { Card, OperationTypes, Restriction } from '../../api/generated.ts';
+import type { Card, LeavingDate, OperationTypes, Restriction } from '../../api/generated.ts';
 import type { BadgeTone } from '../../ui/index.tsx';
 
 const PEOPLE_CHANGED = ['listPeople', 'getPerson'] as const;
-const CARD_CHANGED = ['listCards', 'getCard', 'listCardEvents', 'listCardRoles', 'getCardRestrictions'] as const;
+const CARD_CHANGED = ['listCards', 'getCard', 'listCardEvents', 'listCardRoles', 'getCardRestrictions', 'listAnomalyEvents'] as const;
 
 export type PersonStatus = 'active' | 'departed';
 export const usePeopleList = (status: PersonStatus) => useApiList('listPeople', { query: { status, limit: 50 } });
 export const useCreatePerson = () => useApiMutation('createPerson', PEOPLE_CHANGED);
-export const useUpdatePerson = () => useApiMutation('updatePerson', PEOPLE_CHANGED);
+// a person who has left, or whose name changed, changes the retirement radar too
+export const useUpdatePerson = () => useApiMutation('updatePerson', [...PEOPLE_CHANGED, 'getRetirementRadar']);
 export const useDepartments = ({ enabled = true }: { enabled?: boolean } = {}) => useApiQuery('listDepartments', undefined, { enabled });
 export const useCreateDepartment = () => useApiMutation('createDepartment', ['listDepartments']);
 
@@ -31,6 +32,31 @@ export const useRemoveRole = () => useApiMutation('removeCardRole', CARD_CHANGED
 export const useCardRestrictions = (cardId: string, { enabled }: { enabled: boolean }) => useApiQuery('getCardRestrictions', { path: { card_id: cardId } }, { enabled });
 export const useSaveRestrictions = () => useApiMutation('putCardRestrictions', CARD_CHANGED);
 export const useCardEvents = (cardId: string, { enabled }: { enabled: boolean }) => useApiList('listCardEvents', { path: { card_id: cardId }, query: { limit: 25 } }, { enabled });
+// Retirement radar (feature 11): a leaving date is personal data; it is read and changed one person at a time.
+const LEAVING_CHANGED = ['getLeavingDate', 'getRetirementRadar'] as const;
+export const useLeavingDate = (personId: string) => useApiQuery('getLeavingDate', { path: { person_id: personId } });
+export const useSetLeavingDate = () => useApiMutation('setLeavingDate', LEAVING_CHANGED);
+export const useClearLeavingDate = () => useApiMutation('clearLeavingDate', LEAVING_CHANGED);
+/** People who leave in less than 24 months, a page at a time. */
+export const useRetirementRadar = () => useApiList('getRetirementRadar', { query: { limit: 50 } });
+export type LeavingStage = LeavingDate['stage'];
+export const leavingStageText = (stage: LeavingStage): string =>
+  (stage === 6 ? 'Less than six months' : stage === 12 ? 'Less than a year' : stage === 24 ? 'Less than two years' : 'Two years or more away');
+export const leavingStageTone = (stage: LeavingStage): BadgeTone => (stage === 6 ? 'danger' : stage === 12 ? 'warning' : 'info');
+export const monthsText = (months: number | null): string =>
+  (months === null ? '' : months === 0 ? 'less than a month' : months === 1 ? 'about 1 month' : `about ${months} months`);
+
+// Anomaly lock (feature 5): the recent times a rule fired.
+export const useAnomalyEvents = ({ enabled }: { enabled: boolean }) => useApiList('listAnomalyEvents', { query: { limit: 25 } }, { enabled });
+export const ANOMALY_RULE_TEXT: Readonly<Record<'denials' | 'second_address' | 'unknown', string>> = {
+  denials: 'Many refused actions in a short time',
+  second_address: 'Sign-in from a second network address',
+  unknown: 'A rule this screen does not know',
+};
+/** Why a card is locked, in plain words. */
+export const lockReasonText = (reason: Card['lock_reason']): string =>
+  (reason === 'anomaly' ? 'Locked by an anomaly rule' : reason === 'admin' ? 'Locked by an administrator' : 'Locked after wrong codes');
+
 /** People a card can be issued to. */
 export const useCardHolders = useActivePeople;
 

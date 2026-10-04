@@ -4,9 +4,10 @@
 // short-lived service token (docs/phase2/01). Other modules may import ONLY from this file.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Authorizer } from '../identity-access/index.ts';
+import type { Authorizer, PersonHoldingsLoader } from '../identity-access/index.ts';
 import type { Config, Database, Notifier, RouteDef } from '../platform/index.ts';
 import { AiServiceClient, loadInternalContract } from './internal/client.ts';
+import { personHoldingsLoader } from './internal/holdings.ts';
 import { adminRoutes, knowledgePolicySettings } from './internal/routes-admin.ts';
 import { knowledgeRoutes } from './internal/routes-knowledge.ts';
 import { qualityRoutes } from './internal/routes-quality.ts';
@@ -27,6 +28,8 @@ export interface KnowledgeGatewayDeps {
 
 export interface KnowledgeGateway {
   routes: RouteDef[];
+  /** For the identity module's retirement radar (plugged in by app.ts): what is held from a person, narrowed by the asking card's rights. */
+  personHoldings: PersonHoldingsLoader;
 }
 
 export function createKnowledgeGateway(deps: KnowledgeGatewayDeps): KnowledgeGateway {
@@ -35,5 +38,8 @@ export function createKnowledgeGateway(deps: KnowledgeGatewayDeps): KnowledgeGat
   // The policy decision point needs two of this module's settings; it is given a way to read them.
   deps.authorizer.useKnowledgeSettings(knowledgePolicySettings);
   const g = { db: deps.db, authorizer: deps.authorizer, ai, notifier: deps.notifier };
-  return { routes: [...knowledgeRoutes(g), ...workflowRoutes(g), ...adminRoutes(g), ...qualityRoutes(g)] };
+  return {
+    routes: [...knowledgeRoutes(g), ...workflowRoutes(g), ...adminRoutes(g), ...qualityRoutes(g)],
+    personHoldings: personHoldingsLoader(deps.authorizer),
+  };
 }

@@ -3,11 +3,12 @@ import { useState, type FormEvent } from 'react';
 import type { KTopic } from '../../api/generated.ts';
 import { useSession } from '../../session/session.tsx';
 import { Badge, Banner, Button, Card, ConfirmButton, DataTable, Empty, ErrorNote, Loading, Page, PartialListNote, SelectField, TextArea, TextField } from '../../ui/index.tsx';
-import { useCreateTopic, useReadyDocuments, useSuggestTopics, useTopicList, useUpdateTopic, type TopicStatus } from './hooks.ts';
+import { useApplyTemplate, useCreateTopic, useReadyDocuments, useSuggestTopics, useTopicList, useTopicTemplates, useUpdateTopic, type TopicStatus } from './hooks.ts';
 
 const STATUS_TEXT: Readonly<Record<TopicStatus, string>> = { active: 'In use', proposed: 'Suggested — not yet accepted', retired: 'Retired' };
 
 export function TopicsScreen() {
+  const { can } = useSession();
   const [status, setStatus] = useState<TopicStatus>('active');
   const topics = useTopicList(status);
   const update = useUpdateTopic();
@@ -16,6 +17,7 @@ export function TopicsScreen() {
   return (
     <Page title="Topics" intro="Topics say what a job role needs to know. Interviews, the gap report and the readiness test are all built on them.">
       <NewTopic />
+      {can('listTopicTemplates') && can('applyTopicTemplate') && <Templates />}
       <SuggestFromDocument />
       <h2>The list</h2>
       <SelectField label="Show" value={status} onChange={(e) => setStatus(e.target.value as TopicStatus)}>
@@ -46,6 +48,47 @@ export function TopicsScreen() {
       ))}
       {topics.hasMore && <PartialListNote shown={items.length} noun="topics" busy={topics.isLoadingMore} onLoadMore={topics.loadMore} />}
     </Page>
+  );
+}
+
+/** Ready-made topics and job roles for a kind of department: look, then add. Nothing that exists is changed. */
+function Templates() {
+  const templates = useTopicTemplates({ enabled: true });
+  const apply = useApplyTemplate();
+  const [key, setKey] = useState('');
+  const chosen = templates.data?.items.find((t) => t.key === key);
+  const result = apply.data;
+  return (
+    <Card title="Start from a department template">
+      <p className="muted">
+        Generic starting points written by LegacyAI, not checked by an expert in your industry. Adding one creates its topics and job roles;
+        you then rename, remove and add as it fits. Topics you already have are kept as they are.
+      </p>
+      <ErrorNote error={templates.error ?? apply.error} />
+      <SelectField label="Kind of department" value={key} onChange={(e) => { setKey(e.target.value); apply.reset(); }}>
+        <option value="">Choose a template…</option>
+        {(templates.data?.items ?? []).map((t) => <option key={t.key} value={t.key}>{t.name}</option>)}
+      </SelectField>
+      {chosen !== undefined && (
+        <>
+          <p>{chosen.summary}</p>
+          <DataTable caption={`Topics of the template ${chosen.name}`} columns={['Topic', 'What it covers']}>
+            {chosen.topics.map((t) => <tr key={t.key}><td>{t.name}</td><td>{t.description}</td></tr>)}
+          </DataTable>
+          <p>Job roles: {chosen.roles.map((r) => `${r.job_role} (${r.topics.length} topics)`).join('; ')}.</p>
+          <ConfirmButton resetKey={key} variant="primary" label={`Add the ${chosen.topics.length} topics and ${chosen.roles.length} job roles`}
+            confirmLabel={`Yes, add the template “${chosen.name}”`} busy={apply.isPending}
+            onConfirm={() => apply.mutate({ path: { template_key: chosen.key } })} />
+        </>
+      )}
+      {result !== undefined && result.template_key === key && (
+        <Banner tone="success" title="The template was added">
+          {result.topics_created} new {result.topics_created === 1 ? 'topic' : 'topics'}; {result.topics_existing} existed already and were kept;
+          {' '}{result.links_created} job-role links added{result.links_existing > 0 ? `, ${result.links_existing} were there already` : ''}.
+          {result.topics_skipped > 0 && ` ${result.topics_skipped} could not be used (a topic of that name is retired, or you may not read it).`}
+        </Banner>
+      )}
+    </Card>
   );
 }
 

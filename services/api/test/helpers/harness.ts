@@ -6,7 +6,7 @@ import { createHash, createSign, generateKeyPairSync, randomBytes, randomUUID, t
 import { generate as totpGenerate } from 'otplib';
 import pg from 'pg';
 import { createApp, type App, type AppOverrides } from '../../src/app.ts';
-import { DEFAULT_AUTH_LIMITS, formatCardNumber } from '../../src/modules/identity-access/index.ts';
+import { ANOMALY_DEFAULTS, DEFAULT_AUTH_LIMITS, formatCardNumber } from '../../src/modules/identity-access/index.ts';
 import { createLogger, getSettings, loadConfig, PLATFORM_TENANT_ID, SESSION_COOKIE } from '../../src/modules/platform/index.ts';
 import { ManualClock } from '../../src/shared/clock.ts';
 import { DB_URLS, TEST_ORIGIN, TEST_RP_ID, testEnv } from './env.ts';
@@ -29,6 +29,9 @@ export async function startApp(overrides: AppOverrides = {}, env: Record<string,
     logger,
     generalLimit: HUGE,
     authLimits: { ...DEFAULT_AUTH_LIMITS, loginPerIp: HUGE, loginGlobal: HUGE },
+    // Many tests make one card collect refusals on purpose; the anomaly rules are off unless a test switches them on
+    // for its company (PATCH /v1/tenants/current/anomaly-settings) or starts the app with other defaults.
+    anomalyDefaults: { ...ANOMALY_DEFAULTS, enabled: false },
     ...overrides,
   });
   return { app, clock, logs, close: () => app.close() };

@@ -46,7 +46,8 @@ export interface IssuedSecrets {
 export type CardEventType =
   | 'issued' | 'activated' | 'login_success' | 'login_failed' | 'sc_locked' | 'unlocked' | 'suspended' | 'reinstated'
   | 'revoked' | 'expired' | 'renewed' | 'replaced' | 'role_assigned' | 'role_removed' | 'restriction_denied'
-  | 'restrictions_changed' | 'credential_added' | 'credential_removed' | 'enrollment_token_issued' | 'owner_recovered';
+  | 'restrictions_changed' | 'credential_added' | 'credential_removed' | 'enrollment_token_issued' | 'owner_recovered'
+  | 'anomaly_locked' | 'anomaly_not_locked';
 
 /**
  * Who is doing something to a card: a card of the same tenant, nobody (the system), or a
@@ -73,6 +74,17 @@ export async function isLocked(tx: Tx, cardId: string): Promise<boolean> {
   return rows[0]?.locked_at != null;
 }
 
+/** Why the card is locked ('sc_attempts', 'admin', 'anomaly'), or null when it is not. */
+async function lockReason(tx: Tx, cardId: string): Promise<string | null> {
+  const { rows } = await tx.query<{ lock_reason: string | null }>('SELECT lock_reason FROM card_auth_state WHERE card_id = $1', [cardId]);
+  return rows[0]?.lock_reason ?? null;
+}
+
+/** Per-tenant, per-transaction lock used by everything that changes roles or could leave a company without a usable Owner. */
+export async function lockTenantRoles(tx: Tx, tenantId: string): Promise<void> {
+  await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 42))', [`roles:${tenantId}`]);
+}
+
 export async function personDepartment(tx: Tx, personId: string | null): Promise<string | null> {
   if (personId === null) return null;
   const { rows } = await tx.query<{ department_id: string | null }>('SELECT department_id FROM people WHERE id = $1', [personId]);
@@ -83,12 +95,22 @@ export function maxRank(roles: readonly SubjectRole[]): number {
   return roles.reduce((m, r) => (r.rank > m ? r.rank : m), 0);
 }
 
-/** How many OTHER cards are active Company Owners. Zero means the given card is the last one. */
-export async function otherActiveOwners(tx: Tx, tenantId: string, exceptCardId: string, now: Date): Promise<number> {
+/**
+ * How many OTHER cards are USABLE Company Owner cards: a person's card that is active, in date and not locked.
+ * Zero means the given card is the last one that can act for the company. This is the ONE definition, used by
+ * everything that could leave a company without such a card (suspend, revoke, role removal, offboarding, the
+ * anomaly lock). Replacing a card is not in that list and need not be: the policy refuses replacing a card of equal
+ * rank, so no Owner can replace another Owner's card, and a replacement issues a new usable card in the same step. A locked Owner card cannot sign in, so it does not count: before Phase 4 it did, which would have let the
+ * last WORKING Owner card be suspended while a locked one was still "there".
+ */
+export async function otherUsableOwners(tx: Tx, tenantId: string, exceptCardId: string, now: Date): Promise<number> {
   const { rows } = await tx.query<{ n: string }>(
-    `SELECT count(*)::text AS n FROM cards c JOIN card_roles cr ON cr.tenant_id = c.tenant_id AND cr.card_id = c.id
+    `SELECT count(*)::text AS n
+       FROM cards c
+       JOIN card_roles cr ON cr.tenant_id = c.tenant_id AND cr.card_id = c.id
+       LEFT JOIN card_auth_state a ON a.tenant_id = c.tenant_id AND a.card_id = c.id
       WHERE c.tenant_id = $1 AND c.id <> $2 AND c.kind = 'person' AND c.state = 'active' AND c.expires_at > $3
-        AND cr.role_key = 'company_owner'`,
+        AND cr.role_key = 'company_owner' AND a.locked_at IS NULL`,
     [tenantId, exceptCardId, now],
   );
   return Number(rows[0]?.n ?? 0);
@@ -112,6 +134,7 @@ export async function toApiCard(tx: Tx, card: CardRow, now: Date): Promise<Recor
     renewal_due: card.renewal_due.toISOString(),
     renewal_count: card.renewal_count,
     locked: await isLocked(tx, card.id),
+    lock_reason: await lockReason(tx, card.id),
     replaced_by_card_id: card.replaced_by_card_id,
     replaces_card_id: card.replaces_card_id,
     roles: assigned.rows.map((r) => ({ role_key: r.role_key, department_id: r.department_id, assigned_at: r.assigned_at.toISOString() })),
@@ -389,20 +412,45 @@ export class CardService {
     return { card: current, sc, enrollmentToken: enrollment.token, enrollmentTokenExpiresAt: enrollment.expiresAt };
   }
 
+  /**
+   * THE lock: the card stops working until someone with the right to unlock it issues a new secret code. Used by
+   * the secret-code lockout and by the anomaly rules, so both leave exactly the same state behind. Returns false
+   * (and changes nothing) when the card is already locked.
+   */
+  async lock(
+    tx: Tx, card: Pick<CardRow, 'id' | 'tenant_id'>,
+    how: { reason: 'sc_attempts' | 'anomaly'; event: CardEventType; auditReason: string; details: Record<string, string | number | boolean | null> },
+    ctx: RequestContext,
+  ): Promise<boolean> {
+    await tx.query('INSERT INTO card_auth_state (tenant_id, card_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [card.tenant_id, card.id]);
+    const locked = await tx.query(
+      'UPDATE card_auth_state SET locked_at = $3, lock_reason = $4 WHERE tenant_id = $1 AND card_id = $2 AND locked_at IS NULL',
+      [card.tenant_id, card.id, ctx.now, how.reason]);
+    if (locked.rowCount === 0) return false;
+    await revokeSessionsForCard(tx, card.tenant_id, card.id, 'card_locked', ctx.now);
+    await this.event(tx, card, how.event, null, ctx, how.details);
+    await this.#audit(tx, card, 'card:lock', how.auditReason, null, ctx, how.details);
+    return true;
+  }
+
   async unlock(tx: Tx, card: CardRow, actorCardId: string, ctx: RequestContext): Promise<IssuedSecrets> {
     const state = effectiveState(card, ctx.now);
     if (card.kind !== 'person' || (state !== 'active' && state !== 'expired')) {
       throw problems.conflict('illegal-transition', `A card that is ${state} cannot be unlocked`);
     }
     if (!(await isLocked(tx, card.id))) throw problems.conflict('not-locked', 'This card is not locked');
+    // why it was locked ('sc_attempts' or 'anomaly'), for the audit trail: an unlock after an anomaly lock must be visible as such
+    const why = await lockReason(tx, card.id);
     // The old SC was forgotten or under attack, so unlocking always issues a new one.
     const sc = await this.rotateSecret(tx, card, actorCardId, ctx.now);
     await tx.query(
       'UPDATE card_auth_state SET sc_failed_count = 0, locked_at = NULL, lock_reason = NULL WHERE tenant_id = $1 AND card_id = $2',
       [card.tenant_id, card.id]);
     await revokeSessionsForCard(tx, card.tenant_id, card.id, 'sc_rotated', ctx.now);
+    // an anomaly rule starts counting from nothing again
+    await tx.query('DELETE FROM card_anomaly_counters WHERE tenant_id = $1 AND card_id = $2', [card.tenant_id, card.id]);
     await this.event(tx, card, 'unlocked', actorCardId, ctx);
-    await this.#audit(tx, card, 'card:unlock', 'CARD_UNLOCKED_SC_ROTATED', actorCardId, ctx);
+    await this.#audit(tx, card, 'card:unlock', 'CARD_UNLOCKED_SC_ROTATED', actorCardId, ctx, why === null ? {} : { reason: why });
     await this.#notifier.notify({ type: 'card_unlocked', tenantId: card.tenant_id, cardId: card.id });
     return { card, sc };
   }

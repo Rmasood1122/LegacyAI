@@ -36,6 +36,8 @@ export const ALLOWED_DETAIL_KEYS: ReadonlySet<string> = new Set([
   'department_from', 'department_to', 'interview_id', 'topic_id',
   // Phase 4 (answer feedback): the opinion and whether the question was shared - never the comment or the question
   'verdict', 'question_shared',
+  // Phase 4 (anomaly lock, retirement radar, department templates): which rule, which stage, which template
+  'rule', 'stage', 'template_key',
 ]);
 
 const FORBIDDEN_VALUE = /\b\d{16}\b/;

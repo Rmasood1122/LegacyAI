@@ -16,6 +16,7 @@ import {
   getSettings, getTenant, PLATFORM_TENANT_ID, writeAudit,
   type Database, type HandlerResult, type Notifier, type RateLimiter, type Tx,
 } from '../../platform/index.ts';
+import type { AnomalyGuard } from './anomaly.ts';
 import type { Authorizer } from './authz.ts';
 import { maskCardNumber, normalizeCardNumber } from './card-number.ts';
 import { CARD_COLUMNS, type CardRow, type CardService } from './cards.ts';
@@ -66,6 +67,7 @@ export interface AuthDeps {
   authorizer: Authorizer;
   rateLimiter: RateLimiter;
   notifier: Notifier;
+  anomaly: AnomalyGuard;
   webauthn: WebAuthnSettings;
   hmacKey: Buffer;
   limits: AuthLimits;
@@ -261,6 +263,9 @@ export class AuthService {
         await revokeSession(tx, sessionId, 'card_expired', ctx.now);
         return fail('expired', card);
       }
+      // Anomaly rule "second address" (off unless the company switched it on): this successful sign-in came from
+      // another network address while a session of the same card was in use. The card locks; this sign-in fails.
+      if (await this.#d.anomaly.signedIn(tx, { tenant_id: tenantId, card_id: card.id }, sessionId, ctx)) return fail('locked', card);
 
       await tx.query(
         `UPDATE card_auth_state SET sc_failed_count = 0, factor_failed_count = 0, factor_window_start = NULL,
@@ -313,19 +318,13 @@ export class AuthService {
     // A threshold outside 3-5 cannot come from the database (CHECK constraint); if it somehow does, use the strictest.
     const effective = Number.isInteger(threshold) && threshold >= 3 && threshold <= 5 ? threshold : 3;
     const count = state.sc_failed_count + 1;
-    const lockNow = count >= effective && state.locked_at === null;
-    await tx.query(
-      `UPDATE card_auth_state SET sc_failed_count = $3, locked_at = CASE WHEN $4 THEN $5 ELSE locked_at END,
-              lock_reason = CASE WHEN $4 THEN 'sc_attempts' ELSE lock_reason END
-        WHERE tenant_id = $1 AND card_id = $2`,
-      [card.tenant_id, card.id, count, lockNow, ctx.now]);
-    if (lockNow) {
-      await this.#d.cards.revokeSessions(tx, card, 'card_locked', ctx.now);
-      await this.#d.cards.event(tx, card, 'sc_locked', null, ctx, { count });
-      await writeAudit(tx, {
-        tenantId: card.tenant_id, actorKind: 'system', action: 'card:lock', resourceType: 'card', resourceId: card.id,
-        decision: 'event', reasonCode: 'CARD_LOCKED_SC_ATTEMPTS', requestId: ctx.requestId, ip: ctx.ip, details: { count },
-      });
+    await tx.query('UPDATE card_auth_state SET sc_failed_count = $3 WHERE tenant_id = $1 AND card_id = $2', [card.tenant_id, card.id, count]);
+    if (count < effective || state.locked_at !== null) return;
+    // The same lock an anomaly rule uses (CardService.lock). Unlike those rules, this one DOES lock the last usable
+    // Owner card (Phase 1 decision, unchanged): the secret-code lockout is the brute-force protection, and an
+    // exception for the last Owner would let whoever holds that Owner's strong factor try every secret code.
+    // Recovery is the operator's (docs/runbooks/owner-recovery.md).
+    if (await this.#d.cards.lock(tx, card, { reason: 'sc_attempts', event: 'sc_locked', auditReason: 'CARD_LOCKED_SC_ATTEMPTS', details: { count } }, ctx)) {
       await this.#d.notifier.notify({ type: 'card_locked', tenantId: card.tenant_id, cardId: card.id });
     }
   }

@@ -19,6 +19,7 @@ import { OperatorScreen } from './features/operator/OperatorScreen.tsx';
 import { CardScreen } from './features/people/CardScreen.tsx';
 import { CardsScreen } from './features/people/CardsScreen.tsx';
 import { PeopleScreen } from './features/people/PeopleScreen.tsx';
+import { RadarScreen } from './features/people/RadarScreen.tsx';
 import { AttemptScreen } from './features/readiness/AttemptScreen.tsx';
 import { QuestionBankScreen } from './features/readiness/QuestionBankScreen.tsx';
 import { ReadinessScreen } from './features/readiness/ReadinessScreen.tsx';
@@ -56,6 +57,7 @@ const COMPONENTS: Readonly<Record<ScreenKey, ComponentType>> = {
   gaps: GapsScreen,
   questionBank: QuestionBankScreen,
   people: PeopleScreen,
+  radar: RadarScreen,
   cards: CardsScreen,
   card: CardScreen,
   consentAdmin: ConsentAdminScreen,

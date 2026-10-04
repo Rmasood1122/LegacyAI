@@ -106,15 +106,15 @@ describe('the list of routes that skip the session check is short and pinned', (
     const known = new Set((await su.query('SELECT permission_key FROM permissions')).rows.map((r) => r.permission_key as string));
     await su.end();
     const session = t.app.http.registeredRoutes().filter((r) => r.kind === 'session' || r.kind === 'gateway');
-    expect(session).toHaveLength(123);
+    expect(session).toHaveLength(132);
     for (const r of session) expect(known.has(r.permission!), `${r.operationId} uses unknown permission ${r.permission}`).toBe(true);
   });
 
-  it('routes registered in the server == operations in openapi.yaml (129, no more, no fewer)', () => {
+  it('routes registered in the server == operations in openapi.yaml (138, no more, no fewer)', () => {
     const registered = t.app.http.registeredRoutes().map((r) => `${r.method} ${r.path}`).sort();
     const contract = [...t.app.http.contract.operations.values()].map((o) => `${o.method} ${o.path}`).sort();
     expect(registered).toEqual(contract);
-    expect(registered).toHaveLength(129);
+    expect(registered).toHaveLength(138);
     // and Fastify itself knows no route beyond those (HEAD/OPTIONS helpers aside)
     const printed = t.app.http.app.printRoutes({ commonPrefix: false });
     expect(printed).not.toMatch(/rogue/);
@@ -240,7 +240,7 @@ describe('a read of a whole collection must say how it is narrowed to what the c
     expect(declared).toEqual({
       listCards: 'applied', listPeople: 'applied', listConsents: 'applied', listReviewTasks: 'applied', listSources: 'applied',
       listInterviews: 'applied', listTopics: 'applied', listJobRoles: 'applied', getRoleTopics: 'applied', getRolePeople: 'applied',
-      listReadinessAttempts: 'applied',
+      listReadinessAttempts: 'applied', listAnomalyEvents: 'applied', getRetirementRadar: 'applied',
       askKnowledge: 'delegated', listKnowledgeItems: 'delegated', getGapReport: 'delegated', listExpertQuestions: 'delegated',
       listQuizQuestions: 'delegated',
       listRoles: 'unfiltered', listDepartments: 'unfiltered', listTenants: 'unfiltered', listAuditEvents: 'unfiltered',
@@ -294,7 +294,7 @@ describe('a read of a whole collection must say how it is narrowed to what the c
 });
 
 describe('real app: a card with almost no permissions cannot get a 2xx from anything it is not granted', () => {
-  it('walks all 123 protected operations as a Successor', async () => {
+  it('walks all 132 protected operations as a Successor', async () => {
     const su = await superuser();
     const granted = new Set((await su.query(`SELECT permission_key FROM role_permissions WHERE role_key = 'successor'`)).rows.map((r) => r.permission_key as string));
     await su.end();
@@ -320,6 +320,8 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
       editQuizQuestion: { stem: 'x' }, overrideQuizAnswer: { score: 1 }, recordWithdrawalForPerson: { reference: 'REF-000001' }, holdConsent: { reason: 'x' },
       assignReviewTask: {}, bulkReviewTasks: { action: 'dismiss', task_ids: [randomUUID()] }, addRedactionAllowlistTerm: { term: 'x', entity_type: 'OTHER' },
       updateKnowledgeSettings: { review_sla_days: 5 }, setTenantAiBudget: { monthly_cap_micro_usd: 1 }, setAiKillSwitch: { on: false },
+      // Phase 4, step 2
+      updateAnomalySettings: { enabled: true }, setLeavingDate: { leaving_on: '2031-06-30' },
     };
     let denied = 0;
     for (const op of t.app.http.contract.operations.values()) {
@@ -327,7 +329,8 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
       // Target a REAL resource in the same tenant (the Owner's card / the Successor's own person), so that
       // "not found" cannot be what stops the request.
       let url = op.path.replace('{card_id}', tenant.ownerCard.id).replace('{person_id}', successor.personId).replace('{tenant_id}', tenant.tenantId)
-        .replace('{role_key}', 'company_owner').replace('{export_id}', randomUUID()).replace('{credential_id}', randomUUID()).replace('{job_role}', 'x');
+        .replace('{role_key}', 'company_owner').replace('{export_id}', randomUUID()).replace('{credential_id}', randomUUID()).replace('{job_role}', 'x')
+        .replace('{template_key}', 'maintenance');
       const phase2Target = /\{[a-z_]+_id\}/.test(url);   // Phase 2 record ids are random here: "not found" is an acceptable refusal
       url = url.replace(/\{[a-z_]+_id\}/g, () => randomUUID());
       if (op.operationId === 'getGapReport') url += '?job_role=x';
@@ -342,7 +345,9 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
     // (of the five added later it reaches the job-role list, a role's topics and its own tests taken; not item topics, not a role's people).
     // Phase 4 (features 22, 23): feedback on its own answers it may give (knowledge:ask); the company's quality numbers and
     // the readers' feedback list it may not read.
-    expect(denied).toBe(28 + 57 + 2);
+    // Phase 4 (features 5, 11, 26): it may read its own leaving date, its own radar entry and its own cards' anomaly events;
+    // it may not read or change the anomaly rules, set or clear a leaving date, or read or apply department templates.
+    expect(denied).toBe(28 + 57 + 2 + 6);
   });
 });
 

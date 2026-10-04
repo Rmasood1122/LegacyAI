@@ -2,7 +2,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { StubBilling, type BillingPort } from './modules/billing/index.ts';
-import { createIdentityAccess, type AuthLimits, type IdentityAccess } from './modules/identity-access/index.ts';
+import { createIdentityAccess, type AnomalySettings, type AuthLimits, type IdentityAccess } from './modules/identity-access/index.ts';
 import { createKnowledgeGateway } from './modules/knowledge-gateway/index.ts';
 import {
   createHttpServer, createLogger, Database, ExportRegistry, LogNotifier, platformRoutes, PostgresIdempotencyStore,
@@ -17,6 +17,7 @@ export interface AppOverrides {
   rateLimiter?: RateLimiter;
   billing?: BillingPort;
   authLimits?: AuthLimits;
+  anomalyDefaults?: AnomalySettings;
   generalLimit?: { limit: number; windowSeconds: number };
 }
 
@@ -57,7 +58,7 @@ export async function createApp(config: Config, overrides: AppOverrides = {}): P
   });
 
   const identity = createIdentityAccess({
-    config, db, rateLimiter, notifier, billing: overrides.billing ?? new StubBilling(), exports, limits: overrides.authLimits,
+    config, db, rateLimiter, notifier, billing: overrides.billing ?? new StubBilling(), exports, limits: overrides.authLimits, anomalyDefaults: overrides.anomalyDefaults, log,
   });
 
   const http = await createHttpServer({
@@ -66,7 +67,10 @@ export async function createApp(config: Config, overrides: AppOverrides = {}): P
   });
   http.defineRoutes(platformRoutes({ config, db, exports }));
   http.defineRoutes(identity.routes);
-  http.defineRoutes(createKnowledgeGateway({ config, db, authorizer: identity.authorizer, notifier }).routes);
+  const knowledge = createKnowledgeGateway({ config, db, authorizer: identity.authorizer, notifier });
+  // the retirement radar (identity) shows what is held from a person; the knowledge module answers that, by its own rules
+  identity.usePersonHoldings(knowledge.personHoldings);
+  http.defineRoutes(knowledge.routes);
 
   // Every operation in openapi.yaml must have a route, and vice versa.
   const registered = new Set(http.registeredRoutes().map((r) => r.operationId));

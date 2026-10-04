@@ -167,7 +167,7 @@ export class Database {
 }
 
 /** The newest migration this build of the API expects. Checked by the readiness endpoint. */
-export const EXPECTED_SCHEMA_VERSION = '20261004000100';
+export const EXPECTED_SCHEMA_VERSION = '20261004000200';
 
 /** The LegacyAI operator tenant (seeded by the first migration). */
 export const PLATFORM_TENANT_ID = '00000000-0000-7000-8000-000000000001';

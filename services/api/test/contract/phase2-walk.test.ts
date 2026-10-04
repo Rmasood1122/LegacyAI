@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { addMember, createTenant, platformOperator, startApp, superuser, type Res, type TestApp, type TestTenant } from '../helpers/harness.ts';
 
 const REAL = process.env.AI_SERVICE_URL_REAL;
-const PHASE2_OPERATIONS = 78 + 5;   // Phase 2, plus the five quality operations of Phase 4 (features 22, 23)
+const PHASE2_OPERATIONS = 78 + 5 + 2;   // Phase 2, plus Phase 4: five quality operations (features 22, 23) and two for department templates (26)
 
 describe.skipIf(!REAL)('Phase 2 walk with the real AI service', () => {
   let t: TestApp;
@@ -231,6 +231,13 @@ describe.skipIf(!REAL)('Phase 2 walk with the real AI service', () => {
     expect(said.body.items[0].question_shared).toBe(false);
     const wrongTasks = await o.get('/v1/review/tasks?kind=answer_feedback');
     expect(wrongTasks.body.items.map((x: any) => x.subject_id)).toEqual([answer.body.answer_id]);
+
+    // department templates (feature 26): topics are created and embedded exactly as createTopic does it
+    const templates = ok('listTopicTemplates', await o.get('/v1/topic-templates'), 200);
+    expect(templates.body.items.length).toBeGreaterThanOrEqual(6);
+    const applied = ok('applyTopicTemplate', await o.post('/v1/topic-templates/warehouse/apply'), 200);
+    expect(applied.body).toMatchObject({ template_key: 'warehouse', topics_created: 6, topics_skipped: 0 });
+    expect((await o.post('/v1/topic-templates/warehouse/apply')).body).toMatchObject({ topics_created: 0, topics_existing: 6, links_created: 0 });
 
     expect(hit.size).toBe(PHASE2_OPERATIONS);
   });

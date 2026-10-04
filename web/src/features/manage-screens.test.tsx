@@ -22,7 +22,7 @@ const as = (...ops: Parameters<typeof permissionsFor>) => sessionValue(makeSessi
 const person = (n: number, name: string) => ({ id: ID(n), display_name: name, email: null, department_id: null, status: 'active' as const, created_at: T });
 const card = (over: Partial<Card> = {}): Card => ({
   id: ID(30), kind: 'person', card_number: 'LGY-0000-0000-0000-0030', state: 'active', person_id: ID(7), issued_at: T, activated_at: T, expires_at: '2099-01-01T00:00:00.000Z',
-  grace_until: '2099-02-01T00:00:00.000Z', renewal_due: '2098-12-01T00:00:00.000Z', renewal_count: 0, locked: false, replaced_by_card_id: null, replaces_card_id: null,
+  grace_until: '2099-02-01T00:00:00.000Z', renewal_due: '2098-12-01T00:00:00.000Z', renewal_count: 0, locked: false, lock_reason: null, replaced_by_card_id: null, replaces_card_id: null,
   roles: [{ role_key: 'successor', department_id: null, assigned_at: T }], ...over,
 });
 const role = (key: 'successor' | 'expert' | 'reviewer', name: string, enabled = true) => ({ role_key: key, display_name: name, rank: 1, enabled_for_tenant: enabled, permissions: [] });

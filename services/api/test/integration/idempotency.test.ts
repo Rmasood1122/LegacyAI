@@ -132,7 +132,9 @@ describe('idempotency keys', () => {
       'releaseConsentHold', 'reopenKnowledgeItem', 'replyExpertQuestion', 'restrictContribution', 'resumeInterview', 'retireKnowledgeItem',
       'retireQuizQuestion', 'revertVerifications', 'saveAttemptAnswer', 'setAiKillSwitch', 'setItemLabels', 'setItemTopics', 'setRolePeople', 'setRoleTopics',
       'setSourceLabels', 'setTenantAiBudget', 'startReadinessAttempt', 'submitKnowledgeItem', 'submitReadinessAttempt', 'suggestTopics',
-      'unassignReviewTask', 'updateKnowledgeSettings', 'updateTopic', 'verifyKnowledgeItem', 'withdrawAnswerFeedback', 'withdrawConsent', 'withdrawSource'];
+      'unassignReviewTask', 'updateKnowledgeSettings', 'updateTopic', 'verifyKnowledgeItem', 'withdrawAnswerFeedback', 'withdrawConsent', 'withdrawSource',
+      // Phase 4, step 2 (anomaly lock, retirement radar, department templates)
+      'updateAnomalySettings', 'setLeavingDate', 'clearLeavingDate', 'applyTopicTemplate'];
     for (const id of required) expect(t.app.http.contract.operations.get(id)?.idempotent, id).toBe(true);
     const actual = [...t.app.http.contract.operations.values()].filter((o) => o.idempotent).map((o) => o.operationId).sort();
     expect(actual).toEqual([...required].sort());

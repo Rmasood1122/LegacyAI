@@ -4,10 +4,38 @@ import { problems } from '../../../shared/errors.ts';
 import { decodeIdCursor, decodeNameCursor, encodeCursor, encodeNameCursor, pageOf, writeAudit, type RouteDef, type Tx } from '../../platform/index.ts';
 import { baseClaims, gatewayRoute, pick, uuidOrNull, withListFilter, type GatewayDeps } from './common.ts';
 import { collectionRef, newRef, sourceRef, topicRef } from './resources.ts';
+import { DEPARTMENT_TEMPLATES, findTemplate, type DepartmentTemplate } from './templates.ts';
 
 const TOPIC_DESCRIPTOR = { type: 'topic', tenantExpr: 'topics.tenant_id', departmentExpr: 'topics.department_id', sensitivityExpr: 'topics.sensitivity' };
 // People are narrowed by their own department (a Department Manager's gap:read is department-wide).
 const ROLE_PERSON_DESCRIPTOR = { type: 'person', tenantExpr: 'p.tenant_id', departmentExpr: 'p.department_id' };
+
+// ---- The statements that create a topic and link it to a job role: used by creating one by hand AND by applying a
+// ---- template, so both go the same way (same columns, same defaults, same search-vector step).
+interface NewTopic { name: string; description: string; department_id: string | null; sensitivity: number }
+/** Inserts an active topic. Null = a topic of that name exists already (nothing was written). */
+async function insertTopic(tx: Tx, tenantId: string, cardId: string, t: NewTopic): Promise<TopicRow | null> {
+  const { rows } = await tx.query<TopicRow>(
+    `INSERT INTO topics (tenant_id, name, description, department_id, sensitivity, origin, status, created_by_card_id)
+     VALUES ($1, $2, $3, $4, $5, 'admin', 'active', $6)
+     ON CONFLICT (tenant_id, lower(name)) DO NOTHING
+     RETURNING ${TOPIC_COLUMNS}`,
+    [tenantId, t.name, t.description, t.department_id, t.sensitivity, cardId]);
+  return rows[0] ?? null;
+}
+/** Links a topic to a job role. `replace`: an existing link takes the new values; otherwise it is left alone. Returns whether a row was written. */
+async function linkRoleTopic(
+  tx: Tx, tenantId: string, cardId: string, link: { job_role: string; topic_id: string; required: boolean; importance: number }, replace: boolean,
+): Promise<boolean> {
+  const written = await tx.query(
+    replace
+      ? `INSERT INTO role_topic_maps (tenant_id, job_role, topic_id, required, importance, created_by_card_id) VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (tenant_id, job_role, topic_id) DO UPDATE SET required = EXCLUDED.required, importance = EXCLUDED.importance`
+      : `INSERT INTO role_topic_maps (tenant_id, job_role, topic_id, required, importance, created_by_card_id) VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (tenant_id, job_role, topic_id) DO NOTHING`,
+    [tenantId, link.job_role, link.topic_id, link.required, link.importance, cardId]);
+  return written.rowCount > 0;
+}
 
 interface TopicRow { id: string; name: string; description: string; department_id: string | null; sensitivity: number; origin: string; status: string; created_at: Date }
 const toApiTopic = (r: TopicRow): Record<string, unknown> => ({
@@ -22,6 +50,13 @@ async function mustTopic(tx: Tx, tenantId: string, id: string): Promise<TopicRow
   return rows[0];
 }
 
+const TOPIC_COLUMNS = 'id, name, description, department_id, sensitivity, origin, status, created_at';
+const toApiTemplate = (t: DepartmentTemplate): Record<string, unknown> => ({
+  key: t.key, name: t.name, summary: t.summary,
+  topics: t.topics.map((x) => ({ key: x.key, name: x.name, description: x.description })),
+  roles: t.roles.map((r) => ({ job_role: r.job_role, topics: r.topics.map((l) => ({ key: l.key, required: l.required, importance: l.importance })) })),
+});
+
 /** A job role in the body is optional (so the answer of the read can be sent back); if given it must be the one in the address. */
 function sameRole(body: { job_role?: unknown }, role: string): void {
   if (body.job_role !== undefined && body.job_role !== role) throw problems.unprocessable('The job role in the body is not the one in the address');
@@ -29,6 +64,10 @@ function sameRole(body: { job_role?: unknown }, role: string): void {
 
 export function topicRoutes(deps: GatewayDeps): RouteDef[] {
   const { authorizer, ai } = deps;
+  /** The AI service gives a topic its search vector. One place, for a topic made by hand and for one from a template. */
+  const embedTopic = async (topicId: string, claims: ReturnType<typeof baseClaims>): Promise<void> => {
+    await ai.call({ path: `/internal/topics/${topicId}/embed`, action: 'topic.embed', subject: topicId, claims });
+  };
   return [
     withListFilter('delegated', gatewayRoute(deps, 'getGapReport',
       async ({ subject }) => collectionRef('gap', subject.tenant_id),
@@ -64,22 +103,14 @@ export function topicRoutes(deps: GatewayDeps): RouteDef[] {
       kind: 'gateway',
       policy: { resource: async ({ subject, body }) => newRef('topic', subject.tenant_id, { department_id: uuidOrNull(body.department_id), sensitivity: body.sensitivity ?? 0 }) },
       prepare: async ({ tx, subject, decision, ctx, body }) => {
-        let topic: TopicRow;
-        try {
-          const { rows } = await tx.query<TopicRow>(
-            `INSERT INTO topics (tenant_id, name, description, department_id, sensitivity, origin, status, created_by_card_id)
-             VALUES ($1, $2, $3, $4, $5, 'admin', 'active', $6)
-             RETURNING id, name, description, department_id, sensitivity, origin, status, created_at`,
-            [subject.tenant_id, body.name, body.description ?? '', body.department_id ?? null, body.sensitivity ?? 0, subject.card_id]);
-          topic = rows[0] as TopicRow;
-        } catch (err) {
-          if ((err as { code?: string }).code === '23505') throw problems.conflict('duplicate-topic', 'A topic with this name exists');
-          throw err;
-        }
+        const topic = await insertTopic(tx, subject.tenant_id, subject.card_id, {
+          name: body.name, description: body.description ?? '', department_id: body.department_id ?? null, sensitivity: body.sensitivity ?? 0,
+        });
+        if (topic === null) throw problems.conflict('duplicate-topic', 'A topic with this name exists');
         const claims = baseClaims(subject, decision, ctx);
         return {
           call: async () => {
-            await ai.call({ path: `/internal/topics/${topic.id}/embed`, action: 'topic.embed', subject: topic.id, claims });
+            await embedTopic(topic.id, claims);
             return { status: 201, body: toApiTopic(topic) };
           },
         };
@@ -107,7 +138,7 @@ export function topicRoutes(deps: GatewayDeps): RouteDef[] {
         return {
           call: async () => {
             if (after.status === 'active') {
-              await ai.call({ path: `/internal/topics/${after.id}/embed`, action: 'topic.embed', subject: after.id, claims });
+              await embedTopic(after.id, claims);
             }
             return { body: toApiTopic(after) };
           },
@@ -191,10 +222,8 @@ export function topicRoutes(deps: GatewayDeps): RouteDef[] {
               AND topics.status <> 'retired' AND ${mine.sql}`,
           [subject.tenant_id, params.job_role, ...mine.params]);
         for (const t of entries) {
-          await tx.query(
-            `INSERT INTO role_topic_maps (tenant_id, job_role, topic_id, required, importance, created_by_card_id) VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (tenant_id, job_role, topic_id) DO UPDATE SET required = EXCLUDED.required, importance = EXCLUDED.importance`,
-            [subject.tenant_id, params.job_role, t.topic_id, t.required ?? true, t.importance ?? 2, subject.card_id]);
+          await linkRoleTopic(tx, subject.tenant_id, subject.card_id,
+            { job_role: params.job_role, topic_id: t.topic_id, required: t.required ?? true, importance: t.importance ?? 2 }, true);
         }
         await writeAudit(tx, {
           tenantId: subject.tenant_id, actorCardId: subject.card_id, actorKind: 'card', action: 'topic:role_map', decision: 'event',
@@ -233,6 +262,84 @@ export function topicRoutes(deps: GatewayDeps): RouteDef[] {
           reasonCode: 'ROLE_PEOPLE_SET', requestId: ctx.requestId, ip: ctx.ip, details: { count: entries.length },
         });
         return { body: { job_role: params.job_role, people: entries } };
+      },
+    },
+    // ---------------------------------------------------------------- department templates (feature 26)
+    // The library is data in the repository (templates.ts), the same for every company; reading it shows no company data.
+    {
+      operationId: 'listTopicTemplates',
+      kind: 'session',
+      policy: { resource: async ({ subject }) => newRef('topic', subject.tenant_id, { sensitivity: 0 }) },
+      handler: async () => ({ body: { items: DEPARTMENT_TEMPLATES.map(toApiTemplate) } }),
+    },
+    // Applying a template ADDS what is missing and changes nothing that exists: a topic of the same name is kept as it
+    // is, a map entry that exists is left alone. So applying twice creates nothing the second time.
+    {
+      operationId: 'applyTopicTemplate',
+      kind: 'gateway',
+      policy: { resource: async ({ subject }) => newRef('topic', subject.tenant_id, { sensitivity: 0 }) },
+      prepare: async ({ tx, subject, decision, ctx, params }) => {
+        const template = findTemplate(String(params.template_key));
+        if (!template) throw problems.notFound();
+        // An existing topic of the same name is used for the maps only if THIS card may read it; otherwise it is
+        // skipped (and nothing says whether it exists at a level the card cannot see - "skipped" also counts retired ones).
+        const mine = await authorizer.filter(tx, subject, 'topic:read', TOPIC_DESCRIPTOR, ctx, 2);
+        const idOf = new Map<string, string>();
+        const toEmbed: string[] = [];
+        const createdIds: string[] = [];
+        let existing = 0;
+        let skipped = 0;
+        for (const t of template.topics) {
+          const row = await insertTopic(tx, subject.tenant_id, subject.card_id, { name: t.name, description: t.description, department_id: null, sensitivity: 0 });
+          if (row) {
+            createdIds.push(row.id);
+            idOf.set(t.key, row.id);
+            toEmbed.push(row.id);
+            continue;
+          }
+          const found = await tx.query<{ id: string; embedded: boolean }>(
+            // eslint-disable-next-line no-restricted-syntax -- mine.sql is built by the policy module from code constants; all values are bound
+            `SELECT id, embedding IS NOT NULL AS embedded FROM topics WHERE lower(name) = lower($1) AND status <> 'retired' AND ${mine.sql}`,
+            [t.name, ...mine.params]);
+          const have = found.rows[0];
+          if (!have) {
+            skipped += 1;
+            continue;
+          }
+          existing += 1;
+          idOf.set(t.key, have.id);
+          // a topic left without its search vector by an earlier, interrupted run gets it now
+          if (!have.embedded) toEmbed.push(have.id);
+        }
+        let linksCreated = 0;
+        let linksExisting = 0;
+        for (const role of template.roles) {
+          for (const link of role.topics) {
+            const topicId = idOf.get(link.key);
+            if (topicId === undefined) continue;
+            const written = await linkRoleTopic(tx, subject.tenant_id, subject.card_id,
+              { job_role: role.job_role, topic_id: topicId, required: link.required, importance: link.importance }, false);
+            if (written) linksCreated += 1;
+            else linksExisting += 1;
+          }
+        }
+        await writeAudit(tx, {
+          tenantId: subject.tenant_id, actorCardId: subject.card_id, actorKind: 'card', action: 'topic:template', decision: 'event',
+          reasonCode: 'TOPIC_TEMPLATE_APPLIED', requestId: ctx.requestId, ip: ctx.ip, details: { template_key: template.key, count: createdIds.length },
+        });
+        const claims = baseClaims(subject, decision, ctx);
+        const body = {
+          template_key: template.key, topics_created: createdIds.length, created_topic_ids: createdIds, topics_existing: existing,
+          topics_skipped: skipped, links_created: linksCreated, links_existing: linksExisting,
+        };
+        return {
+          call: async () => {
+            // The same step createTopic takes for one topic. The topics and links above are ALREADY committed when this
+            // runs: if it fails (502), they stay, and applying the template again gives the missing search vectors.
+            for (const id of toEmbed) await embedTopic(id, claims);
+            return { status: 200, body };
+          },
+        };
       },
     },
     gatewayRoute(deps, 'suggestTopics',

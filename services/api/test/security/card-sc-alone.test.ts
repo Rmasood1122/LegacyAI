@@ -109,7 +109,7 @@ describe('login/verify with a correct card number and a correct SC but no valid 
 });
 
 describe('every endpoint: card number + SC presented any other way never opens anything', () => {
-  it('for all 129 operations: no 2xx on a protected route and no session cookie anywhere', async () => {
+  it('for all 138 operations: no 2xx on a protected route and no session cookie anywhere', async () => {
     const digits = victim.card.number.replace(/\D/g, '');
     const basic = Buffer.from(`${digits}:${victim.card.sc}`).toString('base64');
     const before = await sessionsOf(victim.card.id);
@@ -137,7 +137,7 @@ describe('every endpoint: card number + SC presented any other way never opens a
         }
       }
     }
-    expect(checked).toBe(129 * 3);
+    expect(checked).toBe(138 * 3);
     expect(await sessionsOf(victim.card.id)).toBe(before);
   });
 

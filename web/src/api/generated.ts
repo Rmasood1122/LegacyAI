@@ -713,6 +713,7 @@ export interface Card {
   renewal_due: string;
   renewal_count: number;
   locked: boolean;
+  lock_reason: "sc_attempts" | "admin" | "anomaly" | null;
   replaced_by_card_id: string | null;
   replaces_card_id: string | null;
   roles: RoleAssignment[];
@@ -967,6 +968,84 @@ export interface ExportJob {
   completed_at: string | null;
 }
 
+export interface AnomalySettings {
+  enabled: boolean;
+  denials_enabled: boolean;
+  denials_threshold: number;
+  denials_window_minutes: number;
+  second_address_enabled: boolean;
+  second_address_window_minutes: number;
+  updated_at: string | null;
+}
+
+export interface UpdateAnomalySettingsRequest {
+  enabled?: boolean;
+  denials_enabled?: boolean;
+  denials_threshold?: number;
+  denials_window_minutes?: number;
+  second_address_enabled?: boolean;
+  second_address_window_minutes?: number;
+}
+
+export interface AnomalyEvent {
+  id: string;
+  card_id: string;
+  card_number: string;
+  occurred_at: string;
+  outcome: "locked" | "not_locked_last_owner";
+  rule: "denials" | "second_address" | "unknown";
+  count: number | null;
+}
+
+export interface LeavingDate {
+  person_id: string;
+  leaving_on: string | null;
+  months_left: number | null;
+  stage: (6 | 12 | 24) | null;
+  updated_at: string | null;
+}
+
+export interface RadarEntry {
+  person_id: string;
+  display_name: string;
+  department_id: string | null;
+  leaving_on: string;
+  months_left: number;
+  stage: 6 | 12 | 24;
+  job_roles: string[] | null;
+  verified_items: number | null;
+  interviews_completed: number | null;
+}
+
+export interface TopicTemplate {
+  key: string;
+  name: string;
+  summary: string;
+  topics: {
+    key: string;
+    name: string;
+    description: string;
+  }[];
+  roles: {
+    job_role: string;
+    topics: {
+      key: string;
+      required: boolean;
+      importance: number;
+    }[];
+  }[];
+}
+
+export interface TopicTemplateResult {
+  template_key: string;
+  topics_created: number;
+  created_topic_ids: string[];
+  topics_existing: number;
+  topics_skipped: number;
+  links_existing: number;
+  links_created: number;
+}
+
 export const operations = {
   getHealth: { method: "GET", path: "/v1/health", status: 200, idempotent: false, public: true, permission: null, contentTypes: [] },
   getReady: { method: "GET", path: "/v1/ready", status: 200, idempotent: false, public: true, permission: null, contentTypes: [] },
@@ -1097,6 +1176,15 @@ export const operations = {
   setTenantAiBudget: { method: "PUT", path: "/v1/tenants/{tenant_id}/ai-budget", status: 200, idempotent: true, public: false, permission: "ai_budget:manage", contentTypes: ["application/json"] },
   setAiKillSwitch: { method: "PUT", path: "/v1/platform/ai/kill-switch", status: 200, idempotent: true, public: false, permission: "ai_kill_switch:manage", contentTypes: ["application/json"] },
   getPlatformStorage: { method: "GET", path: "/v1/platform/storage", status: 200, idempotent: false, public: false, permission: "platform_storage:read", contentTypes: [] },
+  getAnomalySettings: { method: "GET", path: "/v1/tenants/current/anomaly-settings", status: 200, idempotent: false, public: false, permission: "tenant_settings:read", contentTypes: [] },
+  updateAnomalySettings: { method: "PATCH", path: "/v1/tenants/current/anomaly-settings", status: 200, idempotent: true, public: false, permission: "tenant_settings:update", contentTypes: ["application/json"] },
+  listAnomalyEvents: { method: "GET", path: "/v1/anomalies", status: 200, idempotent: false, public: false, permission: "card_events:read", contentTypes: [] },
+  getLeavingDate: { method: "GET", path: "/v1/people/{person_id}/leaving-date", status: 200, idempotent: false, public: false, permission: "person:read", contentTypes: [] },
+  setLeavingDate: { method: "PUT", path: "/v1/people/{person_id}/leaving-date", status: 200, idempotent: true, public: false, permission: "person:update", contentTypes: ["application/json"] },
+  clearLeavingDate: { method: "DELETE", path: "/v1/people/{person_id}/leaving-date", status: 204, idempotent: true, public: false, permission: "person:update", contentTypes: [] },
+  getRetirementRadar: { method: "GET", path: "/v1/retirement-radar", status: 200, idempotent: false, public: false, permission: "person:read", contentTypes: [] },
+  listTopicTemplates: { method: "GET", path: "/v1/topic-templates", status: 200, idempotent: false, public: false, permission: "topic:manage", contentTypes: [] },
+  applyTopicTemplate: { method: "POST", path: "/v1/topic-templates/{template_key}/apply", status: 200, idempotent: true, public: false, permission: "topic:manage", contentTypes: [] },
 } as const;
 
 export type OperationId = keyof typeof operations;
@@ -2080,5 +2168,69 @@ export interface OperationTypes {
     query: undefined;
     body: undefined;
     response: KStorage;
+  };
+  getAnomalySettings: {
+    path: undefined;
+    query: undefined;
+    body: undefined;
+    response: AnomalySettings;
+  };
+  updateAnomalySettings: {
+    path: undefined;
+    query: undefined;
+    body: UpdateAnomalySettingsRequest;
+    response: AnomalySettings;
+  };
+  listAnomalyEvents: {
+    path: undefined;
+    query: { limit?: number; cursor?: string };
+    body: undefined;
+    response: {
+      items: AnomalyEvent[];
+      next_cursor: string | null;
+    };
+  };
+  getLeavingDate: {
+    path: { person_id: string };
+    query: undefined;
+    body: undefined;
+    response: LeavingDate;
+  };
+  setLeavingDate: {
+    path: { person_id: string };
+    query: undefined;
+    body: {
+      leaving_on: string;
+    };
+    response: LeavingDate;
+  };
+  clearLeavingDate: {
+    path: { person_id: string };
+    query: undefined;
+    body: undefined;
+    response: undefined;
+  };
+  getRetirementRadar: {
+    path: undefined;
+    query: { limit?: number; cursor?: string };
+    body: undefined;
+    response: {
+      items: RadarEntry[];
+      next_cursor: string | null;
+    };
+  };
+  listTopicTemplates: {
+    path: undefined;
+    query: undefined;
+    body: undefined;
+    response: {
+      items: TopicTemplate[];
+    };
+  };
+  applyTopicTemplate: {
+    path: { template_key: string };
+    query: undefined;
+    body: undefined;
+    response: TopicTemplateResult;
   };
 }

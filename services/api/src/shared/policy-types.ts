@@ -88,4 +88,16 @@ export interface RequestContext {
   ip: string;
   userAgent: string;
   now: Date;
+  /**
+   * The browser's own statement of where a request came from (the Sec-Fetch-Site header): 'same-origin',
+   * 'same-site', 'cross-site' or 'none'. Page scripts cannot set or change it. Null when the client sent none
+   * (anything that is not a browser). Set by the HTTP layer only, and used there only: a signed-in request marked
+   * 'cross-site' or 'same-site' without an allowed Origin is refused before the policy is asked.
+   */
+  fetchSite?: string | null;
+  /**
+   * Work to do once the request's transaction has COMMITTED (telling people about something that really
+   * happened). The HTTP layer runs these after the commit and never lets one of them fail the request.
+   */
+  afterCommit?: Array<() => Promise<void>>;
 }

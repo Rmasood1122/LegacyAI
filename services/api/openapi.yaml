@@ -1329,7 +1329,7 @@ paths:
   /v1/tenants/current/settings:
     get:
       operationId: getTenantSettings
-      summary: Tenant settings.
+      summary: Tenant settings. The anomaly-lock rules are a resource of their own - getAnomalySettings.
       tags:
         - tenants
       x-permission: tenant_settings:read
@@ -5576,6 +5576,354 @@ paths:
           $ref: "#/components/responses/Unprocessable"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+  /v1/tenants/current/anomaly-settings:
+    get:
+      operationId: getAnomalySettings
+      summary: The company's anomaly-lock rules and thresholds (the defaults if nothing was changed).
+      description: >-
+        Kept apart from the general settings (getTenantSettings) because they have their own audit entries - one per
+        changed value, with the old and the new value. Same permission. What the rules count: see updateAnomalySettings.
+      tags:
+        - tenants
+      x-permission: tenant_settings:read
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnomalySettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    patch:
+      operationId: updateAnomalySettings
+      summary: Change the anomaly-lock rules. Values outside the allowed ranges are rejected, not adjusted.
+      description: >-
+        Rule "denials": this many COUNTED refusals of requests made with a live session of ONE card inside the window
+        lock that card. Counted are refusals that suggest probing - no right to the action, outside the card's scope
+        or level, acting on someone who outranks it. NOT counted: refusals of ordinary use (a card outside its hours,
+        network or limit, read-only, in its grace period; a lapsed company), "not found", failed sign-ins (the
+        secret-code lockout handles those), and verifying one's own work. A signed-in request that a page of another
+        address made the browser send (Sec-Fetch-Site cross-site or same-site without an allowed Origin) is refused
+        before any rule is asked and counts nothing. One refusal fewer than the threshold in every window is never caught:
+        the rule finds bursts, not slow probing. Rule "second address": a successful sign-in from another network
+        address while a session of the same card was used from a different one within the window locks the card. It
+        compares addresses, it knows nothing about geography, and it relies on the service knowing the real client
+        address. A locked card is unlocked by an admin with unlockCard, as after wrong secret codes. The last usable
+        Owner card of a company is never locked by a rule. Each changed value is recorded in the audit log with its
+        old and new value.
+      tags:
+        - tenants
+      x-permission: tenant_settings:update
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAnomalySettingsRequest"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnomalySettings"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/anomalies:
+    get:
+      operationId: listAnomalyEvents
+      summary: The times an anomaly rule fired, newest first - which card, which rule, how many, and what happened to the card then. No addresses, no names. A locked card is unlocked with unlockCard.
+      tags:
+        - cards
+      x-permission: card_events:read
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                  - next_cursor
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AnomalyEvent"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/people/{person_id}/leaving-date:
+    get:
+      operationId: getLeavingDate
+      summary: When this person plans to leave (null if no date is recorded). A person may read their own.
+      tags:
+        - people
+      x-permission: person:read
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/PersonId"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeavingDate"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    put:
+      operationId: setLeavingDate
+      summary: Record or change the date a person plans to leave. Not in the past. The audit log records that it changed, never the date.
+      description: >-
+        The date must be a real calendar day, not before today (the current day in UTC) and not more than 50 years
+        ahead; otherwise 422. Setting a date starts its nudges again. The date is removed when the person is marked as
+        departed, and 30 days after it has passed.
+      tags:
+        - people
+      x-permission: person:update
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - leaving_on
+              properties:
+                leaving_on:
+                  type: string
+                  format: date
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeavingDate"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    delete:
+      operationId: clearLeavingDate
+      summary: Remove a person's leaving date; the nudges that came from it go with it.
+      tags:
+        - people
+      x-permission: person:update
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/PersonId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Done
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/retirement-radar:
+    get:
+      operationId: getRetirementRadar
+      summary: People who leave in less than 24 months, soonest first, with what the system holds from each.
+      description: >-
+        Narrowed like the list of people: a card that may read only its own person sees only its own entry. Ordered by
+        leaving date, then person; paged like every list. Job roles and the two counts come from the knowledge side and
+        are narrowed by the caller's rights THERE: a count covers only what the caller may read, and is null when the
+        caller may not read that kind of thing at all. The counts say how many verified items the person contributed
+        and how many interviews were completed - not which topics are still uncaptured; the gap report of each job
+        role shows that.
+      tags:
+        - people
+      x-permission: person:read
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                  - next_cursor
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RadarEntry"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/topic-templates:
+    get:
+      operationId: listTopicTemplates
+      summary: Ready-made topic lists and job-role maps per department type. Generic; not validated by an industry expert.
+      tags:
+        - knowledge
+      x-permission: topic:manage
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TopicTemplate"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/topic-templates/{template_key}/apply:
+    post:
+      operationId: applyTopicTemplate
+      summary: Add a template's topics and job-role maps to the company. Adds what is missing; changes nothing that exists.
+      description: >-
+        A topic whose name already exists is kept as it is (and used for the links if the caller may read it; otherwise
+        it is counted as skipped). A link between a job role and a topic that exists is left alone. Applying the same
+        template again creates nothing. Two steps: the topics and links are written first; then each new topic gets its
+        search vector from the knowledge service. If that second step fails the answer is 502 AND THE TOPICS AND LINKS
+        EXIST ALREADY - apply the template again (with a new Idempotency-Key) to complete it; nothing is duplicated.
+      tags:
+        - knowledge
+      x-permission: topic:manage
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - name: template_key
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[a-z][a-z0-9-]{1,39}$"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopicTemplateResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
 components:
   securitySchemes:
     sessionCookie:
@@ -8205,6 +8553,7 @@ components:
         - grace_until
         - renewal_due
         - renewal_count
+        - lock_reason
         - locked
         - replaced_by_card_id
         - replaces_card_id
@@ -8236,6 +8585,16 @@ components:
           type: integer
         locked:
           type: boolean
+        lock_reason:
+          description: Why the card is locked - wrong secret codes, an admin, or an anomaly rule; null when it is not locked.
+          type:
+            - "string"
+            - "null"
+          enum:
+            - sc_attempts
+            - admin
+            - anomaly
+            - null
         replaced_by_card_id:
           anyOf:
             - *a1
@@ -8998,3 +9357,303 @@ components:
           anyOf:
             - *a5
             - type: "null"
+    AnomalySettings:
+      type: object
+      additionalProperties: false
+      description: >-
+        "Off" is always a switch, never a special number: every number here is a usable value even while its rule is off.
+      required:
+        - enabled
+        - denials_enabled
+        - denials_threshold
+        - denials_window_minutes
+        - second_address_enabled
+        - second_address_window_minutes
+        - updated_at
+      properties:
+        enabled:
+          type: boolean
+          description: The master switch. false = no rule is evaluated, whatever the two switches below say.
+        denials_enabled:
+          type: boolean
+          description: Rule "denials" on or off.
+        denials_threshold:
+          type: integer
+          minimum: 5
+          maximum: 500
+          description: This many counted refusals of ONE card inside the window lock the card.
+        denials_window_minutes:
+          type: integer
+          minimum: 1
+          maximum: 60
+          description: Length of the window, in minutes. A fixed window - one refusal fewer than the threshold in every window is never caught.
+        second_address_enabled:
+          type: boolean
+          description: Rule "second address" on or off (off by default - two devices on two networks are common).
+        second_address_window_minutes:
+          type: integer
+          minimum: 1
+          maximum: 120
+          description: How recently, in minutes, another session of the card must have been used from a different address for the rule to fire.
+        updated_at:
+          description: When the company last changed these settings. null = never - the values shown are the defaults.
+          anyOf:
+            - *a5
+            - type: "null"
+    UpdateAnomalySettingsRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: Only the settings given are changed. A value outside its range is refused (422), not adjusted.
+      properties:
+        enabled:
+          type: boolean
+          description: The master switch. false = no rule is evaluated, whatever the two switches below say.
+        denials_enabled:
+          type: boolean
+          description: Rule "denials" on or off.
+        denials_threshold:
+          type: integer
+          minimum: 5
+          maximum: 500
+          description: This many counted refusals of ONE card inside the window lock the card.
+        denials_window_minutes:
+          type: integer
+          minimum: 1
+          maximum: 60
+          description: Length of the window, in minutes. A fixed window - one refusal fewer than the threshold in every window is never caught.
+        second_address_enabled:
+          type: boolean
+          description: Rule "second address" on or off (off by default - two devices on two networks are common).
+        second_address_window_minutes:
+          type: integer
+          minimum: 1
+          maximum: 120
+          description: How recently, in minutes, another session of the card must have been used from a different address for the rule to fire.
+    AnomalyEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - card_id
+        - card_number
+        - occurred_at
+        - outcome
+        - rule
+        - count
+      properties:
+        id: *a1
+        card_id: *a1
+        card_number:
+          type: string
+          description: The card's number, masked as everywhere else (last four digits shown).
+        occurred_at: *a5
+        outcome:
+          type: string
+          enum:
+            - locked
+            - not_locked_last_owner
+          description: >-
+            What happened to the card AT THAT MOMENT. "locked" - the card was locked (it may have been unlocked since;
+            the card itself, getCard, says whether it is locked now, and unlockCard unlocks it). "not_locked_last_owner" -
+            the rule fired on the company's last usable Owner card, which a rule never locks.
+        rule:
+          type: string
+          enum:
+            - denials
+            - second_address
+            - unknown
+          description: The rule that fired. "unknown" - the stored record names a rule this version does not know.
+        count:
+          type:
+            - "integer"
+            - "null"
+          description: >-
+            For "denials": the counted refusals in the window when the rule fired. For "second_address": the number of
+            other live sessions of the card on a different address. null if the record holds no number.
+    LeavingDate:
+      type: object
+      additionalProperties: false
+      description: >-
+        A person's planned leaving date. "Today" is the current calendar day in UTC. Months are calendar months: the
+        same day of the month N months on, or the last day of that month when it has no such day.
+      required:
+        - person_id
+        - leaving_on
+        - months_left
+        - stage
+        - updated_at
+      properties:
+        person_id: *a1
+        leaving_on:
+          description: A calendar day without time or zone; null = no date is recorded.
+          type:
+            - "string"
+            - "null"
+          format: date
+        months_left:
+          description: Whole calendar months from today (UTC) to the date - the largest N with today + N months on or before the date; 0 when less than a month away or passed. null = no date.
+          type:
+            - "integer"
+            - "null"
+        stage:
+          description: >-
+            6 = less than 6 months away, 12 = less than 12, 24 = less than 24 (a date exactly 6 months away is stage 12);
+            null = 24 months away or more, already passed, or no date.
+          anyOf:
+            - type: integer
+              enum:
+                - 6
+                - 12
+                - 24
+            - type: "null"
+        updated_at:
+          anyOf:
+            - *a5
+            - type: "null"
+    RadarEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - person_id
+        - display_name
+        - department_id
+        - leaving_on
+        - months_left
+        - stage
+        - job_roles
+        - verified_items
+        - interviews_completed
+      properties:
+        person_id: *a1
+        display_name:
+          type: string
+        department_id:
+          anyOf:
+            - *a1
+            - type: "null"
+        leaving_on:
+          type: string
+          format: date
+        months_left:
+          type: integer
+          description: As in LeavingDate.
+        stage:
+          type: integer
+          enum:
+            - 6
+            - 12
+            - 24
+          description: As in LeavingDate. Never null here - only dates less than 24 months away are listed.
+        job_roles:
+          description: The job roles the person holds. null = the caller may not read who holds which job role (gap:read).
+          type:
+            - "array"
+            - "null"
+          items:
+            type: string
+        verified_items:
+          description: >-
+            Verified or corrected knowledge items contributed by the person, counted among the items the CALLER may read
+            (department, sensitivity). null = the caller may not read knowledge items at all - not "none".
+          type:
+            - "integer"
+            - "null"
+        interviews_completed:
+          description: Completed interviews with the person that the caller may read. null = the caller may not read interviews.
+          type:
+            - "integer"
+            - "null"
+    TopicTemplate:
+      type: object
+      additionalProperties: false
+      required:
+        - key
+        - name
+        - summary
+        - topics
+        - roles
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+        summary:
+          type: string
+        topics:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - key
+              - name
+              - description
+            properties:
+              key:
+                type: string
+              name:
+                type: string
+              description:
+                type: string
+        roles:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - job_role
+              - topics
+            properties:
+              job_role:
+                type: string
+              topics:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required:
+                    - key
+                    - required
+                    - importance
+                  properties:
+                    key:
+                      type: string
+                    required:
+                      type: boolean
+                    importance:
+                      type: integer
+                      minimum: 1
+                      maximum: 3
+    TopicTemplateResult:
+      type: object
+      additionalProperties: false
+      required:
+        - template_key
+        - topics_created
+        - created_topic_ids
+        - topics_existing
+        - topics_skipped
+        - links_created
+        - links_existing
+      properties:
+        template_key:
+          type: string
+        topics_created:
+          type: integer
+        created_topic_ids:
+          type: array
+          description: The topics this call created.
+          items: *a1
+        topics_existing:
+          type: integer
+          description: Topics of the same name that existed and that the caller may read; they were left as they are and used for the links.
+        topics_skipped:
+          type: integer
+          description: Topics of the same name that are retired or that the caller may not read; they are not touched and not linked.
+        links_existing:
+          type: integer
+          description: Job-role links that existed already and were left alone.
+        links_created:
+          type: integer
+          description: Links between a job role and a topic (the job-role map) this call created.

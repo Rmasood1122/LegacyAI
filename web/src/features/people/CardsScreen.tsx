@@ -4,7 +4,9 @@ import type { CardWithSecrets, RoleAssignmentInput } from '../../api/generated.t
 import { ScreenLink } from '../../navigation/ScreenLink.tsx';
 import { useSession } from '../../session/session.tsx';
 import { Badge, Button, Card, CheckboxField, DataTable, Empty, ErrorNote, formatDate, humanize, Loading, OneTimeSecrets, Page, PartialListNote, SelectField } from '../../ui/index.tsx';
-import { CARD_STATE_TEXT, CARD_STATES, cardTone, useCardHolders, useCardList, useIssueCard, useRoles, type CardState } from './hooks.ts';
+import {
+  ANOMALY_RULE_TEXT, CARD_STATE_TEXT, CARD_STATES, cardTone, lockReasonText, useAnomalyEvents, useCardHolders, useCardList, useIssueCard, useRoles, type CardState,
+} from './hooks.ts';
 
 type RoleKey = RoleAssignmentInput['role_key'];
 
@@ -29,7 +31,7 @@ export function CardsScreen() {
             <tr key={c.id}>
               <td><ScreenLink screen="card" id={c.id}>{c.card_number}</ScreenLink></td>
               <td>{c.kind === 'company' ? 'Company card' : 'Person'}</td>
-              <td><Badge tone={cardTone(c.state)}>{CARD_STATE_TEXT[c.state]}</Badge> {c.locked && <Badge tone="danger">Locked</Badge>}</td>
+              <td><Badge tone={cardTone(c.state)}>{CARD_STATE_TEXT[c.state]}</Badge> {c.locked && <Badge tone="danger">{lockReasonText(c.lock_reason)}</Badge>}</td>
               <td>{c.roles.map((r) => humanize(r.role_key)).join(', ') || '—'}</td>
               <td>{formatDate(c.expires_at)}</td>
             </tr>
@@ -37,7 +39,40 @@ export function CardsScreen() {
         </DataTable>
       ))}
       {cards.hasMore && <PartialListNote shown={items.length} noun="cards" busy={cards.isLoadingMore} onLoadMore={cards.loadMore} />}
+      {can('listAnomalyEvents') && can('unlockCard') && <AnomalyEvents />}
     </Page>
+  );
+}
+
+/** The recent times an anomaly rule fired. A locked card is unlocked on its own screen, as after wrong codes. */
+function AnomalyEvents() {
+  const events = useAnomalyEvents({ enabled: true });
+  const items = events.items ?? [];
+  return (
+    <>
+      <h2>Cards locked by an anomaly rule</h2>
+      <p className="muted">
+        A rule locks a card when it is used in an unusual way (the rules are in Settings). The list says what happened at that moment; open
+        the card to see whether it is still locked and to unlock it with a new 3-digit code.
+        The rules compare counts and network addresses; they can be wrong, which is why a lock can be undone.
+      </p>
+      {events.isPending && <Loading what="anomaly locks" />}
+      <ErrorNote error={events.error} />
+      {events.items !== undefined && (items.length === 0 ? <Empty>No rule has fired.</Empty> : (
+        <DataTable caption="Anomaly locks" columns={['When', 'Card', 'Rule', 'Count', 'What happened then']}>
+          {items.map((e) => (
+            <tr key={e.id}>
+              <td>{formatDate(e.occurred_at)}</td>
+              <td><ScreenLink screen="card" id={e.card_id}>{e.card_number}</ScreenLink></td>
+              <td>{ANOMALY_RULE_TEXT[e.rule]}</td>
+              <td>{e.count ?? <span className="muted">not recorded</span>}</td>
+              <td>{e.outcome === 'locked' ? <Badge tone="danger">Card was locked</Badge> : <Badge tone="warning">Not locked: the last usable Owner card</Badge>}</td>
+            </tr>
+          ))}
+        </DataTable>
+      ))}
+      {events.hasMore && <PartialListNote shown={items.length} noun="events" busy={events.isLoadingMore} onLoadMore={events.loadMore} />}
+    </>
   );
 }
 

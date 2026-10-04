@@ -253,7 +253,23 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
 
   function contextOf(req: FastifyRequest): RequestContext {
     const ua = req.headers['user-agent'];
-    return { requestId: req.id, ip: req.ip, userAgent: typeof ua === 'string' ? ua.slice(0, 300) : '', now: clock.now() };
+    const site = req.headers['sec-fetch-site'];
+    return {
+      requestId: req.id, ip: req.ip, userAgent: typeof ua === 'string' ? ua.slice(0, 300) : '', now: clock.now(),
+      fetchSite: typeof site === 'string' ? site.toLowerCase().slice(0, 20) : null, afterCommit: [],
+    };
+  }
+
+  /** Runs what was queued for "after the commit". A failure here is logged and never changes the answer. */
+  async function flushAfterCommit(req: FastifyRequest, ctx: RequestContext): Promise<void> {
+    const queued = ctx.afterCommit?.splice(0) ?? [];
+    for (const job of queued) {
+      try {
+        await job();
+      } catch (err) {
+        req.log.error({ err, request_id: req.id }, 'an after-commit step failed');
+      }
+    }
   }
 
   function validateRequest(op: Operation, req: FastifyRequest): { body: unknown; params: unknown; query: unknown; idemKey: string | null; contentType: string } {
@@ -313,6 +329,22 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
     if (typeof token !== 'string' || token === '' || !constantTimeEqual(token, expectedToken)) throw problems.csrf();
   }
 
+  /**
+   * A browser states where a request came from in Sec-Fetch-Site, and page scripts cannot set that header. A signed-in
+   * request that a page of ANOTHER address made the browser send ("same-site" from a sibling address, or
+   * "cross-site"), and that does not name an allowed Origin, is refused before the policy is asked: such a page must
+   * not be able to act with the card - nor make it collect refusals, which the anomaly rule would count against it.
+   * A separately hosted front end named in ALLOWED_ORIGINS sends its Origin and passes. "same-origin", "none"
+   * (typed address, bookmark) and no header at all (not a browser) go on as before. For anything but GET the CSRF
+   * check has already demanded an allowed Origin, so in effect this adds a rule for GET only.
+   * Somebody who holds a stolen session and forges the header gains nothing: the request is refused outright.
+   */
+  function fromAnotherSite(req: FastifyRequest, ctx: RequestContext): boolean {
+    if (ctx.fetchSite !== 'cross-site' && ctx.fetchSite !== 'same-site') return false;
+    const origin = req.headers.origin;
+    return typeof origin !== 'string' || !config.allowedOrigins.includes(origin);
+  }
+
   type Outcome = { result: HandlerResult } | { problem: ProblemError } | { call: Extract<GatewayPrepared, { call: unknown }>['call'] };
 
   async function runSessionRoute(
@@ -331,6 +363,14 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
         if (!session) return { problem: problems.unauthenticated() };
         checkCsrf(req, session.csrfToken);
         const { subject } = session;
+        if (fromAnotherSite(req, ctx)) {
+          // written directly, like "not found": the policy was never asked, and nothing is counted against the card
+          await writeAudit(tx, {
+            tenantId, actorCardId: subject.card_id, actorKind: 'card', action, decision: 'deny',
+            reasonCode: 'DENY_FETCH_SITE', requestId: ctx.requestId, ip: ctx.ip,
+          });
+          return { problem: problems.forbidden() };
+        }
 
         const loaded = await def.policy.resource({ tx, subject, params: input.params, body: input.body, query: input.query, ctx });
         if (loaded === null) {
@@ -410,6 +450,8 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
         await recordAllow();
         return { result };
       });
+      // the transaction has committed: a refusal's audit row, and anything that refusal set off, is now real
+      await flushAfterCommit(req, ctx);
       if ('problem' in outcome) throw outcome.problem;
       if ('result' in outcome) return outcome.result;
       const granted = allowed as unknown as { subject: Subject; resource: ResourceRef; decision: Decision };
@@ -507,7 +549,17 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
 
               let result: HandlerResult;
               if (def.kind === 'public') {
-                result = await def.handler({ ctx, body: input.body, params: input.params, query: input.query });
+                try {
+                  result = await def.handler({ ctx, body: input.body, params: input.params, query: input.query });
+                } catch (err) {
+                  // A refusal a public handler THROWS on purpose (sign-in records the failure, commits, then throws a
+                  // Problem) has written its facts, so what it queued is sent. Any other error means its transaction
+                  // rolled back: the queued notices describe things that did not happen and are dropped.
+                  if (err instanceof ProblemError) await flushAfterCommit(req, ctx);
+                  else ctx.afterCommit?.splice(0);
+                  throw err;
+                }
+                await flushAfterCommit(req, ctx);
               } else {
                 result = await runSessionRoute(op, def, req, input, ctx);
               }

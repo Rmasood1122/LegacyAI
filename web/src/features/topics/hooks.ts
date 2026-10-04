@@ -11,6 +11,9 @@ export type TopicStatus = 'active' | 'proposed' | 'retired';
 export const useTopicList = (status: TopicStatus) => useApiList('listTopics', { query: { status, limit: 50 } });
 export const useCreateTopic = () => useApiMutation('createTopic', TOPICS_CHANGED);
 export const useUpdateTopic = () => useApiMutation('updateTopic', TOPIC_UPDATED);
+// Department templates (feature 26): ready-made topics and job-role maps. Applying one adds topics and maps.
+export const useTopicTemplates = ({ enabled }: { enabled: boolean }) => useApiQuery('listTopicTemplates', undefined, { enabled });
+export const useApplyTemplate = () => useApiMutation('applyTopicTemplate', [...TOPICS_CHANGED, 'listJobRoles', 'getRoleTopics', 'getReadinessReport']);
 export const useSuggestTopics = () => useApiMutation('suggestTopics', TOPICS_CHANGED);
 /** Documents that are ready, to suggest topics from. */
 export const useReadyDocuments = ({ enabled }: { enabled: boolean }) => useApiList('listSources', { query: { status: 'ready', limit: 50 } }, { enabled });
@@ -21,7 +24,8 @@ export const useGapReport = (jobRole: string) => useApiQuery('getGapReport', { q
 export const useSetRoleTopics = () => useApiMutation('setRoleTopics', ['getGapReport', 'listJobRoles', 'getRoleTopics', 'getReadinessReport']);
 /** The topics set for a job role now, as far as this card may see them (retired topics are left out). */
 export const useRoleTopics = (jobRole: string) => useApiQuery('getRoleTopics', { path: { job_role: jobRole } });
-export const useSetRolePeople = () => useApiMutation('setRolePeople', ['getGapReport', 'getRolePeople']);
+// who holds a job role is also shown on the retirement radar
+export const useSetRolePeople = () => useApiMutation('setRolePeople', ['getGapReport', 'getRolePeople', 'getRetirementRadar']);
 /** The job roles that already have topics (a role is only a name; one with no topics yet is typed in). */
 export const useJobRoles = ({ enabled }: { enabled: boolean }) => useApiList('listJobRoles', { query: { limit: 50 } }, { enabled });
 /** Who is set for a job role now. */

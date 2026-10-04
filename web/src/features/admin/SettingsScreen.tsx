@@ -1,12 +1,12 @@
 // Company settings: the company and its use, the card and sign-in rules, the knowledge rules, the
 // AI budget, and the words redaction must leave alone.
 import { useState, type FormEvent } from 'react';
-import type { KSettings, OperationTypes, TenantSettings, UpdateTenantSettingsRequest } from '../../api/generated.ts';
+import type { AnomalySettings, KSettings, OperationTypes, TenantSettings, UpdateAnomalySettingsRequest, UpdateTenantSettingsRequest } from '../../api/generated.ts';
 import { useSession } from '../../session/session.tsx';
 import { Badge, Banner, Button, Card, CheckboxField, ConfirmButton, ErrorNote, Facts, formatDate, humanize, Loading, Page, PartialListNote, SelectField, TextField } from '../../ui/index.tsx';
 import {
-  changedOnly, useAddAllowTerm, useAiBudget, useAllowlist, useDeleteAllowTerm, useKnowledgeSettings, useTenant, useTenantSettings, useTenantUsage, useUpdateKnowledgeSettings,
-  useUpdateTenantSettings, usd,
+  changedOnly, useAddAllowTerm, useAiBudget, useAllowlist, useAnomalySettings, useDeleteAllowTerm, useKnowledgeSettings, useTenant, useTenantSettings, useTenantUsage,
+  useUpdateAnomalySettings, useUpdateKnowledgeSettings, useUpdateTenantSettings, usd,
 } from './hooks.ts';
 
 type NumberKeys<T> = { [K in keyof T]: T[K] extends number ? K : never }[keyof T];
@@ -61,6 +61,7 @@ export function SettingsScreen() {
       )}
       {settings.isPending && <Loading what="settings" />}
       {settings.data !== undefined && <CardRules key={JSON.stringify(settings.data)} settings={settings.data} mayChange={can('updateTenantSettings')} />}
+      {can('getAnomalySettings') && <AnomalyRules mayChange={can('updateAnomalySettings')} />}
       {can('getKnowledgeSettings') && <KnowledgeRules />}
       {can('getAiBudget') && <AiBudget />}
       {can('listRedactionAllowlist') && <Allowlist />}
@@ -69,34 +70,126 @@ export function SettingsScreen() {
 }
 
 /** One number. What is typed is kept as text: a cleared or non-numeric field shows an error and changes nothing (it never becomes 0). */
-function NumberInput({ label, hint, value, onChange, disabled }: { label: string; hint?: string; value: number; onChange: (value: number) => void; disabled: boolean }) {
+function NumberInput({ label, hint, value, onChange, onValidity, disabled }: {
+  label: string; hint?: string; value: number; onChange: (value: number) => void; onValidity: (valid: boolean) => void; disabled: boolean;
+}) {
   const [text, setText] = useState(String(value));
-  const valid = text.trim() !== '' && Number.isFinite(Number(text));
+  const isNumber = (t: string): boolean => t.trim() !== '' && Number.isFinite(Number(t));
+  const valid = isNumber(text);
   return (
     <TextField label={label} hint={hint} type="number" min={0} disabled={disabled} value={text}
-      error={valid ? null : `Enter a number. The saved value (${value}) is kept until you do.`}
+      error={valid ? null : `Enter a number. Nothing can be saved until you do (the saved value is ${value}).`}
       onChange={(e) => {
         setText(e.target.value);
-        if (e.target.value.trim() !== '' && Number.isFinite(Number(e.target.value))) onChange(Number(e.target.value));
+        onValidity(isNumber(e.target.value));
+        if (isNumber(e.target.value)) onChange(Number(e.target.value));
       }} />
   );
 }
 
-function NumberInputs<T extends object>({ fields, values, onChange, disabled }: {
-  fields: ReadonlyArray<NumberField<T>>; values: T; onChange: (key: NumberKeys<T>, value: number) => void; disabled: boolean;
+/**
+ * Which number fields of a form hold something that is not a number. While any does, the form must not be saved:
+ * the draft still holds the last valid value, and saving it would store something the screen does not show.
+ */
+function useInvalidFields(): { anyInvalid: boolean; report: (key: string, valid: boolean) => void } {
+  const [invalid, setInvalid] = useState<ReadonlySet<string>>(new Set());
+  const report = (key: string, valid: boolean): void => setInvalid((before) => {
+    if (valid === !before.has(key)) return before;
+    const next = new Set(before);
+    if (valid) next.delete(key);
+    else next.add(key);
+    return next;
+  });
+  return { anyInvalid: invalid.size > 0, report };
+}
+
+function NumberInputs<T extends object>({ fields, values, onChange, onValidity, disabled }: {
+  fields: ReadonlyArray<NumberField<T>>; values: T; onChange: (key: NumberKeys<T>, value: number) => void;
+  onValidity: (key: string, valid: boolean) => void; disabled: boolean;
 }) {
   return (
     <>
       {fields.map((f) => (
-        <NumberInput key={String(f.key)} label={f.label} hint={f.hint} disabled={disabled} value={Number(values[f.key])} onChange={(n) => onChange(f.key, n)} />
+        <NumberInput key={String(f.key)} label={f.label} hint={f.hint} disabled={disabled} value={Number(values[f.key])} onChange={(n) => onChange(f.key, n)}
+          onValidity={(valid) => onValidity(String(f.key), valid)} />
       ))}
     </>
+  );
+}
+
+type AnomalyNumbers = Pick<AnomalySettings, 'denials_threshold' | 'denials_window_minutes' | 'second_address_window_minutes'>;
+type AnomalyKey = keyof UpdateAnomalySettingsRequest;
+const ANOMALY_KEYS: readonly AnomalyKey[] = [
+  'enabled', 'denials_enabled', 'denials_threshold', 'denials_window_minutes', 'second_address_enabled', 'second_address_window_minutes',
+];
+const DENIALS_FIELDS: ReadonlyArray<NumberField<AnomalyNumbers>> = [
+  {
+    key: 'denials_threshold', label: 'Lock a card after this many refused actions …',
+    hint: 'From 5 to 500. Counted are actions of a signed-in card that it has no right to. Not counted: a card outside its hours or over its limit, a card in its grace period, pages that no longer exist, and wrong sign-ins (the 3-digit code rule above handles those).',
+  },
+  { key: 'denials_window_minutes', label: '… within this many minutes', hint: 'From 1 to 60. Slow attempts - fewer than the number above in every such period - are not caught.' },
+];
+const SECOND_ADDRESS_FIELDS: ReadonlyArray<NumberField<AnomalyNumbers>> = [
+  {
+    key: 'second_address_window_minutes', label: '… while another session of the card was used elsewhere within this many minutes',
+    hint: 'From 1 to 120. Compares network addresses, not places: a phone on mobile data and a laptop on the office network count as two addresses.',
+  },
+];
+
+/** The anomaly-lock rules (feature 5). A locked card is unlocked on its own screen with a new 3-digit code. */
+function AnomalyRules({ mayChange }: { mayChange: boolean }) {
+  const settings = useAnomalySettings();
+  // The change lives here, not in the form: the form is rebuilt when the saved rules arrive, and "saved" must survive that.
+  const update = useUpdateAnomalySettings();
+  return (
+    <Card title="Unusual use of a card">
+      <p className="muted">
+        Simple rules that lock a card when it is used in an unusual way. They can be wrong, so a lock can always be undone by an administrator.
+        The last usable Owner card is never locked by a rule; the event is recorded instead.
+      </p>
+      {settings.isPending && <Loading what="the rules" />}
+      <ErrorNote error={settings.error} />
+      {settings.data !== undefined && (
+        <AnomalyForm key={JSON.stringify(settings.data)} settings={settings.data} mayChange={mayChange} saved={update.isSuccess} busy={update.isPending} error={update.error}
+          onSave={(changes) => update.mutate({ body: changes })} />
+      )}
+    </Card>
+  );
+}
+
+function AnomalyForm({ settings, mayChange, saved, busy, error, onSave }: {
+  settings: AnomalySettings; mayChange: boolean; saved: boolean; busy: boolean; error: { message: string } | null; onSave: (changes: UpdateAnomalySettingsRequest) => void;
+}) {
+  const [draft, setDraft] = useState(settings);
+  const numbers = useInvalidFields();
+  const changes: UpdateAnomalySettingsRequest = Object.fromEntries(ANOMALY_KEYS.filter((k) => draft[k] !== settings[k]).map((k) => [k, draft[k]]));
+  const dirty = Object.keys(changes).length > 0;
+  const set = (key: keyof AnomalyNumbers, value: number): void => setDraft({ ...draft, [key]: value });
+  const onSubmit = (e: FormEvent): void => {
+    e.preventDefault();
+    onSave(changes);
+  };
+  return (
+    <form onSubmit={onSubmit} noValidate>
+      <CheckboxField label="Lock cards that are used in an unusual way" checked={draft.enabled} disabled={!mayChange} onChange={(on) => setDraft({ ...draft, enabled: on })} />
+      <CheckboxField label="Rule 1: many refused actions in a short time" checked={draft.denials_enabled} disabled={!mayChange || !draft.enabled}
+        onChange={(on) => setDraft({ ...draft, denials_enabled: on })} />
+      <NumberInputs<AnomalyNumbers> fields={DENIALS_FIELDS} values={draft} disabled={!mayChange || !draft.enabled || !draft.denials_enabled} onChange={set} onValidity={numbers.report} />
+      <CheckboxField label="Rule 2: a sign-in from a second network address" checked={draft.second_address_enabled} disabled={!mayChange || !draft.enabled}
+        onChange={(on) => setDraft({ ...draft, second_address_enabled: on })} />
+      <NumberInputs<AnomalyNumbers> fields={SECOND_ADDRESS_FIELDS} values={draft} disabled={!mayChange || !draft.enabled || !draft.second_address_enabled} onChange={set}
+        onValidity={numbers.report} />
+      <ErrorNote error={error} />
+      {saved && !dirty && <Banner tone="success" title="The rules were saved" />}
+      {mayChange && <Button type="submit" variant="primary" busy={busy} disabled={!dirty || numbers.anyInvalid}>Save these rules</Button>}
+    </form>
   );
 }
 
 function CardRules({ settings, mayChange }: { settings: TenantSettings; mayChange: boolean }) {
   const update = useUpdateTenantSettings();
   const [draft, setDraft] = useState(settings);
+  const numbers = useInvalidFields();
   const changes = changedOnly<UpdateTenantSettingsRequest, TenantSettings>(settings, draft);
   const dirty = Object.keys(changes).length > 0;
   const onSubmit = (e: FormEvent): void => {
@@ -108,7 +201,7 @@ function CardRules({ settings, mayChange }: { settings: TenantSettings; mayChang
   return (
     <Card title="Cards and signing in">
       <form onSubmit={onSubmit} noValidate>
-        <NumberInputs fields={CARD_FIELDS} values={draft} disabled={!mayChange} onChange={(key, value) => setDraft({ ...draft, [key]: value })} />
+        <NumberInputs fields={CARD_FIELDS} values={draft} disabled={!mayChange} onChange={(key, value) => setDraft({ ...draft, [key]: value })} onValidity={numbers.report} />
         <fieldset>
           <legend>Second step at sign-in</legend>
           <CheckboxField label="Passkey (fingerprint, face or security key)" checked={draft.allowed_factor_types.includes('passkey')} disabled={!mayChange} onChange={(on) => factor('passkey', on)} />
@@ -119,7 +212,7 @@ function CardRules({ settings, mayChange }: { settings: TenantSettings; mayChang
         <p className="muted">Roles in use: {settings.enabled_roles.map(humanize).join(', ')}.</p>
         <ErrorNote error={update.error} />
         {update.isSuccess && !dirty && <Banner tone="success" title="The settings were saved" />}
-        {mayChange && <Button type="submit" variant="primary" busy={update.isPending} disabled={!dirty || draft.allowed_factor_types.length === 0}>Save these settings</Button>}
+        {mayChange && <Button type="submit" variant="primary" busy={update.isPending} disabled={!dirty || numbers.anyInvalid || draft.allowed_factor_types.length === 0}>Save these settings</Button>}
       </form>
     </Card>
   );
@@ -140,6 +233,7 @@ function KnowledgeRules() {
 function KnowledgeRulesForm({ settings, mayChange }: { settings: KSettings; mayChange: boolean }) {
   const update = useUpdateKnowledgeSettings();
   const [draft, setDraft] = useState(settings);
+  const numbers = useInvalidFields();
   const changes = changedOnly<OperationTypes['updateKnowledgeSettings']['body'], KSettings>(settings, draft);
   const dirty = Object.keys(changes).length > 0;
   const onSubmit = (e: FormEvent): void => {
@@ -158,10 +252,10 @@ function KnowledgeRulesForm({ settings, mayChange }: { settings: KSettings; mayC
         </SelectField>
         <CheckboxField label="Show learners the right answers after their test was graded" checked={draft.quiz_show_answers_after_grading} disabled={!mayChange}
           onChange={(on) => setDraft({ ...draft, quiz_show_answers_after_grading: on })} />
-        <NumberInputs fields={KNOWLEDGE_FIELDS} values={draft} disabled={!mayChange} onChange={(key, value) => setDraft({ ...draft, [key]: value })} />
+        <NumberInputs fields={KNOWLEDGE_FIELDS} values={draft} disabled={!mayChange} onChange={(key, value) => setDraft({ ...draft, [key]: value })} onValidity={numbers.report} />
         <ErrorNote error={update.error} />
         {update.isSuccess && !dirty && <Banner tone="success" title="The settings were saved" />}
-        {mayChange && <Button type="submit" variant="primary" busy={update.isPending} disabled={!dirty}>Save these settings</Button>}
+        {mayChange && <Button type="submit" variant="primary" busy={update.isPending} disabled={!dirty || numbers.anyInvalid}>Save these settings</Button>}
       </form>
     </Card>
   );

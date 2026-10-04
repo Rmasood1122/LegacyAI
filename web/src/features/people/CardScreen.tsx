@@ -11,7 +11,7 @@ import {
 import type { ShownSecrets } from '../../ui/index.tsx';
 import {
   CARD_STATE_TEXT, cardTone, describeRestriction, useAssignRole, useCard, useCardEvents, useCardRestrictions, useNewEnrollmentToken, useReinstateCard, useRemoveRole, useRenewCard,
-  useReplaceCard, useRevokeCard, useRoles, useSaveRestrictions, useSuspendCard, useUnlockCard, withReadOnly,
+  lockReasonText, useReplaceCard, useRevokeCard, useRoles, useSaveRestrictions, useSuspendCard, useUnlockCard, withReadOnly,
 } from './hooks.ts';
 
 type RoleKey = RoleAssignmentInput['role_key'];
@@ -37,7 +37,7 @@ export function CardScreen() {
             <Facts items={[
               ['Card number', <span key="n" className="code">{data.card_number}</span>],
               ['Kind', data.kind === 'company' ? 'Company card' : 'Person'],
-              ['State', <span key="s"><Badge tone={cardTone(data.state)}>{CARD_STATE_TEXT[data.state]}</Badge> {data.locked && <Badge tone="danger">Locked after wrong codes</Badge>}</span>],
+              ['State', <span key="s"><Badge tone={cardTone(data.state)}>{CARD_STATE_TEXT[data.state]}</Badge> {data.locked && <Badge tone="danger">{lockReasonText(data.lock_reason)}</Badge>}</span>],
               ['Issued', formatDate(data.issued_at)],
               ['Valid until', formatDate(data.expires_at)],
               ['Read-only grace period until', formatDate(data.grace_until)],

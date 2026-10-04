@@ -8,6 +8,8 @@ export const useUpdateTenantSettings = () => useApiMutation('updateTenantSetting
 export const useTenantUsage = ({ enabled }: { enabled: boolean }) => useApiQuery('getTenantUsage', undefined, { enabled });
 export const useKnowledgeSettings = ({ enabled }: { enabled: boolean }) => useApiQuery('getKnowledgeSettings', undefined, { enabled });
 export const useUpdateKnowledgeSettings = () => useApiMutation('updateKnowledgeSettings', ['getKnowledgeSettings']);
+export const useAnomalySettings = () => useApiQuery('getAnomalySettings');
+export const useUpdateAnomalySettings = () => useApiMutation('updateAnomalySettings', ['getAnomalySettings']);
 export const useAiBudget = ({ enabled }: { enabled: boolean }) => useApiQuery('getAiBudget', undefined, { enabled });
 
 /** The allow-list. The API gives one page and no way to ask for the next, so the screen says when it is cut short. */

@@ -140,7 +140,9 @@ export interface NotificationEvent {
   type:
     | 'card_issued' | 'card_locked' | 'card_unlocked' | 'card_suspended' | 'card_revoked' | 'card_renewed'
     | 'card_replaced' | 'card_expiring' | 'unlock_capacity_low' | 'credential_added' | 'enrollment_token_issued'
-    | 'tenant_created' | 'company_card_renewed' | 'owner_recovered';
+    | 'tenant_created' | 'company_card_renewed' | 'owner_recovered'
+    // Phase 4: an anomaly rule fired on the last usable Owner card (which is not locked); a leaving date came closer
+    | 'card_anomaly' | 'retirement_nudge';
   tenantId: string;
   /** The card the event is about. */
   cardId?: string;

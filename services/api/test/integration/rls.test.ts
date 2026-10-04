@@ -71,7 +71,9 @@ describe('every tenant table has forced row-level security', () => {
     // global on purpose (documented): sign-in tables, and the per-company chunk counter that holds counts only
     const exempt = new Set(['auth_transactions', 'card_directory', 'login_attempts', 'tenant_usage_counters']);
     const scoped = rows.filter((r) => !exempt.has(r.table));
-    expect(scoped.length).toBe(51); // 24 from Phase 1 + 25 from Phase 2 (docs/phase2/02) + 2 from Phase 4 (answer_feedback, knowledge_item_conflicts)
+    // 24 from Phase 1 + 25 from Phase 2 (docs/phase2/02) + 6 from Phase 4 (answer_feedback, knowledge_item_conflicts,
+    // anomaly_settings, card_anomaly_counters, person_leaving, retirement_nudges)
+    expect(scoped.length).toBe(55);
     for (const r of scoped) {
       expect(r, `table ${r.table}`).toMatchObject({ enabled: true, forced: true });
       expect(r.policies, `table ${r.table} has no policy`).toBeGreaterThanOrEqual(1);

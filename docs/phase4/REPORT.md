@@ -70,6 +70,15 @@ say an answer was helpful, unhelpful or wrong. **Nothing is deployed, and no rea
 
 $0. Total real-AI spend of the project stays $0.642.
 
+## Step 2 — features 5, 11, 26 (in progress, NOT yet proven)
+
+> Written and reviewed; **not pushed and not run in CI when this note was written**. Design:
+> `docs/phase4/02-anomaly-radar-templates.md`, decision D26.
+
+Known before any CI run: **the retirement nudges after the first one are created only when the housekeeping
+command is run, and nothing schedules it** (`docs/runbooks/housekeeping.md`). The radar screen itself does not
+depend on it. The anomaly rule finds bursts of refused actions, not slow probing.
+
 ## Not built yet (from the plan)
 
 Batch A: 5 (anomaly lock), 11 (retirement radar), 26 (department templates), 27 (outcome analytics), 30 (knowledge

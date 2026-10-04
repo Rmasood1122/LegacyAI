@@ -4,7 +4,10 @@ import type { Department, Person } from '../../api/generated.ts';
 import { ScreenLink } from '../../navigation/ScreenLink.tsx';
 import { useSession } from '../../session/session.tsx';
 import { Badge, Banner, Button, Card, ConfirmButton, DataTable, Empty, ErrorNote, formatDate, Loading, Page, PartialListNote, SelectField, TextField } from '../../ui/index.tsx';
-import { useCreateDepartment, useCreatePerson, useDepartments, usePeopleList, useUpdatePerson, type PersonStatus } from './hooks.ts';
+import {
+  leavingStageText, monthsText, useClearLeavingDate, useCreateDepartment, useCreatePerson, useDepartments, useLeavingDate, usePeopleList, useSetLeavingDate,
+  useUpdatePerson, type PersonStatus,
+} from './hooks.ts';
 
 export function PeopleScreen() {
   const { can } = useSession();
@@ -16,7 +19,8 @@ export function PeopleScreen() {
   const items = people.items ?? [];
   const departmentName = (id: string | null): string => (id === null ? '—' : departments.data?.items.find((d) => d.id === id)?.name ?? 'Unknown');
   return (
-    <Page title="People" intro="The people of the company. Adding a person gives no access yet; that takes a card." actions={<ScreenLink screen="cards">Cards</ScreenLink>}>
+    <Page title="People" intro="The people of the company. Adding a person gives no access yet; that takes a card."
+      actions={<div className="row"><ScreenLink screen="cards">Cards</ScreenLink><ScreenLink screen="radar">Retirement radar</ScreenLink></div>}>
       {can('createPerson') && <NewPerson departments={departments.data?.items ?? []} />}
       {can('createDepartment') && <NewDepartment existing={departments.data?.items ?? []} />}
       <h2>The list</h2>
@@ -93,6 +97,7 @@ function NewPerson({ departments }: { departments: readonly Department[] }) {
 }
 
 function EditPerson({ person, departments, onClose }: { person: Person; departments: readonly Department[]; onClose: () => void }) {
+  const { can } = useSession();
   const update = useUpdatePerson();
   const [name, setName] = useState(person.display_name);
   const [email, setEmail] = useState(person.email ?? '');
@@ -116,7 +121,44 @@ function EditPerson({ person, departments, onClose }: { person: Person; departme
           <Button onClick={onClose}>Cancel</Button>
         </div>
       </form>
+      {can('getLeavingDate') && can('setLeavingDate') && person.status === 'active' && <LeavingDateForm personId={person.id} name={person.display_name} />}
     </Card>
+  );
+}
+
+/** When a person plans to leave. Personal data: shown only here and on the retirement radar. */
+function LeavingDateForm({ personId, name }: { personId: string; name: string }) {
+  const current = useLeavingDate(personId);
+  const set = useSetLeavingDate();
+  const clear = useClearLeavingDate();
+  const [draft, setDraft] = useState<string | null>(null);
+  const saved = current.data?.leaving_on ?? null;
+  const value = draft ?? saved ?? '';
+  const onSubmit = (e: FormEvent): void => {
+    e.preventDefault();
+    set.mutate({ path: { person_id: personId }, body: { leaving_on: value } }, { onSuccess: () => setDraft(null) });
+  };
+  return (
+    <form onSubmit={onSubmit} noValidate>
+      <h3>Planned leaving date</h3>
+      <p className="muted">
+        Recorded so that knowledge can be captured in time: the retirement radar reminds the people who manage people 24, 12 and 6 months before.
+        Only they and {name} can see it.
+      </p>
+      {current.data !== undefined && saved !== null && (
+        <p role="status">Leaves on {saved} — {leavingStageText(current.data.stage).toLowerCase()} ({monthsText(current.data.months_left)}).</p>
+      )}
+      <TextField label="Leaves on" type="date" min={new Date().toISOString().slice(0, 10)} hint="Not in the past (the day is taken in UTC) and at most 50 years ahead."
+        value={value} onChange={(e) => setDraft(e.target.value)} />
+      <ErrorNote error={current.error ?? set.error ?? clear.error} />
+      <div className="row">
+        <Button type="submit" busy={set.isPending} disabled={value === '' || value === saved}>Save the date</Button>
+        {saved !== null && (
+          <ConfirmButton resetKey={saved} label="Remove the date" confirmLabel={`Yes, remove ${name}’s leaving date`} busy={clear.isPending}
+            onConfirm={() => clear.mutate({ path: { person_id: personId } }, { onSuccess: () => setDraft(null) })} />
+        )}
+      </div>
+    </form>
   );
 }
 

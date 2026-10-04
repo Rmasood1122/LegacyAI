@@ -15,11 +15,12 @@ import {
 import { sessionBody, type AuthService } from './auth.ts';
 import type { Authorizer } from './authz.ts';
 import {
-  CARD_COLUMNS, getCard, maxRank, otherActiveOwners, personDepartment, toApiCard, withSecrets,
+  CARD_COLUMNS, getCard, lockTenantRoles, maxRank, otherUsableOwners, personDepartment, toApiCard, withSecrets,
   type CardRow, type CardService, type RoleInput,
 } from './cards.ts';
 import { normalizeCardNumber } from './card-number.ts';
 import type { ResourceDescriptor } from './policy.ts';
+import { clearLeavingDate } from './leaving.ts';
 import { loadRoles, revokeSession, revokeSessionsForCard, rotateSession } from './sessions.ts';
 
 export interface IdentityRouteDeps {
@@ -60,11 +61,6 @@ const toApiPerson = (p: PersonRow): Record<string, unknown> => ({
 
 const COMPANY_CARD_RANK = 100;
 
-/** Per-tenant, per-transaction lock used by every route that changes roles or could remove the last Owner. */
-async function lockTenantRoles(tx: Tx, tenantId: string): Promise<void> {
-  await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 42))', [`roles:${tenantId}`]);
-}
-
 async function roleRanks(tx: Tx): Promise<Map<string, number>> {
   const { rows } = await tx.query<{ role_key: string; rank: number }>('SELECT role_key, rank FROM roles');
   return new Map(rows.map((r) => [r.role_key, r.rank]));
@@ -92,7 +88,7 @@ async function cardResource(
     target_rank: card.kind === 'company' ? COMPANY_CARD_RANK : maxRank(roles),
   };
   if (opts.lastOwnerCheck === true && roles.some((r) => r.role_key === 'company_owner') && card.state === 'active') {
-    ref.removes_last_owner = (await otherActiveOwners(tx, subject.tenant_id, card.id, now)) === 0;
+    ref.removes_last_owner = (await otherUsableOwners(tx, subject.tenant_id, card.id, now)) === 0;
   }
   return { ref, card };
 }
@@ -519,7 +515,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
           return {
             ...loaded.ref,
             role_rank: rankOf(await roleRanks(tx), touched),
-            removes_last_owner: dropsOwner && (await otherActiveOwners(tx, subject.tenant_id, loaded.card.id, ctx.now)) === 0,
+            removes_last_owner: dropsOwner && (await otherUsableOwners(tx, subject.tenant_id, loaded.card.id, ctx.now)) === 0,
           };
         },
       },
@@ -553,7 +549,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
           return {
             ...loaded.ref,
             role_rank: rankOf(await roleRanks(tx), [params.role_key]),
-            removes_last_owner: isOwnerRemoval && (await otherActiveOwners(tx, subject.tenant_id, loaded.card.id, ctx.now)) === 0,
+            removes_last_owner: isOwnerRemoval && (await otherUsableOwners(tx, subject.tenant_id, loaded.card.id, ctx.now)) === 0,
           };
         },
       },
@@ -647,7 +643,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
             ref.target_rank = maxRank(roles);
             // Offboarding revokes the card, so it must not remove the last active Owner.
             if (body.status === 'departed' && roles.some((r) => r.role_key === 'company_owner') && card.state === 'active') {
-              ref.removes_last_owner = (await otherActiveOwners(tx, subject.tenant_id, card.id, ctx.now)) === 0;
+              ref.removes_last_owner = (await otherUsableOwners(tx, subject.tenant_id, card.id, ctx.now)) === 0;
             }
           }
           return ref;
@@ -679,6 +675,8 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
           const live = await tx.query<CardRow>(
             `SELECT ${CARD_COLUMNS} FROM cards WHERE person_id = $1 AND state NOT IN ('revoked', 'replaced') FOR UPDATE`, [person.id]);
           for (const card of live.rows) await cards.revoke(tx, card, 'offboarded', subject.card_id, ctx);
+          // the planned leaving date has served its purpose and is personal data: it goes when the person has left
+          await clearLeavingDate(tx, subject.tenant_id, person.id);
         }
         await writeAudit(tx, {
           tenantId: subject.tenant_id, actorCardId: subject.card_id, actorKind: 'card', action: 'person:update',
