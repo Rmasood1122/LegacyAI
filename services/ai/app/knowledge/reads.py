@@ -11,6 +11,17 @@ from app.knowledge import item_conflicts
 from app.knowledge.items import ItemRefused, item_topics
 from app.platform import Database, ServiceContext, one, write_audit
 
+# How an item's provenance is read, in ONE place: from a citation (alias ci) to its passage (c) and document (s), and
+# which documents count. The knowledge map (graph.py) uses the same fragments, so the two cannot drift apart.
+CITED_PASSAGE_AND_DOCUMENT = """JOIN chunks c ON c.tenant_id = ci.tenant_id AND c.id = ci.chunk_id
+                  JOIN sources s ON s.tenant_id = c.tenant_id AND s.id = c.source_id"""
+CITES_ITEM_VERSION = "ci.subject_type = 'knowledge_version'"
+
+
+def readable_document(sources_condition: str) -> str:
+    """A document that is ready (not being processed, failed or withdrawn) and that the caller's knowledge filter lets it read."""
+    return f"s.status = 'ready' AND {sources_condition}"
+
 PAGE = 50
 
 
@@ -68,9 +79,8 @@ def get_item(db: Database, ctx: ServiceContext, item_id: str) -> dict[str, Any]:
         cur.execute(
             f"""SELECT DISTINCT s.id::text AS source_id, s.title, c.page_from, c.page_to
                   FROM citations ci
-                  JOIN chunks c ON c.tenant_id = ci.tenant_id AND c.id = ci.chunk_id
-                  JOIN sources s ON s.tenant_id = c.tenant_id AND s.id = c.source_id
-                 WHERE ci.tenant_id = %s AND ci.subject_type = 'knowledge_version' AND ci.subject_id = %s AND s.status = 'ready' AND {swhere}""",
+                  {CITED_PASSAGE_AND_DOCUMENT}
+                 WHERE ci.tenant_id = %s AND {CITES_ITEM_VERSION} AND ci.subject_id = %s AND {readable_document(swhere)}""",
             [ctx.tenant_id, item["current_version_id"], *sparams])
         provenance = [dict(r) for r in cur.fetchall()]
         # only topics this reader may READ: the token's topic filter (permission topic:read), not the knowledge filter

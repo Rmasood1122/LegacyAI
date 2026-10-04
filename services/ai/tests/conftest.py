@@ -101,12 +101,12 @@ class World:
 
     def ctx(self, who: str, action: str, *, filter: dict[str, Any] | None = None, approved: list[str] | None = None,
             limits: dict[str, int] | None = None, phase: str = "normal", subject: str | None = None,
-            topic_filter: dict[str, Any] | None = None) -> ServiceContext:
+            topic_filter: dict[str, Any] | None = None, filters: dict[str, dict[str, Any]] | None = None) -> ServiceContext:
         p = self.people[who]
         return ServiceContext(tenant_id=self.tenant_id, card_id=p.card_id, person_id=p.id, roles=("expert",), card_phase=phase,
                               action=action, request_id="test-request", filter=filter if filter is not None else tenant_filter(self.tenant_id),
                               approved=tuple(approved or []), limits=dict(limits if limits is not None else AI_LIMITS), subject=subject,
-                              topic_filter=topic_filter)
+                              topic_filter=topic_filter, filters=dict(filters or {}))
 
     def caller(self, who: str, **over: int) -> Caller:
         lim = {**AI_LIMITS, **over}

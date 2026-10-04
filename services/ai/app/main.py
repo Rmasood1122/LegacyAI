@@ -27,7 +27,7 @@ from app.ai_gateway import Caller, ChatProvider, Embedder, FakeProvider, Gateway
 from app.ai_gateway.remote import AnthropicProvider, OpenAIProvider
 from app.capture import ingest, interviews, topics, withdrawal
 from app.capture.gaps import gap_report
-from app.knowledge import answers, expert, items, quality, readiness, reads, upkeep
+from app.knowledge import analytics, answers, expert, graph, items, quality, readiness, reads, upkeep
 from app.platform import (
     ConfigError,
     Database,
@@ -72,6 +72,15 @@ class Feedback(Body):
     verdict: Literal["helpful", "unhelpful", "wrong"]
     comment: str | None = Field(default=None, max_length=500)
     share_question: bool = False
+
+
+class ActivityQuery(Body):
+    months: int = Field(default=6, ge=1, le=analytics.MAX_MONTHS)
+
+
+class GraphQuery(Body):
+    kind: Literal["topic", "item", "source", "job_role"]
+    id: str = Field(min_length=1, max_length=120)
 
 
 class QualityQuery(Body):
@@ -289,7 +298,8 @@ def create_app(services: Services | None = None) -> FastAPI:
     def _config_error(request: Request, exc: ConfigError) -> JSONResponse:
         return JSONResponse({"error": "not_configured"}, status_code=503)   # fail closed; the reason is not echoed
 
-    for cls in (ingest.CaptureRefused, items.ItemRefused, interviews.InterviewRefused, topics.TopicRefused, quality.QualityRefused, Refused):
+    for cls in (ingest.CaptureRefused, items.ItemRefused, interviews.InterviewRefused, topics.TopicRefused, quality.QualityRefused,
+                graph.GraphRefused, Refused):
         @app.exception_handler(cls)
         def _refused(request: Request, exc: Any) -> JSONResponse:
             return JSONResponse({"error": exc.code}, status_code=exc.status)
@@ -379,6 +389,19 @@ def create_app(services: Services | None = None) -> FastAPI:
                                  ctx: Annotated[ServiceContext, Depends(token("answer.feedback_withdraw", "answer_id"))]) -> dict[str, Any]:
         quality.withdraw_feedback(svc().db, ctx, answer_id)
         return {"answer_id": answer_id, "withdrawn": True}
+
+    # ------------------------------------------------------------------ activity numbers (feature 27) and the graph (feature 30)
+    @app.post("/internal/analytics/activity")
+    def analytics_activity(body: ActivityQuery, ctx: Annotated[ServiceContext, Depends(token("analytics.activity"))]) -> dict[str, Any]:
+        return analytics.activity(svc().db, ctx, body.months)
+
+    @app.post("/internal/graph/neighbours")
+    def graph_neighbours(body: GraphQuery, ctx: Annotated[ServiceContext, Depends(token("graph.read"))]) -> dict[str, Any]:
+        return graph.neighbourhood(svc().db, ctx, body.kind, body.id)
+
+    @app.post("/internal/graph/export")
+    def graph_export(ctx: Annotated[ServiceContext, Depends(token("graph.export"))]) -> dict[str, Any]:
+        return graph.export(svc().db, ctx)
 
     @app.post("/internal/quality/summary")
     def quality_summary(body: QualityQuery, ctx: Annotated[ServiceContext, Depends(token("quality.summary"))]) -> dict[str, Any]:

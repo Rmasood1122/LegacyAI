@@ -2577,6 +2577,125 @@ paths:
           $ref: "#/components/responses/TooManyRequests"
         "502":
           $ref: "#/components/responses/BadGateway"
+  /v1/analytics/activity:
+    get:
+      operationId: "getActivity"
+      summary: "Activity numbers for each of the last `months` calendar months (UTC, newest first; the first entry is the current month, which is not over), the items as they stand now, and test results per job role. These count what was done in the product; they are not business outcomes. EVERY number is narrowed by the caller's own rights: documents and items by its right to read knowledge, interviews by its right to read interviews (an interview has the level of what it captured), tests by its right to read test results. A number the caller has no right to at all is null - never the company's total. Test results per job role use one fixed window that does not depend on `months` (see KActivityJobRoleResults). Counts of questions and answers are in getQualitySummary (per week)."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge_settings:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "months"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 24
+            default: 6
+          description: "How many calendar months (UTC), counting the current one. Every month of the range is returned, also one in which nothing happened."
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KActivity"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  /v1/knowledge/graph:
+    get:
+      operationId: "getGraphNeighbourhood"
+      summary: "One node of the knowledge map and what it is directly linked to, in groups. Nodes are topics, knowledge items, documents and job roles; links are the ones that already exist (item - topic, item - document it cites, job role - topic, item - item conflict). Nothing is inferred, and people are not nodes. Only what the caller may read is returned. A node the caller may not read answers 404, like one that does not exist; in the same way a neighbour hidden from the caller and a neighbour that does not exist cannot be told apart - an empty group means 'nothing you may read', not 'nothing'. Each group holds at most `limit_per_group` (50) nodes and says with `truncated` when there are more; the rest of such a group cannot be reached through this operation."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "kind"
+          in: "query"
+          required: true
+          schema:
+            $ref: "#/components/schemas/KGraphNodeKind"
+          description: "What kind of node `id` names."
+        - name: "id"
+          in: "query"
+          required: true
+          schema:
+            $ref: "#/components/schemas/JobRoleName"
+          description: "The id of the topic, item or document; for a job role, its name (the same rule as a job-role name everywhere)."
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KGraphNeighbourhood"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  /v1/knowledge/graph/export:
+    post:
+      operationId: "exportKnowledgeGraph"
+      summary: "Take the whole knowledge map the caller may read out of the product, as one file in an open, documented JSON shape (KGraphExport, `schema` legacyai-knowledge-graph/1). This is an EXPORT: it needs the right to export (export:create - the Company Owner), is still narrowed by the caller's own rights to read knowledge and topics, is written to the audit log (action knowledge:graph_export, with the number of nodes and links only), and may be done at most 5 times an hour per card (429 after that). It is a second, smaller kind of export next to POST /v1/exports (the company's data export): it runs at once, returns its content in the answer and creates no export job. Caps: 2000 nodes of each kind (items, topics, documents, job roles) and 10000 links in all; `truncated` says a cap was reached. Not idempotent: each call is a new export and a new audit entry."
+      tags:
+        - "knowledge"
+      x-permission: "export:create"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KGraphExport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
   /v1/quality/feedback:
     get:
       operationId: "listAnswerFeedback"
@@ -6789,6 +6908,240 @@ components:
           type: "integer"
         feedback_wrong:
           type: "integer"
+    KActivity:
+      type: "object"
+      additionalProperties: false
+      required: ["months", "items_now", "job_role_results"]
+      properties:
+        months:
+          type: "array"
+          description: "Newest first; the first entry is the current, unfinished month. Every month of the range is present."
+          items:
+            $ref: "#/components/schemas/KActivityMonth"
+        items_now:
+          type: "object"
+          additionalProperties: false
+          description: "The items the caller may read, as they stand now."
+          required: ["verified", "stale_items", "not_yet_verified"]
+          properties:
+            verified:
+              type: "integer"
+              description: "Verified or corrected."
+            stale_items:
+              type: "integer"
+              description: "Items whose verification has run out, among the items the caller may read. getQualitySummary has a counter of the same name in `waiting_for_review`: that one counts open review tasks for stale items in the whole company, so the two can differ."
+            not_yet_verified:
+              type: "integer"
+              description: "Captured or in review, not yet verified."
+        job_role_results:
+          $ref: "#/components/schemas/KActivityJobRoleResults"
+    KActivityMonth:
+      type: "object"
+      additionalProperties: false
+      required: ["month_start", "documents_added", "items_captured", "items_verified", "median_hours_to_verify", "interviews_completed", "tests_handed_in"]
+      properties:
+        month_start:
+          type: "string"
+          format: "date"
+          description: "The first day of the calendar month (UTC), as week_start names a week in getQualitySummary."
+        documents_added:
+          type: "integer"
+        items_captured:
+          type: "integer"
+        items_verified:
+          type: "integer"
+          description: "Items verified in this month that are still verified, corrected or stale."
+        median_hours_to_verify:
+          type: ["number", "null"]
+          description: "Median HOURS from capture to verification for those items; null when none was verified in the month."
+        interviews_completed:
+          type: ["integer", "null"]
+          description: "Interviews finished in this month that the caller may read. Null (not 0) when the caller does not hold the right to read interviews at all."
+        tests_handed_in:
+          type: ["integer", "null"]
+          description: "Readiness tests handed in this month that the caller may read results of. Null (not 0) when the caller does not hold the right to read test results at all."
+    KActivityJobRoleResults:
+      type: "object"
+      additionalProperties: false
+      description: "Readiness test results per job role, protected so that one person's result cannot be read off. (1) Only for a caller who may read the test results of the whole company; otherwise `state` is not_allowed and `rows` is empty. (2) ONE fixed window, the 12 complete calendar months before the current one (UTC), whatever `months` was asked for, so two requests cannot be subtracted from each other. (3) A job role gets numbers only with at least `minimum_group` different people in that window. (4) The mean is rounded to one decimal. What this does NOT prevent: comparing the table before and after a new test was graded shows that a test was added and roughly moved the mean. That is accepted because the only cards that receive the table may already read every single result."
+      required: ["state", "window_start", "window_end", "minimum_group", "max_rows", "truncated", "rows"]
+      properties:
+        state:
+          type: "string"
+          enum: ["shown", "not_allowed"]
+          description: "not_allowed: the caller may not read the whole company's test results, so there is no table."
+        window_start:
+          type: "string"
+          format: "date"
+          description: "First day of the window (UTC), inclusive."
+        window_end:
+          type: "string"
+          format: "date"
+          description: "First day of the current month (UTC), exclusive: the current month is not in the window."
+        minimum_group:
+          type: "integer"
+          description: "The smallest number of different people for which numbers are shown (5)."
+        max_rows:
+          type: "integer"
+          description: "At most this many job roles are listed, in name order (100)."
+        truncated:
+          type: "boolean"
+          description: "True when there are more job roles than `max_rows`."
+        rows:
+          type: "array"
+          items:
+            $ref: "#/components/schemas/KActivityJobRole"
+    KActivityJobRole:
+      type: "object"
+      additionalProperties: false
+      required: ["job_role", "state", "people", "attempts", "mean_score"]
+      properties:
+        job_role:
+          type: "string"
+        state:
+          type: "string"
+          enum: ["shown", "too_few_people", "no_graded_answers"]
+          description: "shown: all numbers are given. too_few_people: fewer than `minimum_group` different people took a graded test for this job role in the window - people, attempts and mean_score are null on purpose (suppressed, not zero). no_graded_answers: enough people, but none of their answers has a score yet - people and attempts are given, mean_score is null."
+        people:
+          type: ["integer", "null"]
+          description: "Different people with a graded test in the window. Null only when state is too_few_people."
+        attempts:
+          type: ["integer", "null"]
+          description: "Graded tests in the window. Null only when state is too_few_people."
+        mean_score:
+          type: ["number", "null"]
+          description: "Mean score of the graded answers, 0 to 1, rounded to one decimal. Not a pass mark: the product defines none. Null unless state is shown."
+    KGraphNodeKind:
+      type: "string"
+      enum: ["topic", "item", "source", "job_role"]
+    KGraphNodeRef:
+      type: "object"
+      additionalProperties: false
+      description: "Names one node. An id is unique within its kind only (a job role's id is its name), so a node is always named by kind AND id."
+      required: ["kind", "id"]
+      properties:
+        kind:
+          $ref: "#/components/schemas/KGraphNodeKind"
+        id:
+          type: "string"
+    KGraphNode:
+      type: "object"
+      additionalProperties: false
+      required: ["kind", "id", "label", "status"]
+      properties:
+        kind:
+          $ref: "#/components/schemas/KGraphNodeKind"
+        id:
+          type: "string"
+          description: "The id of the topic, item or document; for a job role, its name. Unique within its kind only."
+        label:
+          type: "string"
+          description: "The name or title, with personal details blanked out as everywhere."
+        status:
+          description: "For an item: its state (the same values as the status filter of listKnowledgeItems). Null for other kinds."
+          oneOf:
+            - $ref: "#/components/schemas/KItemStatus"
+            - type: "null"
+    KItemStatus:
+      type: "string"
+      enum: ["candidate", "in_review", "verified", "corrected", "rejected", "stale"]
+    KGraphEdgeKind:
+      type: "string"
+      enum: ["item_topic", "item_source", "job_role_topic", "item_conflict"]
+      description: "item_topic: from an item to a topic it belongs to. item_source: from an item to a document it cites. job_role_topic: from a job role to a topic it needs. item_conflict: two verified items that state different values - it has NO direction; by convention the item with the smaller id is `from`."
+    KGraphEdgeOrigin:
+      description: "How a link between an item and a topic was made: by similarity of the texts, or by a reviewer. Null for every other kind of link."
+      oneOf:
+        - type: "string"
+          enum: ["similarity", "reviewer"]
+        - type: "null"
+    KGraphNeighbour:
+      type: "object"
+      additionalProperties: false
+      required: ["node", "origin"]
+      properties:
+        node:
+          $ref: "#/components/schemas/KGraphNode"
+        origin:
+          $ref: "#/components/schemas/KGraphEdgeOrigin"
+    KGraphGroup:
+      type: "object"
+      additionalProperties: false
+      required: ["group", "edge_kind", "truncated", "nodes"]
+      properties:
+        group:
+          type: "string"
+          enum: ["topics", "items", "sources", "job_roles", "conflicting_items"]
+        edge_kind:
+          $ref: "#/components/schemas/KGraphEdgeKind"
+        truncated:
+          type: "boolean"
+          description: "True when this group has more nodes the caller may read than the 50 listed. The others cannot be fetched through this operation; open one of the listed nodes, or use the list screens."
+        nodes:
+          type: "array"
+          description: "Empty when nothing is linked OR when everything linked is hidden from the caller: the two are not told apart, on purpose."
+          items:
+            $ref: "#/components/schemas/KGraphNeighbour"
+    KGraphNeighbourhood:
+      type: "object"
+      additionalProperties: false
+      required: ["node", "neighbours", "limit_per_group"]
+      properties:
+        node:
+          $ref: "#/components/schemas/KGraphNode"
+        neighbours:
+          type: "array"
+          description: "Only the groups this kind of node has, in a fixed order."
+          items:
+            $ref: "#/components/schemas/KGraphGroup"
+        limit_per_group:
+          type: "integer"
+          description: "The cap of every group (50)."
+    KGraphEdge:
+      type: "object"
+      additionalProperties: false
+      required: ["kind", "from", "to", "origin"]
+      properties:
+        kind:
+          $ref: "#/components/schemas/KGraphEdgeKind"
+        from:
+          $ref: "#/components/schemas/KGraphNodeRef"
+        to:
+          $ref: "#/components/schemas/KGraphNodeRef"
+        origin:
+          $ref: "#/components/schemas/KGraphEdgeOrigin"
+    KGraphExport:
+      type: "object"
+      additionalProperties: false
+      description: "The exported file. Every edge joins two nodes that are in the file. No text of items or documents, no people."
+      required: ["schema", "nodes", "edges", "truncated", "limits"]
+      properties:
+        schema:
+          type: "string"
+          const: "legacyai-knowledge-graph/1"
+          description: "The name and version of this shape."
+        nodes:
+          type: "array"
+          items:
+            $ref: "#/components/schemas/KGraphNode"
+        edges:
+          type: "array"
+          items:
+            $ref: "#/components/schemas/KGraphEdge"
+        truncated:
+          type: "boolean"
+          description: "True when a cap in `limits` was reached, so the file is not the whole map."
+        limits:
+          type: "object"
+          additionalProperties: false
+          required: ["nodes_per_kind", "edges"]
+          properties:
+            nodes_per_kind:
+              type: "integer"
+              description: "At most this many nodes of each kind: items, topics, documents, job roles (2000)."
+            edges:
+              type: "integer"
+              description: "At most this many links of all kinds together (10000)."
     KQualitySummary:
       type: "object"
       additionalProperties: false

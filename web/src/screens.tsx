@@ -11,6 +11,8 @@ import { ConsentScreen } from './features/consent/ConsentScreen.tsx';
 import { DocumentDetailScreen } from './features/documents/DocumentDetailScreen.tsx';
 import { DocumentsScreen } from './features/documents/DocumentsScreen.tsx';
 import { HomeScreen } from './features/home/HomeScreen.tsx';
+import { ActivityScreen } from './features/insight/ActivityScreen.tsx';
+import { GraphNodeScreen, GraphStartScreen } from './features/insight/GraphScreen.tsx';
 import { InterviewScreen } from './features/interviews/InterviewScreen.tsx';
 import { InterviewsScreen } from './features/interviews/InterviewsScreen.tsx';
 import { KnowledgeItemScreen } from './features/knowledge/KnowledgeItemScreen.tsx';
@@ -53,6 +55,8 @@ const COMPONENTS: Readonly<Record<ScreenKey, ComponentType>> = {
   attempt: AttemptScreen,
   report: ReportScreen,
   consent: ConsentScreen,
+  graph: GraphStartScreen,
+  graphNode: GraphNodeScreen,
   topics: TopicsScreen,
   gaps: GapsScreen,
   questionBank: QuestionBankScreen,
@@ -62,6 +66,7 @@ const COMPONENTS: Readonly<Record<ScreenKey, ComponentType>> = {
   card: CardScreen,
   consentAdmin: ConsentAdminScreen,
   quality: QualityScreen,
+  activity: ActivityScreen,
   settings: SettingsScreen,
   audit: AuditScreen,
   operator: OperatorScreen,

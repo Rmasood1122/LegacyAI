@@ -3,15 +3,17 @@
 import { useState } from 'react';
 import { useParams } from 'react-router';
 import type { Card as CardRecord, CardWithSecrets, EnrollmentTokenResponse, RoleAssignmentInput } from '../../api/generated.ts';
+import { signInAddress } from '../../navigation/cardLink.ts';
 import { ScreenLink } from '../../navigation/ScreenLink.tsx';
 import { useSession } from '../../session/session.tsx';
 import {
   Badge, Banner, Button, Card, CheckboxField, ConfirmButton, DataTable, ErrorNote, Facts, formatDate, humanize, Loading, OneTimeSecrets, Page, PartialListNote, SelectField, TextField,
 } from '../../ui/index.tsx';
+import { QrCode } from '../../ui/qr.tsx';
 import type { ShownSecrets } from '../../ui/index.tsx';
 import {
   CARD_STATE_TEXT, cardTone, describeRestriction, useAssignRole, useCard, useCardEvents, useCardRestrictions, useNewEnrollmentToken, useReinstateCard, useRemoveRole, useRenewCard,
-  lockReasonText, useReplaceCard, useRevokeCard, useRoles, useSaveRestrictions, useSuspendCard, useUnlockCard, withReadOnly,
+  lockReasonText, useCompany, useReplaceCard, useRevokeCard, useRoles, useSaveRestrictions, useSuspendCard, useUnlockCard, withReadOnly,
 } from './hooks.ts';
 
 type RoleKey = RoleAssignmentInput['role_key'];
@@ -44,6 +46,7 @@ export function CardScreen() {
               ['Renewed', `${data.renewal_count} ${data.renewal_count === 1 ? 'time' : 'times'}`],
             ]} />
           </Card>
+          {data.kind === 'person' && <CardQr card={data} />}
           <Actions card={data} />
           {can('listCardRoles') && <Roles card={data} />}
           {can('getCardRestrictions') && <Restrictions cardId={data.id} />}
@@ -195,6 +198,58 @@ function Events({ cardId }: { cardId: string }) {
       )}
       {events.hasMore && <PartialListNote shown={items.length} noun="entries" busy={events.isLoadingMore} onLoadMore={events.loadMore} />}
       {events.items !== undefined && items.length > 0 && !events.hasMore && <Banner tone="info">This is the whole history of the card.</Banner>}
+    </Card>
+  );
+}
+
+/** While this class is on <body>, printing prints the card section only (styles/base.css). */
+const PRINTING_CARD = 'printing-card';
+
+/**
+ * Prints the card and nothing else: no roles, no history, no buttons.
+ * The class is taken off again only when the browser says printing is over ("afterprint"). Some browsers (phones)
+ * return from print() before the page is rendered; taking the class off straight away would then print the whole
+ * card screen. If "afterprint" never comes, the class goes after five minutes; until then a second print from this
+ * screen prints the card only, which is the safe direction.
+ */
+function printCardOnly(): void {
+  const done = (): void => document.body.classList.remove(PRINTING_CARD);
+  document.body.classList.add(PRINTING_CARD);
+  window.addEventListener('afterprint', done, { once: true });
+  window.setTimeout(done, 5 * 60_000);
+  window.print();
+}
+
+/** The card as a QR code: it opens the sign-in screen with the card number filled in - never the 3-digit code. */
+function CardQr({ card }: { card: CardRecord }) {
+  const { can } = useSession();
+  const company = useCompany({ enabled: can('getCurrentTenant') });
+  const address = signInAddress(window.location.origin, card.card_number);
+  if (address === null) return null;
+  const label = `QR code that opens the sign-in screen for card ${card.card_number}`;
+  return (
+    <Card title="This card as a QR code">
+      <div className="qr-card no-print">
+        <QrCode text={address} label={label} />
+        <div>
+          <p>Scanning it opens the sign-in screen with this card number filled in. It holds the card number only.</p>
+          <p className="muted">
+            The 3-digit code and the passkey or authenticator app are still needed to sign in, so the QR code alone lets nobody in.
+            NFC cards are not supported.
+          </p>
+          <p><Button onClick={printCardOnly}>Print this card</Button></p>
+          <p className="muted">Only the card is printed: its number, how long it is valid, and the QR code.</p>
+        </div>
+      </div>
+      {/* What goes on paper. Hidden on the screen; when "Print this card" is used it is the only thing printed. */}
+      <section className="print-card" aria-label="The card as it is printed">
+        {company.data !== undefined && <p className="print-card-company">{company.data.name}</p>}
+        <p>LegacyAI access card</p>
+        <p className="code">{card.card_number}</p>
+        <p>Valid until {formatDate(card.expires_at)}</p>
+        <QrCode text={address} label={label} />
+        <p>Scan to open the sign-in screen. The 3-digit code is not on this card.</p>
+      </section>
     </Card>
   );
 }

@@ -41,6 +41,12 @@ DESCRIPTORS: dict[str, Descriptor] = {
     # The same owner columns as the API's ATTEMPT_DESCRIPTOR (routes-workflow.ts). owner_person_id always equals
     # learner_person_id (a CHECK on the table), so the two services cannot disagree about whose attempt it is.
     "quiz_attempts": Descriptor("qa.tenant_id", None, None, ("qa.owner_person_id",), owner_card=("qa.learner_card_id",)),
+    # An interview carries no level of its own; what it captured does (its document). An interview that has no
+    # document yet (only invited) holds nothing and counts as level 0.
+    "interviews": Descriptor(
+        "v.tenant_id", None,
+        "COALESCE((SELECT sv.sensitivity FROM sources sv WHERE sv.tenant_id = v.tenant_id AND sv.id = v.source_id), 0)",
+        ("v.expert_person_id",)),
 }
 
 _SCOPE_KEYS = {
@@ -129,6 +135,30 @@ def condition(spec: Any, table: str, token_tenant_id: str) -> tuple[str, list[An
             return NOTHING  # "verified only" cannot be honoured on this table: show nothing
         sql += f" AND {descriptor.verified}"
     return sql + ")", params
+
+
+def named(filters: Any, permission: str) -> dict[str, Any] | None:
+    """The filter of ONE permission from the token's `filters` claim, or None.
+
+    The claim maps a permission to the filter the policy built for it. A filter is used only for the permission it
+    was built for: its own `action` must say so, otherwise it is treated as absent.
+    """
+    if not isinstance(filters, dict):
+        return None
+    spec = filters.get(permission)
+    if not isinstance(spec, dict) or spec.get("action") != permission:
+        return None
+    return spec
+
+
+def grants_something(spec: Any) -> bool:
+    """False when the card does not hold the permission at all (the policy sends `nothing: true`), or the filter is missing."""
+    return isinstance(spec, dict) and spec.get("nothing") is False and isinstance(spec.get("any_of"), list) and bool(spec["any_of"])
+
+
+def company_wide(spec: Any) -> bool:
+    """True when at least one grant in the filter covers the whole company (scope "tenant")."""
+    return grants_something(spec) and any(isinstance(g, dict) and g.get("scope") == "tenant" for g in spec["any_of"])
 
 
 def topic_condition(spec: Any, token_tenant_id: str) -> tuple[str, list[Any]]:

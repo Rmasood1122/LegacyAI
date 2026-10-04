@@ -67,7 +67,7 @@ export async function createApp(config: Config, overrides: AppOverrides = {}): P
   });
   http.defineRoutes(platformRoutes({ config, db, exports }));
   http.defineRoutes(identity.routes);
-  const knowledge = createKnowledgeGateway({ config, db, authorizer: identity.authorizer, notifier });
+  const knowledge = createKnowledgeGateway({ config, db, authorizer: identity.authorizer, notifier, rateLimiter });
   // the retirement radar (identity) shows what is held from a person; the knowledge module answers that, by its own rules
   identity.usePersonHoldings(knowledge.personHoldings);
   http.defineRoutes(knowledge.routes);

@@ -283,7 +283,7 @@ The maturity rule is applied to the **major** version, as everywhere in this fil
 `docs/phase3/00-proposal.md` (the newest release that was itself at least 60 days old on the day of the proposal), which is stricter
 than the rule requires.
 
-### Runtime dependencies (5) — this is all the third-party code that runs in the browser
+### Runtime dependencies (6) — this is all the third-party code that runs in the browser
 
 | Package | Version | Evidence | Why |
 |---|---|---|---|
@@ -292,8 +292,9 @@ than the rule requires.
 | react-router | **7.18.2** (2026-07-28) | MEASURED: major 7 since 2024-11-22; 8.0.0 was published 2026-06-17 and passes the 60-day rule, 8.4.0 is the latest; MIT | Screen addresses. Major 7 kept as approved in the proposal; moving to 8 is a later, separate change. |
 | @tanstack/react-query | **5.101.4** (2026-07-21) | MEASURED: major 5 since 2023-10-17; latest 5.104.1; peer `react ^18 or ^19`; MIT | Loading and refreshing data from the API. |
 | @simplewebauthn/browser | **13.3.0** (2026-03-10) | MEASURED: major 13 since 2024-12-09; 14.0.0 was published 2026-09-02 (31 days) → maturity rule; MIT | Passkeys in the browser. Same major as the server's `@simplewebauthn/server` 13.3.3. |
+| qrcode-generator | **2.0.4** (2025-08-07) | MEASURED 2026-10-04: major 2 since 2025-06-26 (2.0.0); latest is 2.0.4; no dependencies; ships its own types; MIT | Draws a card's QR code in the browser (Phase 4, feature 4). Chosen over writing our own encoder: what it produces is checked in a unit test by reading it back with an independent decoder (jsQR). |
 
-### Development dependencies (17)
+### Development dependencies (18)
 
 | Package | Version | Evidence | Why |
 |---|---|---|---|
@@ -314,6 +315,7 @@ than the rule requires.
 | @types/react-dom | **19.0.6** (2025-04-02) | MEASURED: newest 19.0.x; MIT | Types. |
 | `@types/node` (web) | **24.19.0** | see section 2 | Types for the build and test scripts. |
 | `yaml` (web) | **2.9.1** | see section 2 | Reads `openapi.yaml` in the type generator. |
+| jsqr | **1.4.0** (2021-04-24) | MEASURED 2026-10-04: major 1 since 2018-01-15; latest is 1.4.0 (no release since 2021: old but complete, and used in tests only); no dependencies; Apache-2.0 | Reads a QR code back in the unit test, so the content of a card's QR code is proved by a decoder that is independent of the encoder. Not shipped to the browser. |
 
 ### Decision: our own type generator instead of `openapi-typescript`
 

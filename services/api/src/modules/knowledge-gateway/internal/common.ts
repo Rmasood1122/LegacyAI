@@ -3,7 +3,7 @@ import { isUuid } from '../../../shared/crypto.ts';
 import { problems } from '../../../shared/errors.ts';
 import type { Decision, RequestContext, ResourceRef, Subject } from '../../../shared/policy-types.ts';
 import type { Authorizer } from '../../identity-access/index.ts';
-import type { Database, GatewayPrepared, ListFilter, Notifier, RouteDef, SessionHandlerArgs, Tx } from '../../platform/index.ts';
+import type { Database, GatewayPrepared, ListFilter, Notifier, RateLimiter, RouteDef, SessionHandlerArgs, Tx } from '../../platform/index.ts';
 import type { AiCall, AiServiceClient, TokenClaims } from './client.ts';
 
 export interface GatewayDeps {
@@ -11,6 +11,7 @@ export interface GatewayDeps {
   authorizer: Authorizer;
   ai: AiServiceClient;
   notifier: Notifier;
+  rateLimiter: RateLimiter;
 }
 
 export type Loader = (args: { tx: Tx; subject: Subject; params: any; body: any; query: any; ctx: RequestContext }) => Promise<ResourceRef | null>;
@@ -51,6 +52,11 @@ export interface CallPlan extends Omit<AiCall, 'claims'> {
    * says nothing about topics, so the topics of an item are never narrowed with `filterAction`.
    */
   topicFilter?: boolean;
+  /**
+   * Also add the card's filters of these READ permissions, each under its own name (claim `filters`). For operations
+   * whose answer holds several kinds of thing, each narrowed by the right to read that kind.
+   */
+  moreFilters?: readonly string[];
   /** Add the AI limits to the token (only for operations that may call a model). */
   ai?: boolean;
   approved?: string[];
@@ -79,6 +85,10 @@ export function gatewayRoute(
       const claims: TokenClaims = baseClaims(a.subject, a.decision, a.ctx);
       if (p.filterAction !== undefined) claims.filter = await deps.authorizer.filterSpec(a.tx, a.subject, p.filterAction, a.ctx);
       if (p.topicFilter === true) claims.topic_filter = await deps.authorizer.filterSpec(a.tx, a.subject, 'topic:read', a.ctx);
+      if (p.moreFilters !== undefined) {
+        claims.filters = {};
+        for (const permission of p.moreFilters) claims.filters[permission] = await deps.authorizer.filterSpec(a.tx, a.subject, permission, a.ctx);
+      }
       if (p.ai === true) claims.limits = await aiLimits(a.tx, a.subject.tenant_id);
       if (p.approved !== undefined) claims.approved = p.approved;
       const call: AiCall = { path: p.path, method: p.method, action: p.action, subject: p.subject, json: p.json, bytes: p.bytes, claims };

@@ -58,6 +58,24 @@ const DEFAULTS: Record<string, Answer> = {
   'answer.feedback_withdraw': (c) => ({ answer_id: c.claims.subject, withdrawn: true }),
   'quality.summary': () => ({ weeks: [], kept_for_days: 90, waiting_for_review: { item_conflicts: 0, stale_items: 0, answers_marked_wrong: 0 } }),
   'quality.feedback': () => ({ items: [], next_cursor: null }),
+  'analytics.activity': () => ({
+    months: [{ month_start: '2026-10-01', documents_added: 1, items_captured: 2, items_verified: 1, median_hours_to_verify: 3.5, interviews_completed: null, tests_handed_in: 1 }],
+    items_now: { verified: 1, stale_items: 0, not_yet_verified: 1 },
+    job_role_results: {
+      state: 'shown', window_start: '2025-10-01', window_end: '2026-10-01', minimum_group: 5, max_rows: 100, truncated: false,
+      rows: [{ job_role: 'Synthetic role', state: 'too_few_people', people: null, attempts: null, mean_score: null }],
+    },
+  }),
+  'graph.read': (c) => ({
+    node: { kind: c.body?.kind ?? 'item', id: c.body?.id ?? id(), label: 'Synthetic node', status: 'verified' },
+    neighbours: [
+      { group: 'conflicting_items', edge_kind: 'item_conflict', truncated: false, nodes: [] },
+      { group: 'topics', edge_kind: 'item_topic', truncated: true, nodes: [{ node: { kind: 'topic', id: id(), label: 'Synthetic topic', status: null }, origin: 'reviewer' }] },
+      { group: 'sources', edge_kind: 'item_source', truncated: false, nodes: [] },
+    ],
+    limit_per_group: 50,
+  }),
+  'graph.export': () => ({ schema: 'legacyai-knowledge-graph/1', nodes: [], edges: [], truncated: false, limits: { nodes_per_kind: 2000, edges: 10000 } }),
   'item.list': () => ({ items: [], next_cursor: null }),
   'item.read': (c) => ({
     id: c.claims.subject, title: 'Synthetic item', status: 'verified', origin: 'manual', ai_extracted: false, department_id: null, sensitivity: 1,

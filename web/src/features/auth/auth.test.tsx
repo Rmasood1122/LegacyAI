@@ -14,6 +14,23 @@ const noPasskeys: Passkeys = { supported: () => false, authenticate: vi.fn(), re
 const begun = { login_txn: TXN, webauthn_options: { challenge: 'abc' }, totp_allowed: true as const, expires_in: 300 };
 
 describe('sign-in', () => {
+  it('the QR link of a card fills in the card number, is removed from the address bar, and nothing else is skipped', async () => {
+    window.history.replaceState(null, '', `/#card=${CARD}`);
+    const api = new FakeApi({ loginBegin: () => begun });
+    renderScreen(<SignInScreen passkeys={noPasskeys} />, { api, session: sessionValue(null) });
+    expect((screen.getByLabelText('Card number') as HTMLInputElement).value).toBe(CARD);
+    await waitFor(() => expect(window.location.hash).toBe(''));
+    expect(api.calls).toEqual([]);                                   // nothing is sent until the person presses Continue
+    expect(screen.queryByLabelText('3-digit code')).toBeNull();      // and the 3-digit code is still asked for afterwards
+  });
+
+  it('a fragment that is not exactly a card number is ignored and removed', async () => {
+    window.history.replaceState(null, '', `/#card=${CARD}&sc=123`);
+    renderScreen(<SignInScreen passkeys={noPasskeys} />, { api: new FakeApi({}), session: sessionValue(null) });
+    expect((screen.getByLabelText('Card number') as HTMLInputElement).value).toBe('');
+    await waitFor(() => expect(window.location.hash).toBe(''));
+  });
+
   it('signs in with card number, 3-digit code and an authenticator-app code', async () => {
     const user = userEvent.setup();
     const session = makeSession(['knowledge:ask']);

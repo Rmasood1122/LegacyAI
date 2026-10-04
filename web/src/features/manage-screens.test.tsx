@@ -2,7 +2,7 @@
 // Synthetic data only; the "secrets" below are made-up test strings.
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Card, KConsent, KSettings, TenantSettings } from '../api/generated.ts';
 import { FakeApi, makeSession, permissionsFor, problem, renderScreen, sessionValue } from '../test/harness.tsx';
 import { AuditScreen } from './admin/AuditScreen.tsx';
@@ -101,6 +101,38 @@ describe('cards', () => {
     await user.click(screen.getByRole('button', { name: 'Yes, revoke this card for good' }));
     await waitFor(() => expect(api.callsTo('revokeCard')).toHaveLength(1));
     expect(screen.queryByText('Roles')).toBeNull();                                  // no permission to read roles
+  });
+
+  it('one card: "Print this card" prints the card only - its number, validity, QR code and the company - not roles or history', async () => {
+    const user = userEvent.setup();
+    const api = new FakeApi({
+      getCard: () => card(),
+      getCurrentTenant: () => ({ name: 'Synthetic Bottling Co' }) as never,
+      listRoles: () => ({ items: [role('successor', 'Successor')] }),
+      listCardEvents: () => page([{ id: ID(33), card_id: ID(30), occurred_at: T, event_type: 'login_succeeded', actor_card_id: null, credential_id: null, device: 'Synthetic browser', request_id: null, metadata: {} }]),
+    });
+    renderScreen(<CardScreen />, {
+      api, session: as('getCard', 'getCurrentTenant', 'listCardRoles', 'listRoles', 'listCardEvents'), at: `/cards/${ID(30)}`, route: '/cards/:cardId',
+    });
+    expect(await screen.findByText('Login succeeded')).toBeTruthy();                 // the history is on the screen ...
+    const printed = await screen.findByRole('region', { name: 'The card as it is printed' });
+    await within(printed).findByText('Synthetic Bottling Co');
+    const text = printed.textContent ?? '';
+    expect(text).toContain('LGY-0000-0000-0000-0030');
+    expect(text).toContain('Valid until');
+    expect(within(printed).getByRole('img', { name: /QR code that opens the sign-in screen/ })).toBeTruthy();
+    for (const notOnPaper of ['Login succeeded', 'Successor', 'Synthetic browser', 'Roles', 'Suspend']) expect(text, notOnPaper).not.toContain(notOnPaper);   // ... not on paper
+    // while printing, the page is marked so that the style sheet shows the card section only; the mark is taken off afterwards
+    let markedWhilePrinting = false;
+    const print = vi.spyOn(window, 'print').mockImplementation(() => { markedWhilePrinting = document.body.classList.contains('printing-card'); });
+    await user.click(screen.getByRole('button', { name: 'Print this card' }));
+    expect(print).toHaveBeenCalledTimes(1);
+    expect(markedWhilePrinting).toBe(true);
+    // the class stays until the browser says printing is over (a phone returns from print() before it has rendered)
+    expect(document.body.classList.contains('printing-card')).toBe(true);
+    window.dispatchEvent(new Event('afterprint'));
+    expect(document.body.classList.contains('printing-card')).toBe(false);
+    print.mockRestore();
   });
 
   it('one card: roles, limits and history appear for a card that may read them; read-only can be switched on', async () => {

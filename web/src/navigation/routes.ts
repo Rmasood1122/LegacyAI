@@ -77,6 +77,10 @@ export const ROUTES = {
   // a card with an own-scope grant gets only its own records from it.
   consentAdmin: { path: '/consents', label: 'Consents', requiredOperation: 'listConsents', alsoRequires: ['getTenantSettings'], menu: 'manage' },
   quality: { path: '/quality', label: 'Answer quality', requiredOperation: 'getQualitySummary', menu: 'manage' },
+  activity: { path: '/activity', label: 'Activity', requiredOperation: 'getActivity', menu: 'manage' },
+  // The knowledge map: what is linked to what. A node's address holds its kind and id in one part ("topic~<id>").
+  graph: { path: '/graph', label: 'Knowledge map', requiredOperation: 'getGraphNeighbourhood' },
+  graphNode: { path: '/graph/:node', requiredOperation: 'getGraphNeighbourhood' },
   settings: { path: '/settings', label: 'Settings', requiredOperation: 'getTenantSettings', menu: 'manage' },
   audit: { path: '/audit', label: 'Audit log', requiredOperation: 'listAuditEvents', menu: 'manage' },
   operator: { path: '/operator', label: 'Operator console', requiredOperation: 'listTenants', menu: 'manage' },
@@ -84,10 +88,27 @@ export const ROUTES = {
 
 export type ScreenKey = keyof typeof ROUTES;
 /** Screens that show one thing and so need its id. */
-export type DetailScreenKey = 'document' | 'knowledgeItem' | 'interview' | 'attempt' | 'report' | 'card';
+export type DetailScreenKey = 'document' | 'knowledgeItem' | 'interview' | 'attempt' | 'report' | 'card' | 'graphNode';
 export type PlainScreenKey = Exclude<ScreenKey, DetailScreenKey>;
 /** A screen to go to: a plain one, or a detail screen together with the id of what it shows. */
 export type ScreenTarget = { screen: PlainScreenKey } | { screen: DetailScreenKey; id: string };
+
+/** The kinds of node of the knowledge map (the API's KGraphNodeKind). */
+export const GRAPH_NODE_KINDS = ['topic', 'item', 'source', 'job_role'] as const;
+export type GraphNodeKind = (typeof GRAPH_NODE_KINDS)[number];
+const NODE_KEY_SEPARATOR = '~';
+
+/** A node of the knowledge map in an address: its kind and its own id (for a job role, its name) in one path part. */
+export const graphNodeKey = (kind: GraphNodeKind, id: string): string => `${kind}${NODE_KEY_SEPARATOR}${id}`;
+
+/** The reverse of graphNodeKey, or null for anything it could not have made. The two are kept side by side on purpose. */
+export function parseGraphNodeKey(key: string): { kind: GraphNodeKind; id: string } | null {
+  const at = key.indexOf(NODE_KEY_SEPARATOR);
+  if (at <= 0) return null;
+  const kind = key.slice(0, at);
+  const id = key.slice(at + 1);
+  return (GRAPH_NODE_KINDS as readonly string[]).includes(kind) && id !== '' && id.length <= 120 ? { kind: kind as GraphNodeKind, id } : null;
+}
 
 export const routeOf = (screen: ScreenKey): RouteDef => ROUTES[screen];
 

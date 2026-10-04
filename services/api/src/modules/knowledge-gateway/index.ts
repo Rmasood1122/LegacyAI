@@ -5,10 +5,11 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Authorizer, PersonHoldingsLoader } from '../identity-access/index.ts';
-import type { Config, Database, Notifier, RouteDef } from '../platform/index.ts';
+import type { Config, Database, Notifier, RateLimiter, RouteDef } from '../platform/index.ts';
 import { AiServiceClient, loadInternalContract } from './internal/client.ts';
 import { personHoldingsLoader } from './internal/holdings.ts';
 import { adminRoutes, knowledgePolicySettings } from './internal/routes-admin.ts';
+import { insightRoutes } from './internal/routes-insight.ts';
 import { knowledgeRoutes } from './internal/routes-knowledge.ts';
 import { qualityRoutes } from './internal/routes-quality.ts';
 import { workflowRoutes } from './internal/routes-workflow.ts';
@@ -24,6 +25,8 @@ export interface KnowledgeGatewayDeps {
   db: Database;
   authorizer: Authorizer;
   notifier: Notifier;
+  /** For limits per card on costly operations (taking the knowledge map out). */
+  rateLimiter: RateLimiter;
 }
 
 export interface KnowledgeGateway {
@@ -37,9 +40,9 @@ export function createKnowledgeGateway(deps: KnowledgeGatewayDeps): KnowledgeGat
     loadInternalContract(INTERNAL_CONTRACT_PATH), deps.config.aiServiceIdentity);
   // The policy decision point needs two of this module's settings; it is given a way to read them.
   deps.authorizer.useKnowledgeSettings(knowledgePolicySettings);
-  const g = { db: deps.db, authorizer: deps.authorizer, ai, notifier: deps.notifier };
+  const g = { db: deps.db, authorizer: deps.authorizer, ai, notifier: deps.notifier, rateLimiter: deps.rateLimiter };
   return {
-    routes: [...knowledgeRoutes(g), ...workflowRoutes(g), ...adminRoutes(g), ...qualityRoutes(g)],
+    routes: [...knowledgeRoutes(g), ...workflowRoutes(g), ...adminRoutes(g), ...qualityRoutes(g), ...insightRoutes(g)],
     personHoldings: personHoldingsLoader(deps.authorizer),
   };
 }

@@ -156,3 +156,30 @@ dl.facts dd { margin: 0; }
 .secrets { border: 2px solid var(--warning); border-radius: var(--radius); padding: var(--space-3); margin-bottom: var(--space-3); background: var(--warning-bg); }
 .secrets dd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 1.1rem; overflow-wrap: anywhere; }
 .question { border-left: 4px solid var(--accent); padding-left: var(--space-3); font-size: 1.1rem; }
+
+/* A card as a QR code (docs/phase4/03). The code is always dark on white, also in the dark theme: readers need the contrast. */
+.qr { width: 11rem; height: 11rem; flex: none; }
+.qr-light { fill: #ffffff; }
+.qr-dark { fill: #000000; }
+.qr-card { display: flex; gap: var(--space-4); align-items: flex-start; flex-wrap: wrap; }
+
+/* The card as it goes on paper: not shown on the screen. */
+.print-card { display: none; }
+
+/* Printing a screen prints its content only: no menus, no buttons. */
+@media print {
+  .topbar, .subnav, .skip-link, .no-print, .button { display: none; }
+  body { background: #ffffff; color: #000000; }
+  .card { border: 0; }
+  /* "Print this card" (body.printing-card): the card section and nothing else - no roles, no history, no other screen content. */
+  body.printing-card * { visibility: hidden; }
+  body.printing-card .print-card, body.printing-card .print-card * { visibility: visible; }
+  body.printing-card .print-card { display: block; position: absolute; top: 0; left: 0; padding: var(--space-4); }
+  body.printing-card .print-card .qr { width: 5cm; height: 5cm; }
+}
+
+/* Activity numbers and the knowledge map (docs/phase4/03). */
+progress.bar { width: 8rem; height: 0.6rem; vertical-align: middle; accent-color: var(--accent); }
+.plain-list { list-style: none; padding: 0; margin: 0; }
+.plain-list li { padding: var(--space-1) 0; border-top: 1px solid var(--border); }
+.plain-list li:first-child { border-top: 0; }

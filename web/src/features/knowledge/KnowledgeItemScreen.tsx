@@ -3,6 +3,7 @@
 // in the end (for example, nobody can verify their own item).
 import { useState, type FormEvent } from 'react';
 import { useParams } from 'react-router';
+import { graphNodeKey } from '../../navigation/routes.ts';
 import { ScreenLink } from '../../navigation/ScreenLink.tsx';
 import { useSession } from '../../session/session.tsx';
 import { Badge, Banner, Button, Card, DataTable, ErrorNote, formatDate, humanize, Loading, Page, sensitivityLabel, TextArea } from '../../ui/index.tsx';
@@ -40,7 +41,8 @@ export function KnowledgeItemScreen() {
   ].filter(Boolean);
 
   return (
-    <Page title={i?.title || 'Knowledge item'} intro={<ScreenLink screen="knowledge">Back to knowledge</ScreenLink>}>
+    <Page title={i?.title || 'Knowledge item'} intro={<ScreenLink screen="knowledge">Back to knowledge</ScreenLink>}
+      actions={i !== undefined ? <ScreenLink screen="graphNode" id={graphNodeKey('item', i.id)}>See what this item is linked to</ScreenLink> : undefined}>
       {item.isPending && <Loading what="the item" />}
       <ErrorNote error={item.error} />
       {i !== undefined && (

@@ -25,6 +25,7 @@ export function HomeScreen() {
         <Banner tone="warning" title="This card should be renewed soon">It is valid until {formatDate(session.expires_at)}.</Banner>
       )}
       {cards.length === 0 && <Banner tone="info" title="Nothing to do here yet">This card has no rights for knowledge work. Ask an administrator if that is not what you expected.</Banner>}
+      {can('getCard') && <p><ScreenLink screen="card" id={session.card_id}>Your card and its QR code</ScreenLink></p>}
       <div className="grid">
         {cards.map(([key, route]) => (
           <Card key={key} title={route.home?.title}>

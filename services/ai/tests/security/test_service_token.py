@@ -119,3 +119,14 @@ def test_the_topic_filter_travels_in_the_token_and_must_be_an_object() -> None:
     assert verify_service_token(good(), TEST_KEY, "knowledge.answer").topic_filter is None
     with pytest.raises(TokenError):
         verify_service_token(good(topic_filter="tenant"), TEST_KEY, "knowledge.answer")
+
+
+def test_named_filters_travel_in_the_token_and_must_map_a_permission_to_an_object() -> None:
+    spec = {"v": 1, "tenant_id": T, "action": "interview:read", "nothing": False, "only_verified": False,
+            "any_of": [{"scope": "tenant", "max_sensitivity": 1}]}
+    assert verify_service_token(good(filters={"interview:read": spec}), TEST_KEY, "knowledge.answer").filters == {"interview:read": spec}
+    assert verify_service_token(good(), TEST_KEY, "knowledge.answer").filters == {}          # absent = none
+    for bad in ("tenant", ["interview:read"], {"interview:read": "everything"}, {"interview:read": None}):
+        with pytest.raises(TokenError):
+            verify_service_token(good(filters=bad), TEST_KEY, "knowledge.answer")
+

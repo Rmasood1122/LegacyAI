@@ -1,6 +1,20 @@
 {
   "components": {
     "schemas": {
+      "ActivityQuery": {
+        "additionalProperties": false,
+        "properties": {
+          "months": {
+            "default": 6,
+            "maximum": 24.0,
+            "minimum": 1.0,
+            "title": "Months",
+            "type": "integer"
+          }
+        },
+        "title": "ActivityQuery",
+        "type": "object"
+      },
       "AnswerSave": {
         "additionalProperties": false,
         "properties": {
@@ -233,6 +247,33 @@
           "job_role"
         ],
         "title": "GapQuery",
+        "type": "object"
+      },
+      "GraphQuery": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "topic",
+              "item",
+              "source",
+              "job_role"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "GraphQuery",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -894,6 +935,66 @@
         "summary": "Health"
       }
     },
+    "/internal/analytics/activity": {
+      "post": {
+        "operationId": "analytics_activity_internal_analytics_activity_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivityQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Analytics Activity Internal Analytics Activity Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analytics Activity",
+        "x-action": "analytics.activity",
+        "x-subject": null
+      }
+    },
     "/internal/answers/{answer_id}/feedback": {
       "post": {
         "operationId": "answer_feedback_internal_answers__answer_id__feedback_post",
@@ -1455,6 +1556,116 @@
         },
         "summary": "Gaps",
         "x-action": "gap.report",
+        "x-subject": null
+      }
+    },
+    "/internal/graph/export": {
+      "post": {
+        "operationId": "graph_export_internal_graph_export_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Graph Export Internal Graph Export Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Graph Export",
+        "x-action": "graph.export",
+        "x-subject": null
+      }
+    },
+    "/internal/graph/neighbours": {
+      "post": {
+        "operationId": "graph_neighbours_internal_graph_neighbours_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GraphQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Graph Neighbours Internal Graph Neighbours Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Graph Neighbours",
+        "x-action": "graph.read",
         "x-subject": null
       }
     },

@@ -106,15 +106,15 @@ describe('the list of routes that skip the session check is short and pinned', (
     const known = new Set((await su.query('SELECT permission_key FROM permissions')).rows.map((r) => r.permission_key as string));
     await su.end();
     const session = t.app.http.registeredRoutes().filter((r) => r.kind === 'session' || r.kind === 'gateway');
-    expect(session).toHaveLength(132);
+    expect(session).toHaveLength(135);
     for (const r of session) expect(known.has(r.permission!), `${r.operationId} uses unknown permission ${r.permission}`).toBe(true);
   });
 
-  it('routes registered in the server == operations in openapi.yaml (138, no more, no fewer)', () => {
+  it('routes registered in the server == operations in openapi.yaml (141, no more, no fewer)', () => {
     const registered = t.app.http.registeredRoutes().map((r) => `${r.method} ${r.path}`).sort();
     const contract = [...t.app.http.contract.operations.values()].map((o) => `${o.method} ${o.path}`).sort();
     expect(registered).toEqual(contract);
-    expect(registered).toHaveLength(138);
+    expect(registered).toHaveLength(141);
     // and Fastify itself knows no route beyond those (HEAD/OPTIONS helpers aside)
     const printed = t.app.http.app.printRoutes({ commonPrefix: false });
     expect(printed).not.toMatch(/rogue/);
@@ -242,10 +242,11 @@ describe('a read of a whole collection must say how it is narrowed to what the c
       listInterviews: 'applied', listTopics: 'applied', listJobRoles: 'applied', getRoleTopics: 'applied', getRolePeople: 'applied',
       listReadinessAttempts: 'applied', listAnomalyEvents: 'applied', getRetirementRadar: 'applied',
       askKnowledge: 'delegated', listKnowledgeItems: 'delegated', getGapReport: 'delegated', listExpertQuestions: 'delegated',
-      listQuizQuestions: 'delegated',
+      listQuizQuestions: 'delegated', getGraphNeighbourhood: 'delegated',
       listRoles: 'unfiltered', listDepartments: 'unfiltered', listTenants: 'unfiltered', listAuditEvents: 'unfiltered',
       verifyAuditChain: 'unfiltered', listRedactionAllowlist: 'unfiltered', getKnowledgeSettings: 'unfiltered', getAiBudget: 'unfiltered',
       getPlatformStorage: 'unfiltered', getQualitySummary: 'unfiltered', listAnswerFeedback: 'unfiltered',
+      getActivity: 'unfiltered',
     });
     for (const r of t.app.http.registeredRoutes()) {
       if (r.listFilter !== null && typeof r.listFilter !== 'string') expect(r.listFilter.unfiltered.length, r.operationId).toBeGreaterThan(20);
@@ -294,7 +295,7 @@ describe('a read of a whole collection must say how it is narrowed to what the c
 });
 
 describe('real app: a card with almost no permissions cannot get a 2xx from anything it is not granted', () => {
-  it('walks all 132 protected operations as a Successor', async () => {
+  it('walks all 135 protected operations as a Successor', async () => {
     const su = await superuser();
     const granted = new Set((await su.query(`SELECT permission_key FROM role_permissions WHERE role_key = 'successor'`)).rows.map((r) => r.permission_key as string));
     await su.end();
@@ -347,7 +348,9 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
     // the readers' feedback list it may not read.
     // Phase 4 (features 5, 11, 26): it may read its own leaving date, its own radar entry and its own cards' anomaly events;
     // it may not read or change the anomaly rules, set or clear a leaving date, or read or apply department templates.
-    expect(denied).toBe(28 + 57 + 2 + 6);
+    // Phase 4 (features 27, 30): the map it may read (knowledge:read, narrowed by its own filters); the company's activity numbers
+    // it may not read, and the map it may not take out (an export: export:create).
+    expect(denied).toBe(28 + 57 + 2 + 6 + 2);
   });
 });
 

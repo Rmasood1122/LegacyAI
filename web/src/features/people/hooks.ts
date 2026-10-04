@@ -18,6 +18,8 @@ export type CardState = NonNullable<NonNullable<OperationTypes['listCards']['que
 export const CARD_STATES: readonly CardState[] = ['issued', 'active', 'suspended', 'revoked', 'expired', 'replaced'];
 export const useCardList = (state: CardState | '') => useApiList('listCards', { query: { limit: 50, ...(state === '' ? {} : { state }) } });
 export const useCard = (cardId: string) => useApiQuery('getCard', { path: { card_id: cardId } });
+/** The company's name, for the printed card - only for a card that may read it. */
+export const useCompany = ({ enabled }: { enabled: boolean }) => useApiQuery('getCurrentTenant', undefined, { enabled });
 export const useRoles = ({ enabled = true }: { enabled?: boolean } = {}) => useApiQuery('listRoles', undefined, { enabled });
 export const useIssueCard = () => useApiMutation('issueCard', CARD_CHANGED);
 export const useSuspendCard = () => useApiMutation('suspendCard', CARD_CHANGED);

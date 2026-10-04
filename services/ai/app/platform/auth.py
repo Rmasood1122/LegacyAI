@@ -9,7 +9,7 @@ operation it names all check out.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import jwt
@@ -38,6 +38,9 @@ class ServiceContext:
     limits: dict[str, int]
     subject: str | None = None      # the one record this operation is about, when it has one
     topic_filter: dict[str, Any] | None = None   # which topics this card may read (permission topic:read), when the operation shows or links topics
+    # Further access filters, each under the permission it was built for (for example "interview:read"). This module
+    # only checks the shape; app.capture.filters turns one into a query condition and checks it is the right permission's.
+    filters: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 def verify_service_token(token: str, key: str, expected_action: str) -> ServiceContext:
@@ -74,6 +77,9 @@ def verify_service_token(token: str, key: str, expected_action: str) -> ServiceC
     topic_flt = claims.get("topic_filter")
     if topic_flt is not None and not isinstance(topic_flt, dict):
         raise TokenError("topic_filter must be an object")
+    more = claims.get("filters", {})
+    if not isinstance(more, dict) or not all(isinstance(k, str) and isinstance(v, dict) for k, v in more.items()):
+        raise TokenError("filters must map a permission to an object")
     approved = claims.get("approved", [])
     if not isinstance(approved, list) or not all(isinstance(a, str) for a in approved):
         raise TokenError("approved must be a list of ids")
@@ -89,7 +95,7 @@ def verify_service_token(token: str, key: str, expected_action: str) -> ServiceC
     return ServiceContext(
         tenant_id=tenant_id, card_id=card_id, person_id=person_id, roles=tuple(roles), card_phase=phase,
         action=expected_action, request_id=request_id, filter=flt, approved=tuple(approved), limits=dict(limits),
-        subject=subject, topic_filter=topic_flt,
+        subject=subject, topic_filter=topic_flt, filters=dict(more),
     )
 
 

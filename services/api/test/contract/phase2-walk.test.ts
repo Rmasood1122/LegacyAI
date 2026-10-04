@@ -10,7 +10,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { addMember, createTenant, platformOperator, startApp, superuser, type Res, type TestApp, type TestTenant } from '../helpers/harness.ts';
 
 const REAL = process.env.AI_SERVICE_URL_REAL;
-const PHASE2_OPERATIONS = 78 + 5 + 2;   // Phase 2, plus Phase 4: five quality operations (features 22, 23) and two for department templates (26)
+// Phase 2, plus Phase 4: five quality operations (features 22, 23), two for department templates (26), one for activity numbers (27), two for the graph (30)
+const PHASE2_OPERATIONS = 78 + 5 + 2 + 3;
 
 describe.skipIf(!REAL)('Phase 2 walk with the real AI service', () => {
   let t: TestApp;
@@ -238,6 +239,29 @@ describe.skipIf(!REAL)('Phase 2 walk with the real AI service', () => {
     const applied = ok('applyTopicTemplate', await o.post('/v1/topic-templates/warehouse/apply'), 200);
     expect(applied.body).toMatchObject({ template_key: 'warehouse', topics_created: 6, topics_skipped: 0 });
     expect((await o.post('/v1/topic-templates/warehouse/apply')).body).toMatchObject({ topics_created: 0, topics_existing: 6, links_created: 0 });
+
+    // activity numbers (feature 27): every month of the range; a job role with one learner shows no numbers
+    const activity = ok('getActivity', await o.get('/v1/analytics/activity?months=3'), 200);
+    expect(activity.body.months).toHaveLength(3);
+    expect(activity.body.months[0].items_captured).toBeGreaterThanOrEqual(1);
+    expect(activity.body.months[0].interviews_completed).not.toBeNull();        // the Owner may read interviews: a number, not null
+    expect(activity.body.job_role_results).toMatchObject({ state: 'shown', minimum_group: 5 });
+    for (const j of activity.body.job_role_results.rows) expect(j).toMatchObject({ state: 'too_few_people', people: null, attempts: null, mean_score: null });
+    expect((await l.get('/v1/analytics/activity')).status).toBe(403);
+
+    // the knowledge map (feature 30): taking it out is an export (the Owner's right), then the neighbourhood of one of its nodes
+    expect((await l.post('/v1/knowledge/graph/export')).status).toBe(403);                               // a learner may browse the map, not take it out
+    const whole = ok('exportKnowledgeGraph', await o.post('/v1/knowledge/graph/export'), 200);
+    expect(whole.body).toMatchObject({ schema: 'legacyai-knowledge-graph/1', limits: { nodes_per_kind: 2000, edges: 10000 } });
+    const start = whole.body.nodes.find((n: any) => n.kind === 'item' || n.kind === 'topic');
+    expect(start, 'the walk created topics, so the map cannot be empty').toBeDefined();
+    const around = ok('getGraphNeighbourhood', await o.get(`/v1/knowledge/graph?kind=${start.kind}&id=${start.id}`), 200);
+    expect(around.body.node).toMatchObject({ kind: start.kind, id: start.id });
+    for (const g of around.body.neighbours) expect(typeof g.truncated).toBe('boolean');
+    expect((await o.get(`/v1/knowledge/graph?kind=item&id=${randomUUID()}`)).status).toBe(404);          // unknown and unreadable look the same
+    expect((await o.get('/v1/knowledge/graph?kind=person&id=x')).status).toBe(400);                       // people are not nodes
+    const has = (r: any): boolean => whole.body.nodes.some((n: any) => n.kind === r.kind && n.id === r.id);
+    for (const e of whole.body.edges) expect(has(e.from) && has(e.to), JSON.stringify(e)).toBe(true);
 
     expect(hit.size).toBe(PHASE2_OPERATIONS);
   });

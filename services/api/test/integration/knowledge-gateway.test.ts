@@ -684,4 +684,58 @@ describe('answer quality: readers\' feedback and the weekly counts (features 22 
     expect((await tenant.owner.get('/v1/quality/feedback?verdict=wrong&limit=5')).body).toEqual({ items: [], next_cursor: null });
     expect((await tenant.owner.get('/v1/quality/feedback?cursor=not-an-id')).status).toBe(400);
   });
+
+  it('activity numbers are for the Owner and carry the filter of every right they count by; the map goes to every reader with both of its filters', async () => {
+    for (const who of [expert, learner]) expect((await who.client.get('/v1/analytics/activity')).status).toBe(403);
+    expect(stub.ofAction('analytics.activity')).toHaveLength(0);
+    expect((await tenant.owner.get('/v1/analytics/activity?months=25')).status).toBe(400);
+    const numbers = await tenant.owner.get('/v1/analytics/activity?months=3');
+    expect(numbers.status).toBe(200);
+    expect(numbers.body.job_role_results).toEqual({
+      state: 'shown', window_start: '2025-10-01', window_end: '2026-10-01', minimum_group: 5, max_rows: 100, truncated: false,
+      rows: [{ job_role: 'Synthetic role', state: 'too_few_people', people: null, attempts: null, mean_score: null }],
+    });
+    expect(numbers.body.months[0]).toMatchObject({ month_start: '2026-10-01', interviews_completed: null, tests_handed_in: 1 });   // null passes through as null
+    expect(numbers.body.items_now).toEqual({ verified: 1, stale_items: 0, not_yet_verified: 1 });
+    const sent = stub.ofAction('analytics.activity')[0]!;
+    expect(sent.body).toEqual({ months: 3 });
+    expect(sent.claims.filter).toMatchObject({ v: 1, action: 'knowledge:read', nothing: false, tenant_id: tenant.tenantId });
+    // one filter per right, each under its own name and built for that right
+    expect(Object.keys(sent.claims.filters).sort()).toEqual(['interview:read', 'quiz:read_results']);
+    expect(sent.claims.filters['interview:read']).toMatchObject({ action: 'interview:read', nothing: false, tenant_id: tenant.tenantId });
+    expect(sent.claims.filters['quiz:read_results']).toMatchObject({ action: 'quiz:read_results', nothing: false, any_of: [{ scope: 'tenant', max_sensitivity: 3 }] });
+
+    // the map: a learner may read it, and what it gets is narrowed by ITS OWN knowledge and topic filters
+    const node = randomUUID();
+    const around = await learner.client.get(`/v1/knowledge/graph?kind=item&id=${node}`);
+    expect(around.status).toBe(200);
+    expect(around.body.node).toEqual({ kind: 'item', id: node, label: 'Synthetic node', status: 'verified' });
+    expect(around.body.neighbours.map((g: any) => [g.group, g.edge_kind, g.truncated])).toEqual(
+      [['topics', 'item_topic', true], ['sources', 'item_source', false], ['conflicting_items', 'item_conflict', false]]);   // a fixed order, each with its own flag
+    expect(around.body.neighbours[0].nodes[0]).toMatchObject({ node: { kind: 'topic', label: 'Synthetic topic', status: null }, origin: 'reviewer' });
+    const call = stub.ofAction('graph.read')[0]!;
+    expect(call.body).toEqual({ kind: 'item', id: node });
+    expect(call.claims.filter).toMatchObject({ action: 'knowledge:read', only_verified: true });          // a learner reads verified knowledge only
+    expect(call.claims.topic_filter).toMatchObject({ action: 'topic:read', nothing: false });
+    for (const bad of ['kind=person&id=x', 'kind=item', `kind=item&id=${'x'.repeat(121)}`, 'id=x', 'kind=job_role&id=%20padded']) {
+      expect((await learner.client.get(`/v1/knowledge/graph?${bad}`)).status, bad).toBe(400);
+    }
+  });
+
+  it('taking the whole map out is an export: only a card that may export, a few times an hour, with its own filters', async () => {
+    for (const who of [expert, learner]) expect((await who.client.post('/v1/knowledge/graph/export')).status).toBe(403);
+    expect(stub.ofAction('graph.export')).toHaveLength(0);
+    expect((await tenant.owner.get('/v1/knowledge/graph/export')).status).toBe(404);                     // it is not a plain read any more
+    const whole = await tenant.owner.post('/v1/knowledge/graph/export');
+    expect(whole.status).toBe(200);
+    expect(whole.body).toEqual({ schema: 'legacyai-knowledge-graph/1', nodes: [], edges: [], truncated: false, limits: { nodes_per_kind: 2000, edges: 10000 } });
+    const call = stub.ofAction('graph.export')[0]!;
+    expect(call.claims.filter).toMatchObject({ action: 'knowledge:read', nothing: false });
+    expect(call.claims.topic_filter).toMatchObject({ action: 'topic:read' });
+    // five an hour per card; the sixth is refused before the AI service is asked
+    for (let i = 0; i < 4; i += 1) expect((await tenant.owner.post('/v1/knowledge/graph/export')).status).toBe(200);
+    const sixth = await tenant.owner.post('/v1/knowledge/graph/export');
+    expect(sixth.status).toBe(429);
+    expect(stub.ofAction('graph.export')).toHaveLength(5);
+  });
 });

@@ -1,8 +1,9 @@
 // Sign in: card number, then the 3-digit code together with a passkey or an authenticator-app code.
 // The card number and the 3-digit code alone never sign anyone in; the API enforces that.
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import type { LoginBeginResponse } from '../../api/generated.ts';
+import { cardNumberFromFragment } from '../../navigation/cardLink.ts';
 import { useSession } from '../../session/session.tsx';
 import { Banner, Button, Card, ErrorNote, TextField } from '../../ui/index.tsx';
 import { keepDigits, useLoginBegin, useLoginVerify } from './hooks.ts';
@@ -12,7 +13,13 @@ export function SignInScreen({ passkeys = browserPasskeys }: { passkeys?: Passke
   const { signedIn } = useSession();
   const begin = useLoginBegin();
   const verify = useLoginVerify();
-  const [cardNumber, setCardNumber] = useState('');
+  // A card's QR code opens this screen with "#card=<number>": the number is filled in, nothing else changes
+  // (the 3-digit code and the second factor are asked for as always). The fragment is removed from the address
+  // bar at once, so the number is not left in the history entry or copied along with the address.
+  const [cardNumber, setCardNumber] = useState(() => cardNumberFromFragment(window.location.hash) ?? '');
+  useEffect(() => {
+    if (window.location.hash !== '') window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  }, []);
   const [started, setStarted] = useState<LoginBeginResponse | null>(null);
   const [sc, setSc] = useState('');
   const [code, setCode] = useState('');

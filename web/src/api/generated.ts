@@ -153,6 +153,100 @@ export interface KQualityWeek {
   feedback_wrong: number;
 }
 
+export interface KActivity {
+  months: KActivityMonth[];
+  items_now: {
+    verified: number;
+    stale_items: number;
+    not_yet_verified: number;
+  };
+  job_role_results: KActivityJobRoleResults;
+}
+
+export interface KActivityMonth {
+  month_start: string;
+  documents_added: number;
+  items_captured: number;
+  items_verified: number;
+  median_hours_to_verify: number | null;
+  interviews_completed: number | null;
+  tests_handed_in: number | null;
+}
+
+export interface KActivityJobRoleResults {
+  state: "shown" | "not_allowed";
+  window_start: string;
+  window_end: string;
+  minimum_group: number;
+  max_rows: number;
+  truncated: boolean;
+  rows: KActivityJobRole[];
+}
+
+export interface KActivityJobRole {
+  job_role: string;
+  state: "shown" | "too_few_people" | "no_graded_answers";
+  people: number | null;
+  attempts: number | null;
+  mean_score: number | null;
+}
+
+export type KGraphNodeKind = "topic" | "item" | "source" | "job_role";
+
+export interface KGraphNodeRef {
+  kind: KGraphNodeKind;
+  id: string;
+}
+
+export interface KGraphNode {
+  kind: KGraphNodeKind;
+  id: string;
+  label: string;
+  status: KItemStatus | null;
+}
+
+export type KItemStatus = "candidate" | "in_review" | "verified" | "corrected" | "rejected" | "stale";
+
+export type KGraphEdgeKind = "item_topic" | "item_source" | "job_role_topic" | "item_conflict";
+
+export type KGraphEdgeOrigin = ("similarity" | "reviewer") | null;
+
+export interface KGraphNeighbour {
+  node: KGraphNode;
+  origin: KGraphEdgeOrigin;
+}
+
+export interface KGraphGroup {
+  group: "topics" | "items" | "sources" | "job_roles" | "conflicting_items";
+  edge_kind: KGraphEdgeKind;
+  truncated: boolean;
+  nodes: KGraphNeighbour[];
+}
+
+export interface KGraphNeighbourhood {
+  node: KGraphNode;
+  neighbours: KGraphGroup[];
+  limit_per_group: number;
+}
+
+export interface KGraphEdge {
+  kind: KGraphEdgeKind;
+  from: KGraphNodeRef;
+  to: KGraphNodeRef;
+  origin: KGraphEdgeOrigin;
+}
+
+export interface KGraphExport {
+  schema: "legacyai-knowledge-graph/1";
+  nodes: KGraphNode[];
+  edges: KGraphEdge[];
+  truncated: boolean;
+  limits: {
+    nodes_per_kind: number;
+    edges: number;
+  };
+}
+
 export interface KQualitySummary {
   weeks: KQualityWeek[];
   kept_for_days: number;
@@ -1115,6 +1209,9 @@ export const operations = {
   getAnswerFeedback: { method: "GET", path: "/v1/knowledge/answers/{knowledge_answer_id}/feedback", status: 200, idempotent: false, public: false, permission: "knowledge:ask", contentTypes: [] },
   withdrawAnswerFeedback: { method: "DELETE", path: "/v1/knowledge/answers/{knowledge_answer_id}/feedback", status: 204, idempotent: true, public: false, permission: "knowledge:ask", contentTypes: [] },
   getQualitySummary: { method: "GET", path: "/v1/quality/summary", status: 200, idempotent: false, public: false, permission: "knowledge_settings:read", contentTypes: [] },
+  getActivity: { method: "GET", path: "/v1/analytics/activity", status: 200, idempotent: false, public: false, permission: "knowledge_settings:read", contentTypes: [] },
+  getGraphNeighbourhood: { method: "GET", path: "/v1/knowledge/graph", status: 200, idempotent: false, public: false, permission: "knowledge:read", contentTypes: [] },
+  exportKnowledgeGraph: { method: "POST", path: "/v1/knowledge/graph/export", status: 200, idempotent: false, public: false, permission: "export:create", contentTypes: [] },
   listAnswerFeedback: { method: "GET", path: "/v1/quality/feedback", status: 200, idempotent: false, public: false, permission: "knowledge_settings:read", contentTypes: [] },
   setItemTopics: { method: "PUT", path: "/v1/knowledge/items/{item_id}/topics", status: 200, idempotent: true, public: false, permission: "knowledge:label", contentTypes: ["application/json"] },
   revertVerifications: { method: "POST", path: "/v1/knowledge/verifications/revert", status: 200, idempotent: true, public: false, permission: "knowledge:revert", contentTypes: ["application/json"] },
@@ -1664,6 +1761,24 @@ export interface OperationTypes {
     query: { weeks?: number };
     body: undefined;
     response: KQualitySummary;
+  };
+  getActivity: {
+    path: undefined;
+    query: { months?: number };
+    body: undefined;
+    response: KActivity;
+  };
+  getGraphNeighbourhood: {
+    path: undefined;
+    query: { kind: KGraphNodeKind; id: JobRoleName };
+    body: undefined;
+    response: KGraphNeighbourhood;
+  };
+  exportKnowledgeGraph: {
+    path: undefined;
+    query: undefined;
+    body: undefined;
+    response: KGraphExport;
   };
   listAnswerFeedback: {
     path: undefined;

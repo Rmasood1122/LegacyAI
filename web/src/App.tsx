@@ -1,8 +1,10 @@
 // The frame around every screen: sign-in when nobody is signed in, otherwise the menu (only the
 // screens this card may use) and the current screen.
+import { useEffect } from 'react';
 import { NavLink, Route, Routes } from 'react-router';
 import { EnrollScreen } from './features/auth/EnrollScreen.tsx';
 import { SignInScreen } from './features/auth/SignInScreen.tsx';
+import { dropCardFragment } from './navigation/cardLink.ts';
 import { mayOpen } from './navigation/routes.ts';
 import { SCREENS } from './screens.tsx';
 import { useSession } from './session/session.tsx';
@@ -29,6 +31,9 @@ export function App() {
 
 function SignedIn() {
   const { state, can, signOut } = useSession();
+  // Someone already signed in who opens a card's QR address: the sign-in screen (which reads the card number and
+  // removes it) is not shown, so the number is taken out of the address bar here, once.
+  useEffect(() => dropCardFragment(window.location, window.history), []);
   if (state.status !== 'signed_in') return null;
   const allowed = SCREENS.filter((s) => mayOpen(s, can));
   const manage = allowed.filter((s) => s.label !== undefined && s.menu === 'manage');
