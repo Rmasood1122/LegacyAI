@@ -187,6 +187,65 @@ and job roles; the Owner can export it. **Nothing is deployed.**
 
 $0. Total real-AI spend of the project stays $0.642.
 
+## Step 4 — feature 8 (scenario replay)
+
+> Written 2026-10-04. Evidence: CI run 37209355728 on commit `46b175f`, 10 of 10 jobs green.
+> Design: `docs/phase4/04-scenario-replay.md`. Decision D28.
+
+### In plain language
+
+A reviewer writes a "what would you do if…" scenario as ordered steps tied to verified knowledge, a second person
+approves it, and a learner answers it step by step and gets a result. **Nothing is deployed, and grading was tested
+with the fake AI only.** This completes Batch A of the plan.
+
+### What was measured
+
+| Claim | Evidence | Limits |
+|---|---|---|
+| The flow works in a real browser | Browser test: a reviewer writes a scenario with two steps, a second reviewer approves it, the learner runs it and sees the result; the learner's page never shows the expected points before hand-in | The grading screen for reviewers has no browser test |
+| The learner does not get the expected points early | AI service tests; API mapper tests with hostile payloads (points sent for an expired run are not forwarded); screen test | A point PARAPHRASED in the question text is not caught, only word-for-word copies |
+| Neither the creator nor the last editor may approve | Policy unit tests and integration tests; recorded as `DENY_SELF_REVIEW`; an approve route wired without the rule is refused at start-up | With "second reviewer required" switched off by the Owner the rule does not apply, as for knowledge items |
+| A scenario follows its items | Tests: re-labelling an item returns the scenario to draft and closes old runs to learners who may no longer read it; a withdrawn item retires and hides it | — |
+| Under a legal hold the text is kept, hidden | Test: hidden at once, blanked only by the erasure step | A reading of the Phase 2 design, not a legal opinion; conflict excerpts (D25) do the opposite |
+| Nobody grades blind or grades themselves | Tests: a grader reads exactly the step that waits for a person; own run refused | — |
+| Answer text is removed after the retention time, scores kept | Tests of the sweep | **Nothing schedules the sweep** (housekeeping command) |
+| Totals | 29 of 29 browser tests; 172 web unit tests; 780 API tests (1 skipped; statements 88.98 %, branches 82.73 %); both-services walk; migrations apply, roll back, re-apply; leakage 16 groups / 64 queries / 0 leaks; 156 operations | Chromium only |
+
+### Faults found in existing (Phase 2) behaviour and closed here
+
+1. Approving a readiness test question had no second-person rule.
+2. The answer-retention setting was never applied.
+3. A card that may both take tests and grade could override its own readiness grade.
+4. The readiness response passed on the correct option whenever the AI service sent it, instead of checking for itself.
+
+### What reviews and CI found in the new work before it was green
+
+- **Three security reads:** expected points readable from an expired run; a scenario unaffected when an item's level
+  was raised; no deletion of answers; ungraded runs stranded; hiding undone when a second item was withdrawn under a
+  hold; a retention sweep that could stall; grading without being able to read the answer. All fixed.
+- **Three design reviews:** no critical finding; thirteen warnings fixed, among them a reviewer able to approve text
+  changed after they read it (now refused unless the version matches).
+- **CI found two product faults:** the API refused a request without a body although the contract says the body is
+  optional; and the AI service accepted any filter as "may read this run" without checking which right it was built
+  for (not reachable through the API, but the second line of defence was missing).
+
+### Open
+
+- Reading readiness attempts and scenario lists in the AI service still does not check which right the filter was
+  built for (same pattern as the fault above; the API sends the right one).
+- In the readiness test a grade can still be overridden without reading the answer, and only an Admin can open an
+  attempt.
+- No review task is created when a scenario is flagged; it returns to draft silently.
+- The Company Owner holds no right to write or approve scenarios or test questions (only Reviewer, and Admin and
+  Expert through the pilot grant) — by the Phase 2 permission table, noted because it surprised a test.
+- Save, hand-in and override are still written twice (readiness and scenarios).
+- Text only; no branching scenarios; grading quality with a real model unmeasured.
+
+### Cost
+
+$0. Total real-AI spend of the project stays $0.642.
+
 ## Not built yet (from the plan)
 
-Batch A: 8 (scenario replay). Batch B and Batch C: nothing.
+Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is not
+built). Batch B and Batch C: nothing.
