@@ -451,12 +451,24 @@ def _maybe_graded(db: Database, tenant_id: str, attempt_id: str) -> dict[str, An
         return {"id": attempt_id, "status": one(cur)["status"]}
 
 
+def _results_condition(ctx: ServiceContext) -> tuple[str, list[Any]]:
+    """Which runs the caller may read: ONLY from the filter the policy built for quiz:read_results.
+
+    The filter of any other permission (for example the one for reading knowledge) says nothing about who may read
+    people's results and counts as "no right": the condition is FALSE. Without this check a company-wide right to read
+    knowledge would have opened every run, and every graded step, to a grader (found by the first CI run of the tests).
+    """
+    spec = ctx.filter
+    mine = spec if isinstance(spec, dict) and spec.get("action") == "quiz:read_results" else None
+    return condition(mine, "scenario_attempts", ctx.tenant_id)
+
+
 def _gradable(cur: psycopg.Cursor[Any], ctx: ServiceContext, answer_id: str, *, lock: bool) -> dict[str, Any]:
     """The one rule for reading a step in order to grade it AND for grading it (no blind grading): the run is handed
     in, it is not the caller's own, the scenario is not hidden, and the step either WAITS FOR A PERSON or belongs to
     a run the caller may read anyway (ctx.filter: the caller's quiz:read_results). Anything else looks like "no such
     answer". The level and department of the scenario were checked against the caller by the API's policy."""
-    where, params = condition(ctx.filter, "scenario_attempts", ctx.tenant_id)
+    where, params = _results_condition(ctx)
     for_update = " FOR UPDATE OF an" if lock else ""
     cur.execute(
         f"""SELECT an.id::text AS id, an.attempt_id::text AS attempt_id, an.position, an.answer_text, an.final_score, an.decided_by, an.ai_score,
@@ -553,7 +565,7 @@ def get_attempt(db: Database, ctx: ServiceContext, attempt_id: str) -> dict[str,
     """The learner (own attempt) or someone who may read results. ctx.approved: linked items this reader may read.
     The answer says in so many words what was released (`scores_released`, `points_released`): the API forwards
     scores and points only when these are true AND the run is graded, whatever else this answer may contain."""
-    where, params = condition(ctx.filter, "scenario_attempts", ctx.tenant_id)
+    where, params = _results_condition(ctx)
     with db.tenant_tx(ctx.tenant_id) as cur:
         cur.execute(
             f"""SELECT sa.id::text AS id, sa.scenario_id::text AS scenario_id, sa.learner_person_id::text AS learner_person_id, sa.status, sa.started_at,
@@ -583,7 +595,7 @@ def get_attempt(db: Database, ctx: ServiceContext, attempt_id: str) -> dict[str,
 
 def list_attempts(db: Database, ctx: ServiceContext, *, limit: int, before: str | None) -> dict[str, Any]:
     """Scenario runs, newest first: a learner's own, or the company's for those who may read results. Labels only."""
-    where, params = condition(ctx.filter, "scenario_attempts", ctx.tenant_id)
+    where, params = _results_condition(ctx)
     extra, extra_params = "", list[Any]()
     if before is not None:
         extra += " AND sa.id < %s"

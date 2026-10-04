@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.knowledge import scenarios
 from app.knowledge.scenarios import Step, leak_reason, visible_steps
+from app.platform import ServiceContext
 
 ITEM = "11111111-1111-7111-8111-111111111111"
 OTHER_ITEM = "22222222-2222-7222-8222-222222222222"
@@ -146,3 +148,25 @@ def test_whoever_generated_or_last_edited_a_test_question_wrote_it() -> None:
     # a question written before the rule existed names nobody: nobody is refused for it
     old = {"written_by_card_id": None, "written_by_person_id": None, "edited_by_card_id": None, "edited_by_person_id": None}
     assert not wrote_question(old, "card-a", "person-a") and not wrote_question(old, "card-a", None)
+
+
+TENANT = "33333333-3333-7333-8333-333333333333"
+
+
+def _ctx(filter_: dict[str, Any] | None) -> ServiceContext:
+    return ServiceContext(tenant_id=TENANT, card_id=ITEM, person_id=OTHER_ITEM, roles=("expert",), card_phase="normal", action="scenario.answer_read",
+                          request_id="test", filter=filter_, approved=(), limits={})
+
+
+def _company_wide(action: str) -> dict[str, Any]:
+    return {"v": 1, "tenant_id": TENANT, "action": action, "nothing": False, "only_verified": False,
+            "any_of": [{"scope": "tenant", "max_sensitivity": 3}]}
+
+
+def test_only_the_filter_for_reading_results_opens_runs() -> None:
+    """Found by the first database run of the tests: a company-wide right to read KNOWLEDGE was taken as a right to
+    read people's runs, so a grader could read (and re-grade) any graded step."""
+    assert scenarios._results_condition(_ctx(_company_wide("quiz:read_results")))[0] != "FALSE"
+    for other in ("knowledge:read", "quiz:read", "quiz:grade", "topic:read"):
+        assert scenarios._results_condition(_ctx(_company_wide(other))) == ("FALSE", []), other
+    assert scenarios._results_condition(_ctx(None)) == ("FALSE", [])

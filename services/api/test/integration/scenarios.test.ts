@@ -14,6 +14,7 @@ let tenant: TestTenant;
 let other: TestTenant;
 let writer: TestMember;      // an Expert: during the pilot, Experts write and approve
 let approver: TestMember;
+let third: TestMember;         // a third Expert: the Company Owner holds no right to manage the question bank or scenarios
 let learner: TestMember;
 let learner2: TestMember;
 let su: pg.Client;
@@ -88,6 +89,7 @@ beforeAll(async () => {
   other = await createTenant(t, 'scn-other');
   writer = await addMember(t, tenant.owner, [{ role_key: 'expert' }]);
   approver = await addMember(t, tenant.owner, [{ role_key: 'expert' }]);
+  third = await addMember(t, tenant.owner, [{ role_key: 'expert' }]);
   learner = await addMember(t, tenant.owner, [{ role_key: 'successor' }]);
   learner2 = await addMember(t, tenant.owner, [{ role_key: 'successor' }]);
 });
@@ -222,7 +224,8 @@ describe('what a learner is offered and may start', () => {
     const id = await scenario(tenant, [released], { approved: true, authorCard: writer.card.id });
     const attempt = await run(tenant, id, learner);
     expect((await learner.client.get(`/v1/scenario-attempts/${attempt}`)).status).toBe(200);
-    await seed(tenant.tenantId, (q) => q('UPDATE knowledge_items SET sensitivity = 2 WHERE id = $1', [released]));
+    // labels change only through relabel() (the database refuses a plain UPDATE); it is what the product itself calls
+    await seed(tenant.tenantId, (q) => q("SELECT relabel('item', $1::uuid, NULL::uuid, 2::smallint)", [released]));
     const row = (await su.query('SELECT status, flag_reason, sensitivity FROM scenarios WHERE id = $1', [id])).rows[0];
     expect(row).toEqual({ status: 'draft', flag_reason: 'item_changed', sensitivity: 2 });
     expect((await su.query('SELECT status FROM scenario_attempts WHERE id = $1', [attempt])).rows[0].status).toBe('expired');
@@ -243,13 +246,16 @@ describe('the second-person rule (decided by the policy, recorded as DENY_SELF_R
 
   it('neither the creator of a scenario nor its last editor may approve it; a third person may', async () => {
     const released = await item(tenant, { sensitivity: 0 });
-    // created by one reviewer, last edited by the other: both are refused, the owner (a third person) is not
+    // created by one reviewer, last edited by the other: both are refused, a third reviewer is not.
+    // (Not the Owner: that role holds no quiz:manage, so its refusal would say nothing about this rule.)
     const id = await scenario(tenant, [released], { creatorCard: approver.card.id, authorCard: writer.card.id });
     expect((await writer.client.post(`/v1/scenarios/${id}/approve`)).status).toBe(403);
     expect((await approver.client.post(`/v1/scenarios/${id}/approve`)).status).toBe(403);
     expect(await denials(id)).toBe(2);
     expect(stub.ofAction('scenario.status')).toEqual([]);                // refused before the AI service was asked
-    expect((await tenant.owner.post(`/v1/scenarios/${id}/approve`, { updated_at: '2026-01-01T00:00:00.000Z' })).status).toBe(200);
+    expect((await tenant.owner.post(`/v1/scenarios/${id}/approve`)).status).toBe(403);       // no right to manage scenarios at all
+    expect(await denials(id)).toBe(2);                                                      // ... and that refusal is not a second-person one
+    expect((await third.client.post(`/v1/scenarios/${id}/approve`, { updated_at: '2026-01-01T00:00:00.000Z' })).status).toBe(200);
     const sent = stub.ofAction('scenario.status');
     expect(sent).toHaveLength(1);
     expect(sent[0]!.body).toEqual({ status: 'approved', updated_at: '2026-01-01T00:00:00.000Z' });   // the version the approver read travels with the request
@@ -283,7 +289,7 @@ describe('the second-person rule (decided by the policy, recorded as DENY_SELF_R
     expect((await approver.client.post(`/v1/readiness/questions/${question}/approve`)).status).toBe(403);   // last edited it
     expect(await denials(question)).toBe(2);
     expect(stub.ofAction('quiz.status')).toEqual([]);
-    expect((await tenant.owner.post(`/v1/readiness/questions/${question}/approve`)).status).toBe(200);
+    expect((await third.client.post(`/v1/readiness/questions/${question}/approve`)).status).toBe(200);    // a third reviewer
     // a question written before the rule existed names nobody: anyone who may approve can
     expect((await writer.client.post(`/v1/readiness/questions/${legacy}/approve`)).status).toBe(200);
     // retiring is not approving: the writer may retire the question
@@ -368,9 +374,9 @@ describe('reading and grading a run', () => {
     expect(call.claims).toMatchObject({ subject: answer });
     expect(call.claims.filter.action).toBe('quiz:read_results');
     // what the AI service refuses ("not found": not handed in, not waiting, not readable) stays "not found" for the grader
-    stub.answers.set('scenario.answer_read', () => { throw new StubError(404, 'not_found'); });
+    stub.answers.set('scenario.answer_read', () => new StubError(404, 'not_found'));   // the stand-in fails when a StubError is RETURNED
     expect((await approver.client.get(`/v1/scenario-answers/${answer}`)).status).toBe(404);
-    stub.answers.set('scenario.override', () => { throw new StubError(404, 'not_found'); });
+    stub.answers.set('scenario.override', () => new StubError(404, 'not_found'));
     expect((await approver.client.post(`/v1/scenario-answers/${answer}/override`, { score: 1 })).status).toBe(404);
   });
 
