@@ -65,11 +65,13 @@ def neighbour_ids(around: dict[str, Any], name: str) -> set[str]:
 def graded_attempt(admin: psycopg.Connection[dict[str, Any]], world: World, who: str, role: str, when: str) -> None:
     """A graded test of `who`; `when` is an SQL expression (written here, in the test) for the moment it was handed in and graded."""
     p = world.people[who]
-    admin.execute(
-        f"""INSERT INTO quiz_attempts (tenant_id, learner_card_id, learner_person_id, owner_person_id, job_role, status, started_at, expires_at,
-                                       submitted_at, graded_at)
-            VALUES (%s, %s, %s, %s, %s, 'graded', {when} - interval '1 hour', {when} + interval '1 hour', {when}, {when})""",
-        (world.tenant_id, p.card_id, p.id, p.id, role))
+    # the database lets an attempt start only "in progress" and move on step by step (quiz_attempts_guard)
+    attempt = admin.execute(
+        f"""INSERT INTO quiz_attempts (tenant_id, learner_card_id, learner_person_id, owner_person_id, job_role, started_at, expires_at)
+            VALUES (%s, %s, %s, %s, %s, {when} - interval '1 hour', {when} + interval '1 hour') RETURNING id""",
+        (world.tenant_id, p.card_id, p.id, p.id, role)).fetchone()["id"]
+    admin.execute(f"UPDATE quiz_attempts SET status = 'submitted', submitted_at = {when} WHERE id = %s", (attempt,))
+    admin.execute(f"UPDATE quiz_attempts SET status = 'graded', graded_at = {when} WHERE id = %s", (attempt,))
 
 
 # ---------------------------------------------------------------------------------------------- activity numbers
@@ -102,10 +104,13 @@ def test_interviews_are_counted_by_the_callers_right_to_read_interviews_and_are_
     owner = world.people["owner"]
     for level in (1, 3, 3):          # one interview about ordinary material, two about level-3 material
         source = company_document(db, world, embedder, f"Synthetic interview material at level {level}.", title=f"Interview {level}", sensitivity=level)
-        admin.execute(
-            """INSERT INTO interviews (tenant_id, expert_person_id, source_id, consent_id, job_role, status, max_turns, invited_by_card_id, completed_at)
-               VALUES (%s, %s, %s, %s, %s, 'completed', 10, %s, now())""",
-            (world.tenant_id, world.people["expert"].id, source, consent, ROLE, owner.card_id))
+        # the database lets an interview start only as "invited" and move on step by step (interviews_guard)
+        interview = admin.execute(
+            """INSERT INTO interviews (tenant_id, expert_person_id, source_id, consent_id, job_role, max_turns, invited_by_card_id)
+               VALUES (%s, %s, %s, %s, %s, 10, %s) RETURNING id""",
+            (world.tenant_id, world.people["expert"].id, source, consent, ROLE, owner.card_id)).fetchone()["id"]
+        admin.execute("UPDATE interviews SET status = 'active' WHERE id = %s", (interview,))
+        admin.execute("UPDATE interviews SET status = 'completed', completed_at = now() WHERE id = %s", (interview,))
 
     def this_month(**rights: Any) -> Any:
         return analytics.activity(db, reader(world, "analytics.activity", 3, **rights), 1)["months"][0]["interviews_completed"]

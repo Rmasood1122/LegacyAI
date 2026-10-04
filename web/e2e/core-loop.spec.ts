@@ -77,7 +77,7 @@ test('first-time set-up with an authenticator app, then sign-in with the new car
 test('the owner adds a document and sees what was blanked out', async ({ page }) => {
   await signIn(page, 'owner');
   await checkScreen(page, '03-home');
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Documents' }).click();
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Documents', exact: true }).click();
   await page.getByLabel('Title').fill('Boiler manual (synthetic)');
   await page.getByLabel('File').setInputFiles({
     name: 'boiler.txt', mimeType: 'text/plain',
@@ -100,7 +100,7 @@ test('the owner adds a document and sees what was blanked out', async ({ page })
 
 test('asking: the screen shows exactly what the API decided - an answer with sources, or "I don\'t know"', async ({ page }) => {
   await signIn(page, 'owner');
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Ask' }).click();
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Ask', exact: true }).click();
   for (const [n, question] of [[1, 'How often is the relief valve lever tested?'], [2, 'What is the wifi password of the canteen on the moon?']] as const) {
     await page.getByLabel('Your question').fill(question);
     const [response] = await Promise.all([
@@ -125,13 +125,13 @@ test('asking: the screen shows exactly what the API decided - an answer with sou
 
 test('the author gives consent, writes an item and sends it for review', async ({ page }) => {
   await signIn(page, 'author');
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'My consent' }).click();
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'My consent', exact: true }).click();
   await page.getByRole('checkbox').check();
   await page.getByRole('button', { name: 'Give consent' }).click();
   await expect(page.getByText('Active', { exact: true })).toBeVisible();
   await checkScreen(page, '07-consent');
 
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Knowledge' }).click();
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Knowledge', exact: true }).click();
   await page.getByRole('button', { name: 'Write a new item' }).click();
   await page.getByLabel('Title').fill(ITEM_TITLE);
   await page.getByLabel('What should a successor know?').fill('Lift the relief valve lever once a month and let it snap back. If it sticks, stop the boiler.');
@@ -144,10 +144,10 @@ test('the author gives consent, writes an item and sends it for review', async (
 
 test('a second card finds the task in the review queue and verifies the item', async ({ page }) => {
   await signIn(page, 'reviewer');
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Review queue' }).click();
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Review queue', exact: true }).click();
   await expect(page.getByRole('link', { name: 'Verify a knowledge item' }).first()).toBeVisible();
   await checkScreen(page, '09-review-queue');
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Knowledge' }).click();
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Knowledge', exact: true }).click();
   await checkScreen(page, '10-knowledge');
   await page.getByRole('link', { name: ITEM_TITLE }).click();
   await page.getByRole('button', { name: 'Verify' }).click();
@@ -157,7 +157,7 @@ test('a second card finds the task in the review queue and verifies the item', a
 
 test('the author withdraws consent', async ({ page }) => {
   await signIn(page, 'author');
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'My consent' }).click();
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'My consent', exact: true }).click();
   await page.getByRole('button', { name: 'Withdraw…' }).click();
   await page.getByRole('button', { name: 'Yes, withdraw and erase' }).click();
   await expect(page.getByText('Your consent was withdrawn')).toBeVisible();
@@ -178,14 +178,14 @@ test('a card without a permission is shown no way to the screen, and the API ref
   for (const g of denied) {
     await page.goto('/');
     await expect(page.getByRole('navigation', { name: 'Main' })).toBeVisible();
-    await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: g.label })).toHaveCount(0);
+    await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: g.label, exact: true })).toHaveCount(0);
     await page.goto(g.path);
     await expect(page.getByRole('heading', { name: 'This screen is not available' })).toBeVisible();
     // Hiding is not protection: the API itself must refuse.
     expect((await page.request.get(g.api)).status(), `GET ${g.api}`).toBe(403);
   }
   for (const g of guarded.filter((x) => permissions.includes(x.permission))) {
-    await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: g.label })).toHaveCount(1);
+    await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: g.label, exact: true })).toHaveCount(1);
   }
   test.info().annotations.push({ type: 'denied-screens', description: denied.map((d) => d.label).join(', ') });
   await checkScreen(page, '12-not-available');

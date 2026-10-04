@@ -24,7 +24,7 @@ beforeAll(async () => {
 afterAll(async () => t.close());
 
 /** Paths of the Phase 2 (knowledge) operations. */
-const PHASE2_PATH = /^\/v1\/(sources|knowledge|interviews|gaps|topics|job-roles|expert-questions|readiness|consents|review|redaction|quality|ai|me\/(consents|contributions)|people\/\{person_id\}\/consent-withdrawals|tenants\/\{tenant_id\}\/ai-budget|platform\/(ai|storage)|topic-templates)(\/|$)/;
+const PHASE2_PATH = /^\/v1\/(sources|knowledge|interviews|gaps|topics|job-roles|expert-questions|readiness|consents|review|redaction|quality|ai|me\/(consents|contributions)|people\/\{person_id\}\/consent-withdrawals|tenants\/\{tenant_id\}\/ai-budget|platform\/(ai|storage)|topic-templates|analytics)(\/|$)/;
 
 describe('the contract file', () => {
   it('is OpenAPI 3.1 with 141 operations (46 from Phase 1, 78 from Phase 2, 17 from Phase 4), all under /v1, each with a unique operationId', () => {
@@ -293,7 +293,7 @@ describe('every one of the 47 operations returns a contract-conforming success',
     const all = [...t.app.http.contract.operations.values()].filter((op) => !PHASE2_PATH.test(op.path)).map((op) => op.operationId).sort();
     expect([...hit].sort()).toEqual(all);
     expect(hit.size).toBe(46 + 7);   // Phase 1, plus the seven anomaly-lock and retirement-radar operations of Phase 4
-    expect(t.app.http.contract.operations.size).toBe(46 + 78 + 5 + 7 + 2);
+    expect(t.app.http.contract.operations.size).toBe(46 + 78 + 5 + 7 + 2 + 3);   // + the three insight operations (activity, map, map export)
   });
 });
 

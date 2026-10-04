@@ -72,7 +72,7 @@ test('the owner records when a person plans to leave, and the retirement radar l
   expect(JSON.stringify(await people.json())).not.toContain(date);
   await signOut(page);
   await signIn(page, 'author');
-  await expect(page.getByRole('navigation', { name: 'Manage' }).getByRole('link', { name: 'Retirement radar' })).toHaveCount(0);
+  await expect(page.getByRole('navigation', { name: 'Manage' }).getByRole('link', { name: 'Retirement radar', exact: true })).toHaveCount(0);
   const own = await page.request.get('/v1/retirement-radar');
   expect(own.status()).toBe(200);
   expect(((await own.json()) as { items: unknown[] }).items).toEqual([]);                          // the author has no date; the learner's is not shown to a colleague

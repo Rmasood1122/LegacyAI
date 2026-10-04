@@ -243,7 +243,11 @@ describe.skipIf(!REAL)('Phase 2 walk with the real AI service', () => {
     // activity numbers (feature 27): every month of the range; a job role with one learner shows no numbers
     const activity = ok('getActivity', await o.get('/v1/analytics/activity?months=3'), 200);
     expect(activity.body.months).toHaveLength(3);
-    expect(activity.body.months[0].items_captured).toBeGreaterThanOrEqual(1);
+    // By this point the walk has withdrawn the expert's consents, which withdraws every item and document it made, and
+    // withdrawn material is not counted: the number is a count (possibly 0), never null. That the counts are right is
+    // tested in services/ai/tests/integration/test_analytics_graph.py.
+    expect(activity.body.months[0].items_captured).toBeGreaterThanOrEqual(0);
+    expect(activity.body.months[0].month_start).toMatch(/^\d{4}-\d{2}-01$/);
     expect(activity.body.months[0].interviews_completed).not.toBeNull();        // the Owner may read interviews: a number, not null
     expect(activity.body.job_role_results).toMatchObject({ state: 'shown', minimum_group: 5 });
     for (const j of activity.body.job_role_results.rows) expect(j).toMatchObject({ state: 'too_few_people', people: null, attempts: null, mean_score: null });
