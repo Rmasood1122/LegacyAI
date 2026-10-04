@@ -10,8 +10,9 @@
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { generate as totpGenerate } from 'otplib';
-import { TEST_ORIGIN } from '../helpers/env.ts';
-import { addMember, Client, enrollTotp, fromSecrets, login, platformOperator, startApp, type IssuedCard, type Res, type TestApp } from '../helpers/harness.ts';
+import { signEvent } from '../../src/modules/billing/index.ts';
+import { TEST_ORIGIN, testEnv } from '../helpers/env.ts';
+import { addMember, Client, enrollTotp, fromSecrets, login, platformOperator, startApp, superuser, type IssuedCard, type Res, type TestApp } from '../helpers/harness.ts';
 
 const PORT = Number(process.env.E2E_PORT ?? '8787');
 const CONTROL_PORT = Number(process.env.E2E_CONTROL_PORT ?? '8788');
@@ -95,6 +96,43 @@ async function main(): Promise<void> {
     return { job_role: SEED_JOB_ROLE, item_id: item };
   };
 
+  // Billing (web/e2e/billing.spec.ts). Two things no screen can do, so the control listener does them:
+  //  - move the company's term near its end (the ONE direct database write of this server: the company card's dates,
+  //    as the superuser; moving the clock by months instead would expire every session and card of the other tests);
+  //  - play the payment provider: send the signed message a provider would send about the invoice that is waiting.
+  //    The provider is the stand-in; no money moves and nothing outside this machine is called.
+  const tenantId = created.body.tenant.id as string;
+  const companyCardId = created.body.company_card.card.id as string;
+  const DAY = 86_400_000;
+  const setTermEnd = async (days: number): Promise<{ renewal_on: string }> => {
+    const end = t.clock.now().getTime() + days * DAY;
+    const su = await superuser();
+    try {
+      await su.query('UPDATE cards SET expires_at = $2, grace_until = $3, renewal_due = $4 WHERE id = $1',
+        [companyCardId, new Date(end), new Date(end + 14 * DAY), new Date(end - 14 * DAY)]);
+    } finally {
+      await su.end();
+    }
+    return { renewal_on: new Date(end).toISOString() };
+  };
+  const providerSays = async (outcome: string): Promise<{ http_status: number; status: string | null }> => {
+    const su = await superuser();
+    let open: { id: string; amount_minor: string; currency: string } | undefined;
+    try {
+      open = (await su.query(`SELECT id, amount_minor, currency FROM invoices WHERE tenant_id = $1 AND status = 'open'`, [tenantId])).rows[0];
+    } finally {
+      await su.end();
+    }
+    if (!open) throw new Error('no invoice is waiting for payment');
+    const fields = {
+      version: 'v1', event_id: `evt_${randomUUID()}`, tenant_id: tenantId, invoice_id: open.id, outcome, amount_minor: Number(open.amount_minor), currency: open.currency,
+      sent_at: t.clock.now().toISOString(),
+    };
+    const signature = signEvent(Buffer.from(testEnv().PAYMENT_EVENT_KEY as string, 'base64'), fields);
+    const res = await new Client(t).request('POST', '/v1/billing/provider-events', { ...fields, signature }, { origin: null });
+    return { http_status: res.status, status: (res.body as { status?: string } | null)?.status ?? null };
+  };
+
   await t.app.identity.hasher.warmUp();
   await t.app.http.app.listen({ port: PORT, host: '127.0.0.1' });
 
@@ -116,6 +154,8 @@ async function main(): Promise<void> {
         seeded ??= seedReadiness();
         return reply(200, await seeded);
       }
+      if (url.pathname === '/billing-term') return reply(200, await setTermEnd(Number(url.searchParams.get('days') ?? '5')));
+      if (url.pathname === '/payment-event') return reply(200, await providerSays(url.searchParams.get('outcome') ?? 'paid'));
       if (url.pathname === '/code') return reply(200, { code: await freshCode(t, url.searchParams.get('secret') ?? '') });
       if (url.pathname === '/new-card') {
         t.clock.advance(31_000); // the owner's previous code must not be reused

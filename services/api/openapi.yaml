@@ -29,6 +29,7 @@ tags:
   - name: readiness
   - name: consent
   - name: ai
+  - name: billing
 paths:
   /v1/health:
     get:
@@ -6727,6 +6728,376 @@ paths:
           $ref: "#/components/responses/TooManyRequests"
         "502":
           $ref: "#/components/responses/BadGateway"
+  /v1/billing/subscription:
+    get:
+      operationId: getSubscription
+      summary: "The renewal center: the company's plan, seats, renewal date, what is due and what happens if nothing is done."
+      description: >-
+        The company's term is the company card's validity - one date for the whole company. The fields `expires_at`,
+        `renewal_due`, `grace_until`, `read_only` and `export_only` mean exactly what they mean in the session
+        (getSession); `phase` is the same in one word: `normal` (too early to renew), `renewal_open` (from
+        `renewal_due`), `grace` (after `expires_at`: read-only) and `lapsed` (after `grace_until`: export only).
+        Plan names and prices are placeholders until the founder sets them (`plan.placeholder` is true). Amounts
+        are whole numbers in the smallest unit of the currency. No tax is added or shown. The path is
+        `/v1/billing/...` and not `/v1/tenants/current/...` on purpose: billing is its own area with its own rights.
+      tags:
+        - billing
+      x-permission: billing:read
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Subscription"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    patch:
+      operationId: updateSubscription
+      summary: Ask for a number of seats, or switch automatic renewal.
+      description: >-
+        `seats` is what the Owner ASKS for. Fewer seats than the term already covers take effect at the next
+        renewal (never fewer than the cards in use that day). More seats than the term covers must be paid before
+        they count: `due_now` then shows a `seats` invoice for the added seats at the full price per seat for the
+        term (no proration), issued by startRenewal. While an invoice is waiting to be paid, seats cannot change
+        (409 `seats-locked`). Fewer seats than cards in use is refused (409 `seats-below-use`). Only the platform
+        operator can remove the seat limit; when the operator did, 409 `seats-set-by-operator`. Automatic renewal
+        can only be switched on when a payment provider is connected (409 `payments-unavailable`).
+      tags:
+        - billing
+      x-permission: billing:manage
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSubscriptionRequest"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Subscription"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/billing/invoices:
+    get:
+      operationId: listInvoices
+      summary: The company's invoices, newest first.
+      tags:
+        - billing
+      x-permission: billing:read
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                  - next_cursor
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Invoice"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/billing/invoices/{invoice_id}:
+    get:
+      operationId: getInvoice
+      summary: One invoice. Read it again to learn what became of a payment.
+      tags:
+        - billing
+      x-permission: billing:read
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/InvoiceId"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/billing/renewals:
+    post:
+      operationId: startRenewal
+      summary: Issue the invoice for what is due now and ask the payment provider to collect it.
+      description: >-
+        What is due is what `due_now` in the subscription says: from `renewal_due` on, the next term (a new term
+        starts on the day it takes effect; days left are not carried over); before that, seats the Owner added.
+        Nothing due: 409 `renewal-not-open`. No price for the company's plan: 409 `plan-not-in-catalogue`.
+        A company has at most one unpaid invoice. If one is open for exactly the same thing it is returned (200,
+        `already_open` true); if it is for anything else it is closed and a new one issued, so an old amount is
+        never collected. The invoice is stored BEFORE the provider is asked: if the
+        provider refuses the request the answer is 502 `payment-provider-error`, if it does not answer in time 503
+        `payment-provider-unavailable` - in both cases the invoice exists, nothing was charged, and asking again
+        collects the same invoice. The answer never says "paid": the provider reports the outcome later
+        (receivePaymentEvent). To learn the final state, read the invoice (getInvoice) or the subscription again.
+        An amount of 0 is settled at once. With no provider connected (`collected_by` is `operator`) the invoice
+        waits until the platform operator records the payment.
+      tags:
+        - billing
+      x-permission: billing:manage
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The invoice that is now waiting (or, for an amount of 0, already settled). `already_open` says whether it existed before.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenewalStarted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          description: "The payment provider refused the request (`payment-provider-error`). The invoice is open; nothing was charged."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: "The payment provider did not answer in time (`payment-provider-unavailable`). The invoice is open; nothing was charged."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/billing/provider-events:
+    post:
+      operationId: receivePaymentEvent
+      summary: "For the payment provider only: a signed message saying an invoice was paid or declined."
+      description: >-
+        No session. A body that is not the documented shape answers 400 (that says nothing about a signature).
+        A well-formed message is accepted only with a valid signature (HMAC-SHA256 over every field, made with a key
+        only the provider and the API hold) and a time of sending within five minutes of now; every message that is
+        not accepted gets the same 403, whatever the reason - also when no payment provider is connected. An
+        accepted message is always answered 200, so the provider stops sending it: `applied` (the invoice was paid
+        and took effect, or was marked declined), `duplicate` (this event id was seen before; nothing changed),
+        `recorded` (the message is stored and changed nothing by itself: an unknown invoice or company, another
+        amount or currency than was due, a payment for an invoice that was already closed, declined or paid, or a
+        payment that could not take effect - in every such case the platform operator and the company's Owner are
+        told, and the money is never applied silently). "paid" for an open invoice takes effect exactly once.
+      tags:
+        - billing
+      x-public: true
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentEventRequest"
+      responses:
+        "200":
+          description: The message was accepted (see `status`).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - status
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - applied
+                      - duplicate
+                      - recorded
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/tenants/{tenant_id}/billing:
+    get:
+      operationId: getTenantBilling
+      summary: "Platform operator only: a company's subscription and its invoices, newest first."
+      tags:
+        - billing
+      x-permission: billing:operate
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantBilling"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    patch:
+      operationId: setTenantSeatLimit
+      summary: "Platform operator only: set a company's seat limit, or remove it."
+      description: >-
+        `seat_limit: null` removes the limit (the company may hold any number of person cards, and a renewal bills
+        the cards in use that day). Nobody but the operator can do that. A number below the cards in use is refused
+        (409 `seats-below-use`). Written to the company's audit log as an operator action and to the operator's own.
+      tags:
+        - billing
+      x-permission: billing:operate
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SeatLimitRequest"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Subscription"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/tenants/{tenant_id}/billing/manual-payments:
+    post:
+      operationId: recordManualPayment
+      summary: "Platform operator only: settle an invoice whose payment arrived some other way, or apply a payment that is on record."
+      description: >-
+        The operator names the invoice and what was paid. Another amount or currency than the invoice says is
+        refused (409 `amount-mismatch`). The invoice must be open, or paid and not yet in effect (`applied` false:
+        a payment that arrived late or could not be applied); anything else is 409 `invoice-not-payable`. An
+        invoice is settled once, whatever idempotency key is used. A renewal starts the new term TODAY: while the
+        running term still has days left the request is refused (409 `days-would-be-lost`) unless
+        `discard_remaining_days` is true. `reference` says where the payment is recorded (a transfer or case id);
+        it must not contain a long run of digits - no payment card number is ever stored. The company's audit log
+        records an operator action; the operator's own log names the card.
+      tags:
+        - billing
+      x-permission: billing:operate
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManualPaymentRequest"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 components:
   securitySchemes:
     sessionCookie:
@@ -6894,6 +7265,13 @@ components:
       in: path
       required: true
       schema: *a1
+    InvoiceId:
+      name: invoice_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     RoleKey:
       name: role_key
       in: path
@@ -10235,7 +10613,25 @@ components:
         - logins_last_30_days
         - cards_able_to_unlock
         - plan
+        - seats
       properties:
+        seats:
+          description: The seats paid for this term and how many are taken. Null when the company has no term. This - not `plan.max_person_cards`, which is not a billing limit and is null for every plan - is what limits issuing cards.
+          oneOf:
+            - type: "null"
+            - type: object
+              additionalProperties: false
+              required: [limit, used, state]
+              properties:
+                limit:
+                  type:
+                    - "integer"
+                    - "null"
+                used:
+                  type: integer
+                state:
+                  type: string
+                  enum: [not_limited, ok, near, reached]
         cards_by_state:
           type: object
           additionalProperties:
@@ -11251,3 +11647,302 @@ components:
           type: "array"
           items:
             $ref: "#/components/schemas/KScenarioAttemptStep"
+    Money:
+      description: An amount of money. Always a whole number in the SMALLEST unit of the currency (cents), never a fraction. No tax is included anywhere.
+      type: object
+      additionalProperties: false
+      required: [amount_minor, currency]
+      properties:
+        amount_minor:
+          type: integer
+          minimum: 0
+        currency:
+          description: ISO 4217 code.
+          type: string
+          pattern: "^[A-Z]{3}$"
+    Subscription:
+      type: object
+      additionalProperties: false
+      required: [plan, seats_requested, seat_limit, seats_unlimited, seats_used, seat_state, auto_renew, term_days, expires_at, renewal_due, grace_until, read_only, export_only, phase, next_term, due_now, open_invoice, can_renew_now, payments_available, payments_needing_attention, if_nothing_is_done]
+      properties:
+        plan:
+          description: Null when the company's plan has no entry in the price catalogue.
+          oneOf:
+            - type: "null"
+            - type: object
+              additionalProperties: false
+              required: [code, name, price_per_seat, placeholder]
+              properties:
+                code:
+                  type: string
+                name:
+                  type: string
+                price_per_seat:
+                  description: Per seat and per term.
+                  $ref: "#/components/schemas/Money"
+                placeholder:
+                  description: True while names and prices are invented placeholders, not the founder's decision.
+                  type: boolean
+        seats_requested:
+          description: What the Owner asked for (see updateSubscription). Null = nothing asked. It is used up when an invoice takes effect.
+          type:
+            - "integer"
+            - "null"
+        seat_limit:
+          description: How many person cards the company may hold now - the seats paid for this term. Null = no limit applies (a new company in its first term, or removed by the operator).
+          type:
+            - "integer"
+            - "null"
+        seats_unlimited:
+          description: True when the platform operator removed the seat limit.
+          type: boolean
+        seats_used:
+          description: Person cards in use (not revoked, not replaced).
+          type: integer
+        seat_state:
+          description: "`near` = at most one seat or a tenth of the seats is left; `reached` = no card can be issued (issueCard answers 409 `seat-limit-reached`). While a renewal invoice waits to be paid, its seats bound issuing too - also in a company's first term."
+          type: string
+          enum: [not_limited, ok, near, reached]
+        auto_renew:
+          type: boolean
+        term_days:
+          description: Length of one term in days (the company's card validity period).
+          type: integer
+        expires_at:
+          description: The one renewal date of the company - the end of the term (UTC). Same meaning as in the session.
+          type: string
+          format: date-time
+        renewal_due:
+          description: From this moment on the Owner can renew (UTC). Same meaning as in the session.
+          type: string
+          format: date-time
+        grace_until:
+          description: After `expires_at` the company is read-only until this moment; then only the Owner's export works (UTC). Same meaning as in the session.
+          type: string
+          format: date-time
+        read_only:
+          description: True in the phases `grace` and `lapsed`.
+          type: boolean
+        export_only:
+          description: True in the phase `lapsed`.
+          type: boolean
+        phase:
+          description: "`normal`: before `renewal_due`. `renewal_open`: from `renewal_due` to `expires_at`. `grace`: until `grace_until` (read-only). `lapsed`: after it (export only)."
+          type: string
+          enum: [normal, renewal_open, grace, lapsed]
+        next_term:
+          description: What the next term would cost if it were invoiced today. Null when the plan has no price.
+          oneOf:
+            - type: "null"
+            - type: object
+              additionalProperties: false
+              required: [seats, amount]
+              properties:
+                seats:
+                  description: The seats asked for or paid before, and never fewer than the cards in use.
+                  type: integer
+                amount:
+                  $ref: "#/components/schemas/Money"
+        due_now:
+          description: What startRenewal would invoice right now. Null = nothing is due (409 `renewal-not-open`).
+          oneOf:
+            - type: "null"
+            - type: object
+              additionalProperties: false
+              required: [kind, seats, amount]
+              properties:
+                kind:
+                  type: string
+                  enum: [renewal, seats]
+                seats:
+                  description: "For `renewal`: the seats of the new term. For `seats`: the number of seats ADDED."
+                  type: integer
+                amount:
+                  $ref: "#/components/schemas/Money"
+        open_invoice:
+          description: The unpaid invoice, if one is waiting.
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/Invoice"
+        can_renew_now:
+          description: True when something is due and no invoice is open. The screen needs no rule of its own.
+          type: boolean
+        payments_available:
+          description: False when no payment provider is connected; an invoice is then settled by the platform operator.
+          type: boolean
+        payments_needing_attention:
+          description: Payments on record that did not take effect (arrived late, or could not be applied). The platform operator resolves them.
+          type: integer
+        if_nothing_is_done:
+          type: string
+          enum: [automatic_renewal_is_tried, read_only_then_export_only]
+    UpdateSubscriptionRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        seats:
+          type: integer
+          minimum: 1
+          maximum: 100000
+        auto_renew:
+          type: boolean
+    SeatLimitRequest:
+      type: object
+      additionalProperties: false
+      required: [seat_limit]
+      properties:
+        seat_limit:
+          description: Null removes the limit.
+          type:
+            - "integer"
+            - "null"
+          minimum: 1
+          maximum: 100000
+    Invoice:
+      type: object
+      additionalProperties: false
+      required: [id, number, kind, status, plan_code, seats, term_days, amount, automatic, settlement, issued_at, paid_at, closed_at, applied]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          description: Counts up per company, starting at 1. Numbers of closed invoices are not reused.
+          type: integer
+        kind:
+          description: "`renewal`: the next term. `seats`: seats added to the running term."
+          type: string
+          enum: [renewal, seats]
+        status:
+          description: >-
+            `open`: waiting to be paid (a company has at most one). `paid`: final. `failed`: the payment was
+            declined; final for this invoice - a new attempt gets a new invoice. `void`: closed without payment
+            (replaced by a newer invoice, or too old). `paid_late`: money arrived for an invoice that was already
+            failed or void; it is on record and is NOT applied unless the platform operator applies it.
+          type: string
+          enum: [open, paid, failed, void, paid_late]
+        plan_code:
+          type: string
+        seats:
+          description: "For `renewal`: the seats of the term. For `seats`: the number of seats added."
+          type: integer
+        term_days:
+          type: integer
+        amount:
+          description: Never changes after the invoice was issued.
+          $ref: "#/components/schemas/Money"
+        automatic:
+          description: True when the automatic renewal created it.
+          type: boolean
+        settlement:
+          description: "Who settled it: the payment provider, the platform operator by hand, or nobody (`no_charge`: the amount was 0). Null until paid."
+          type:
+            - "string"
+            - "null"
+          enum: [provider, operator, no_charge, null]
+        issued_at:
+          type: string
+          format: date-time
+        paid_at:
+          type:
+            - "string"
+            - "null"
+          format: date-time
+        closed_at:
+          type:
+            - "string"
+            - "null"
+          format: date-time
+        applied:
+          description: True once the invoice took effect (the term was renewed, or the seats were added). It happens once. A paid invoice with `applied` false needs the platform operator.
+          type: boolean
+    RenewalStarted:
+      type: object
+      additionalProperties: false
+      required: [invoice, already_open, collected_by]
+      properties:
+        invoice:
+          $ref: "#/components/schemas/Invoice"
+        already_open:
+          description: True when the company already had an unpaid invoice for exactly this; that one is returned and nothing new was issued.
+          type: boolean
+        collected_by:
+          description: "`provider`: the payment provider was asked to collect it. `operator`: no provider is connected; the platform operator records the payment."
+          type: string
+          enum: [provider, operator]
+    PaymentEventRequest:
+      description: The message format of the stand-in provider. A real provider's own format is translated to the same facts inside the API.
+      type: object
+      additionalProperties: false
+      required: [version, event_id, tenant_id, invoice_id, outcome, amount_minor, currency, sent_at, signature]
+      properties:
+        version:
+          description: The version of this format; it is part of what is signed.
+          type: string
+          enum: [v1]
+        event_id:
+          description: The provider's own id of this message; a message is applied once per id.
+          type: string
+          pattern: "^[A-Za-z0-9_-]{8,100}$"
+        tenant_id:
+          type: string
+          format: uuid
+        invoice_id:
+          type: string
+          format: uuid
+        outcome:
+          type: string
+          enum: [paid, declined]
+        amount_minor:
+          type: integer
+          minimum: 0
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+        sent_at:
+          description: When the message was sent (UTC). More than five minutes from now is refused.
+          type: string
+          format: date-time
+        signature:
+          description: "HMAC-SHA256, in hex, over these fields joined by line breaks, in this order: version, event_id, tenant_id, invoice_id, outcome, amount_minor, currency, sent_at."
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+    TenantBilling:
+      type: object
+      additionalProperties: false
+      required: [tenant_id, subscription, invoices, next_cursor]
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+        subscription:
+          $ref: "#/components/schemas/Subscription"
+        invoices:
+          type: array
+          items:
+            $ref: "#/components/schemas/Invoice"
+        next_cursor:
+          description: For the next page of invoices.
+          type:
+            - "string"
+            - "null"
+    ManualPaymentRequest:
+      type: object
+      additionalProperties: false
+      required: [invoice_id, amount, reference]
+      properties:
+        invoice_id:
+          type: string
+          format: uuid
+        amount:
+          description: What was paid. It must be exactly what the invoice says.
+          $ref: "#/components/schemas/Money"
+        reference:
+          description: Where the payment is recorded (a transfer or case id). Never a payment card number.
+          type: string
+          minLength: 3
+          maxLength: 200
+        discard_remaining_days:
+          description: Needed to renew while the running term still has days left (the new term starts today).
+          type: boolean

@@ -68,6 +68,11 @@ export interface PolicyContext {
 const GRACE_EXEMPT_WRITES: ReadonlySet<string> = new Set(['export:create']);
 /** The only things a Company Owner can still do after the grace window has ended. */
 const LAPSED_ALLOWED: ReadonlySet<string> = new Set(['export:create', 'export:read', 'self:read', 'self:logout']);
+// Seeing what is owed and paying it must stay possible when the COMPANY's term ran out - otherwise a lapsed company
+// could never come back by itself. This applies only while the company itself is in that phase: a card that is
+// expired on its own account (while the company is fine, or further gone than the company) gets nothing from it,
+// and a locked, suspended, revoked or never-activated card was refused before any phase is looked at.
+const COMPANY_TERM_ACTIONS: ReadonlySet<string> = new Set(['billing:read', 'billing:manage']);
 /** Nobody may do these to their own card. */
 const SELF_FORBIDDEN: ReadonlySet<string> = new Set([
   'card:suspend', 'card:revoke', 'card:replace', 'card:unlock', 'card:reset_credentials',
@@ -166,13 +171,15 @@ function evaluateSubject(subject: Subject, action: string, ctx: PolicyContext): 
   const obligations: Obligation[] = [];
 
   if (phase === 'grace') {
-    if (permission.is_write && !GRACE_EXEMPT_WRITES.has(action)) {
+    const payingForTheCompany = tenantPhase === 'grace' && COMPANY_TERM_ACTIONS.has(action);
+    if (permission.is_write && !GRACE_EXEMPT_WRITES.has(action) && !payingForTheCompany) {
       return deny(tenantCaused ? 'DENY_TENANT_GRACE_READ_ONLY' : 'DENY_GRACE_READ_ONLY');
     }
     obligations.push({ type: 'read_only' });
   } else if (phase === 'lapsed') {
     const isOwner = roles.some((r) => r.role_key === 'company_owner');
-    if (!isOwner || !LAPSED_ALLOWED.has(action)) return deny(tenantCaused ? 'DENY_TENANT_EXPIRED' : 'DENY_CARD_EXPIRED');
+    const payingForTheCompany = tenantPhase === 'lapsed' && COMPANY_TERM_ACTIONS.has(action);
+    if (!isOwner || !(LAPSED_ALLOWED.has(action) || payingForTheCompany)) return deny(tenantCaused ? 'DENY_TENANT_EXPIRED' : 'DENY_CARD_EXPIRED');
     obligations.push({ type: 'export_only' });
   }
 

@@ -1001,6 +1001,11 @@ export interface UpdateTenantSettingsRequest {
 }
 
 export interface TenantUsage {
+  seats: null | ({
+    limit: number | null;
+    used: number;
+    state: "not_limited" | "ok" | "near" | "reached";
+  });
   cards_by_state: {
     [key: string]: number;
   };
@@ -1281,6 +1286,105 @@ export interface KScenarioAttempt {
   steps: KScenarioAttemptStep[];
 }
 
+export interface Money {
+  amount_minor: number;
+  currency: string;
+}
+
+export interface Subscription {
+  plan: null | {
+    code: string;
+    name: string;
+    price_per_seat: Money;
+    placeholder: boolean;
+  };
+  seats_requested: number | null;
+  seat_limit: number | null;
+  seats_unlimited: boolean;
+  seats_used: number;
+  seat_state: "not_limited" | "ok" | "near" | "reached";
+  auto_renew: boolean;
+  term_days: number;
+  expires_at: string;
+  renewal_due: string;
+  grace_until: string;
+  read_only: boolean;
+  export_only: boolean;
+  phase: "normal" | "renewal_open" | "grace" | "lapsed";
+  next_term: null | {
+    seats: number;
+    amount: Money;
+  };
+  due_now: null | ({
+    kind: "renewal" | "seats";
+    seats: number;
+    amount: Money;
+  });
+  open_invoice: null | Invoice;
+  can_renew_now: boolean;
+  payments_available: boolean;
+  payments_needing_attention: number;
+  if_nothing_is_done: "automatic_renewal_is_tried" | "read_only_then_export_only";
+}
+
+export interface UpdateSubscriptionRequest {
+  seats?: number;
+  auto_renew?: boolean;
+}
+
+export interface SeatLimitRequest {
+  seat_limit: number | null;
+}
+
+export interface Invoice {
+  id: string;
+  number: number;
+  kind: "renewal" | "seats";
+  status: "open" | "paid" | "failed" | "void" | "paid_late";
+  plan_code: string;
+  seats: number;
+  term_days: number;
+  amount: Money;
+  automatic: boolean;
+  settlement: "provider" | "operator" | "no_charge" | null;
+  issued_at: string;
+  paid_at: string | null;
+  closed_at: string | null;
+  applied: boolean;
+}
+
+export interface RenewalStarted {
+  invoice: Invoice;
+  already_open: boolean;
+  collected_by: "provider" | "operator";
+}
+
+export interface PaymentEventRequest {
+  version: "v1";
+  event_id: string;
+  tenant_id: string;
+  invoice_id: string;
+  outcome: "paid" | "declined";
+  amount_minor: number;
+  currency: string;
+  sent_at: string;
+  signature: string;
+}
+
+export interface TenantBilling {
+  tenant_id: string;
+  subscription: Subscription;
+  invoices: Invoice[];
+  next_cursor: string | null;
+}
+
+export interface ManualPaymentRequest {
+  invoice_id: string;
+  amount: Money;
+  reference: string;
+  discard_remaining_days?: boolean;
+}
+
 export const operations = {
   getHealth: { method: "GET", path: "/v1/health", status: 200, idempotent: false, public: true, permission: null, contentTypes: [] },
   getReady: { method: "GET", path: "/v1/ready", status: 200, idempotent: false, public: true, permission: null, contentTypes: [] },
@@ -1438,6 +1542,15 @@ export const operations = {
   submitScenarioAttempt: { method: "POST", path: "/v1/scenario-attempts/{scenario_attempt_id}/submit", status: 200, idempotent: true, public: false, permission: "quiz:take", contentTypes: [] },
   getScenarioAnswer: { method: "GET", path: "/v1/scenario-answers/{scenario_answer_id}", status: 200, idempotent: false, public: false, permission: "quiz:grade", contentTypes: [] },
   overrideScenarioAnswer: { method: "POST", path: "/v1/scenario-answers/{scenario_answer_id}/override", status: 200, idempotent: true, public: false, permission: "quiz:grade", contentTypes: ["application/json"] },
+  getSubscription: { method: "GET", path: "/v1/billing/subscription", status: 200, idempotent: false, public: false, permission: "billing:read", contentTypes: [] },
+  updateSubscription: { method: "PATCH", path: "/v1/billing/subscription", status: 200, idempotent: true, public: false, permission: "billing:manage", contentTypes: ["application/json"] },
+  listInvoices: { method: "GET", path: "/v1/billing/invoices", status: 200, idempotent: false, public: false, permission: "billing:read", contentTypes: [] },
+  getInvoice: { method: "GET", path: "/v1/billing/invoices/{invoice_id}", status: 200, idempotent: false, public: false, permission: "billing:read", contentTypes: [] },
+  startRenewal: { method: "POST", path: "/v1/billing/renewals", status: 200, idempotent: true, public: false, permission: "billing:manage", contentTypes: [] },
+  receivePaymentEvent: { method: "POST", path: "/v1/billing/provider-events", status: 200, idempotent: false, public: true, permission: null, contentTypes: ["application/json"] },
+  getTenantBilling: { method: "GET", path: "/v1/tenants/{tenant_id}/billing", status: 200, idempotent: false, public: false, permission: "billing:operate", contentTypes: [] },
+  setTenantSeatLimit: { method: "PATCH", path: "/v1/tenants/{tenant_id}/billing", status: 200, idempotent: true, public: false, permission: "billing:operate", contentTypes: ["application/json"] },
+  recordManualPayment: { method: "POST", path: "/v1/tenants/{tenant_id}/billing/manual-payments", status: 200, idempotent: true, public: false, permission: "billing:operate", contentTypes: ["application/json"] },
 } as const;
 
 export type OperationId = keyof typeof operations;
@@ -2614,5 +2727,64 @@ export interface OperationTypes {
       score: number;
     };
     response: KStatus;
+  };
+  getSubscription: {
+    path: undefined;
+    query: undefined;
+    body: undefined;
+    response: Subscription;
+  };
+  updateSubscription: {
+    path: undefined;
+    query: undefined;
+    body: UpdateSubscriptionRequest;
+    response: Subscription;
+  };
+  listInvoices: {
+    path: undefined;
+    query: { limit?: number; cursor?: string };
+    body: undefined;
+    response: {
+      items: Invoice[];
+      next_cursor: string | null;
+    };
+  };
+  getInvoice: {
+    path: { invoice_id: string };
+    query: undefined;
+    body: undefined;
+    response: Invoice;
+  };
+  startRenewal: {
+    path: undefined;
+    query: undefined;
+    body: undefined;
+    response: RenewalStarted;
+  };
+  receivePaymentEvent: {
+    path: undefined;
+    query: undefined;
+    body: PaymentEventRequest;
+    response: {
+      status: "applied" | "duplicate" | "recorded";
+    };
+  };
+  getTenantBilling: {
+    path: { tenant_id: string };
+    query: { limit?: number; cursor?: string };
+    body: undefined;
+    response: TenantBilling;
+  };
+  setTenantSeatLimit: {
+    path: { tenant_id: string };
+    query: undefined;
+    body: SeatLimitRequest;
+    response: Subscription;
+  };
+  recordManualPayment: {
+    path: { tenant_id: string };
+    query: undefined;
+    body: ManualPaymentRequest;
+    response: Invoice;
   };
 }

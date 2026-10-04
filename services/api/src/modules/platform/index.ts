@@ -21,7 +21,7 @@ export {
   type ExportTable, type TenantRow, type TenantSettings,
 } from './internal/tenants.ts';
 export {
-  createHttpServer, SESSION_COOKIE,
+  checkedHeaderNames, createHttpServer, declaredHeaders, NEVER_DECLARED_HEADERS, SESSION_COOKIE,
   type AuthPort, type GatewayCallArgs, type GatewayPrepared, type HandlerResult, type HttpDeps, type HttpServer, type PublicHandlerArgs,
   honoursFilter, type ListFilter, type RegisteredRoute, type RouteDef, type SessionHandlerArgs,
 } from './internal/http.ts';

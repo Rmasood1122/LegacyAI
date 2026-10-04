@@ -77,7 +77,7 @@ export class Authorizer {
       usage.set(usageKey(limitKey, windowSeconds as number), rows[0]?.count ?? 0);
     }
 
-    const plan = await this.#billing.checkLimit({ tenantId: subject.tenant_id, planCode: tenant.plan_code, action });
+    const plan = await this.#billing.checkLimit({ tx, tenantId: subject.tenant_id, planCode: tenant.plan_code, action });
     const knowledge = this.#knowledgeSettings !== null && KNOWLEDGE_NAMESPACES.some((n) => action.startsWith(n))
       ? await this.#knowledgeSettings(tx, subject.tenant_id)
       : {};

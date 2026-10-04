@@ -154,6 +154,37 @@ export function formatDate(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? '—' : DATE.format(d);
 }
 
+/**
+ * An amount as it is stored (whole minor units, e.g. cents) written for reading: "45.00 USD".
+ * Done with whole numbers only, so no amount is rounded on the way to the screen.
+ */
+// Currencies whose smallest unit is not a hundredth (ISO 4217). Every other currency has two decimals.
+const NO_DECIMALS = new Set(['BIF', 'CLP', 'DJF', 'GNF', 'ISK', 'JPY', 'KMF', 'KRW', 'PYG', 'RWF', 'UGX', 'VND', 'VUV', 'XAF', 'XOF', 'XPF']);
+const THREE_DECIMALS = new Set(['BHD', 'IQD', 'JOD', 'KWD', 'LYD', 'OMR', 'TND']);
+/** An amount in the smallest unit of its currency, written out. Whole numbers only: nothing is rounded. */
+export function money(amountMinor: number, currency: string): string {
+  const decimals = NO_DECIMALS.has(currency) ? 0 : THREE_DECIMALS.has(currency) ? 3 : 2;
+  const sign = amountMinor < 0 ? '-' : '';
+  const unit = 10 ** decimals;
+  const whole = Math.trunc(Math.abs(amountMinor) / unit);
+  if (decimals === 0) return `${sign}${whole} ${currency}`;
+  const part = String(Math.abs(amountMinor) % unit).padStart(decimals, '0');
+  return `${sign}${whole}.${part} ${currency}`;
+}
+/** The same, for the API's Money object. */
+export const moneyOf = (m: { amount_minor: number; currency: string }): string => money(m.amount_minor, m.currency);
+
+const INVOICE_STATE = {
+  open: ['info', 'Waiting for payment'], paid: ['success', 'Paid'], failed: ['danger', 'Payment failed'], void: ['neutral', 'Cancelled'],
+  paid_late: ['warning', 'Paid late'],
+} as const satisfies Record<string, readonly [BadgeTone, string]>;
+/** A paid invoice that has not taken effect is said to be so: it needs the platform operator. */
+export function InvoiceStatus({ status, applied = true }: { status: keyof typeof INVOICE_STATE; applied?: boolean }) {
+  const [tone, text] = INVOICE_STATE[status];
+  const waiting = (status === 'paid' || status === 'paid_late') && !applied;
+  return <Badge tone={waiting ? 'warning' : tone}>{waiting ? `${text}, not yet in effect` : text}</Badge>;
+}
+
 export const SENSITIVITY_LABELS = ['Public inside the company', 'Internal', 'Restricted', 'Confidential'] as const;
 export function sensitivityLabel(level: number): string {
   return SENSITIVITY_LABELS[level] ?? `Level ${level}`;

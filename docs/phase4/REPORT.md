@@ -248,4 +248,9 @@ $0. Total real-AI spend of the project stays $0.642.
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is not
-built). Batch B and Batch C: nothing.
+built).
+
+Batch B step 1 (billing and renewal: features 29 billing part, 31, 32, 33, 34, 35) is **written and not proven**:
+the code, its unit tests and its database and browser tests exist (docs/phase4/05-billing.md, D29), but the
+database and browser tests had not run on GitHub when this line was written. The payment provider is a stand-in;
+no money can be taken and the prices are placeholders. The rest of Batch B and Batch C: nothing.

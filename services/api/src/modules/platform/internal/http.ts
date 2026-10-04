@@ -50,12 +50,18 @@ export interface HandlerResult {
 
 export interface PublicHandlerArgs {
   ctx: RequestContext;
+  /**
+   * ONLY the request headers the route declared in `headers` (lower-case names); empty for every other route. For
+   * callers that prove themselves by a signature instead of a session. Cookies, Authorization and the CSRF token
+   * can never be declared.
+   */
+  headers: Readonly<Record<string, string | undefined>>;
   body: any;
   params: any;
   query: any;
 }
 
-export interface SessionHandlerArgs extends PublicHandlerArgs {
+export interface SessionHandlerArgs extends Omit<PublicHandlerArgs, 'headers'> {
   /** The request's content type (without parameters), for raw-file uploads. */
   contentType?: string;
   tx: Tx;
@@ -97,7 +103,12 @@ export interface GatewayCallArgs {
 export type GatewayPrepared = HandlerResult | { call: (a: GatewayCallArgs) => Promise<HandlerResult> };
 
 export type RouteDef =
-  | { kind: 'public'; operationId: string; policy: { public: true; reason: string }; handler: (a: PublicHandlerArgs) => Promise<HandlerResult> }
+  | {
+      kind: 'public'; operationId: string; policy: { public: true; reason: string };
+      /** Request headers this handler needs (e.g. a provider's signature header). Default: none reach it. */
+      headers?: readonly string[];
+      handler: (a: PublicHandlerArgs) => Promise<HandlerResult>;
+    }
   | {
       kind: 'session'; operationId: string; policy: Extract<PolicySpec, { resource: unknown }>; listFilter?: ListFilter;
       handler: (a: SessionHandlerArgs) => Promise<HandlerResult>;
@@ -135,6 +146,34 @@ export interface RegisteredRoute {
   publicReason: string | null;
   /** The route's declaration for collection reads; null when it declares none. */
   listFilter: ListFilter | null;
+}
+
+/** Headers that carry a person's session or credentials: no public handler may ever be handed them. */
+export const NEVER_DECLARED_HEADERS: ReadonlySet<string> = new Set(['cookie', 'authorization', 'proxy-authorization', 'x-csrf-token', 'set-cookie']);
+
+/** A route's declared header names, checked when the route is defined. */
+export function checkedHeaderNames(operationId: string, declared: readonly string[] | undefined): readonly string[] {
+  const names = (declared ?? []).map((n) => n.toLowerCase());
+  for (const name of names) {
+    if (NEVER_DECLARED_HEADERS.has(name) || !/^[a-z0-9-]{1,64}$/.test(name)) {
+      throw new Error(`Route ${operationId} declares the header "${name}", which a public handler may not receive`);
+    }
+  }
+  return names;
+}
+
+/**
+ * The declared headers of a request as plain strings (a repeated header keeps its first value). Nothing that was not
+ * declared is passed on - in particular no cookie, no Authorization, no CSRF token.
+ */
+export function declaredHeaders(headers: Record<string, string | string[] | undefined>, declared: readonly string[]): Readonly<Record<string, string | undefined>> {
+  const out: Record<string, string | undefined> = {};
+  for (const name of declared) {
+    if (NEVER_DECLARED_HEADERS.has(name)) continue;
+    const value = headers[name];
+    if (value !== undefined) out[name] = Array.isArray(value) ? value[0] : value;
+  }
+  return out;
 }
 
 /** True when the route itself (or the AI service on its behalf) narrows a list to what the caller's grant covers. */
@@ -387,6 +426,12 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
         const decision = await auth.authorize(tx, subject, action, loaded, ctx);
         if (decision.effect !== 'allow') {
           await auth.recordDecision(tx, subject, action, loaded, decision, ctx);
+          // The plan's limit is the LAST check of the policy: everything else allowed the request. Saying so tells
+          // the caller nothing it may not know, and lets a screen show "add seats" instead of "not allowed".
+          // (Seats are the only plan limit there is today.)
+          if (decision.reason_code === 'DENY_PLAN_LIMIT') {
+            return { problem: problems.conflict('seat-limit-reached', 'No seat is free: all seats the company paid for are in use, or an invoice for fewer seats is waiting to be paid; the Owner can add seats or pay the invoice') };
+          }
           return { problem: problems.forbidden() };
         }
         // An obligation this layer does not understand cannot be honoured, so the request is refused.
@@ -535,6 +580,8 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
         listFilter: def.kind === 'public' ? null : def.listFilter ?? null,
       });
 
+      const publicHeaders = def.kind === 'public' ? checkedHeaderNames(def.operationId, def.headers) : [];
+
       app.route({
         method: op.method,
         url: op.fastifyPath,
@@ -553,7 +600,7 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
               let result: HandlerResult;
               if (def.kind === 'public') {
                 try {
-                  result = await def.handler({ ctx, body: input.body, params: input.params, query: input.query });
+                  result = await def.handler({ ctx, headers: declaredHeaders(req.headers, publicHeaders), body: input.body, params: input.params, query: input.query });
                 } catch (err) {
                   // A refusal a public handler THROWS on purpose (sign-in records the failure, commits, then throws a
                   // Problem) has written its facts, so what it queued is sent. Any other error means its transaction

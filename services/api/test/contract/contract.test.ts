@@ -24,12 +24,12 @@ beforeAll(async () => {
 afterAll(async () => t.close());
 
 /** Paths of the Phase 2 (knowledge) operations. */
-const PHASE2_PATH = /^\/v1\/(sources|knowledge|interviews|gaps|topics|job-roles|expert-questions|readiness|consents|review|redaction|quality|ai|me\/(consents|contributions)|people\/\{person_id\}\/consent-withdrawals|tenants\/\{tenant_id\}\/ai-budget|platform\/(ai|storage)|topic-templates|analytics|scenarios|scenario-offers|scenario-attempts|scenario-answers|scenario-rubric-proposals)(\/|$)/;
+const PHASE2_PATH = /^\/v1\/(sources|knowledge|interviews|gaps|topics|job-roles|expert-questions|readiness|consents|review|redaction|quality|ai|me\/(consents|contributions)|people\/\{person_id\}\/consent-withdrawals|tenants\/\{tenant_id\}\/ai-budget|platform\/(ai|storage)|topic-templates|analytics|scenarios|scenario-offers|scenario-attempts|scenario-answers|scenario-rubric-proposals|billing|tenants\/\{tenant_id\}\/billing)(\/|$)/;   // billing: walked by test/integration/billing.test.ts
 
 describe('the contract file', () => {
-  it('is OpenAPI 3.1 with 156 operations (46 from Phase 1, 78 from Phase 2, 32 from Phase 4), all under /v1, each with a unique operationId', () => {
+  it('is OpenAPI 3.1 with 165 operations (46 from Phase 1, 78 from Phase 2, 41 from Phase 4), all under /v1, each with a unique operationId', () => {
     const c = loadContract(CONTRACT_PATH);
-    expect(c.operations.size).toBe(156);
+    expect(c.operations.size).toBe(165);
     for (const op of c.operations.values()) {
       expect(op.path.startsWith('/v1/')).toBe(true);
       expect(op.responses.size).toBeGreaterThanOrEqual(2);
@@ -43,10 +43,10 @@ describe('the contract file', () => {
     const { readFileSync } = await import('node:fs');
     const yaml = readFileSync(CONTRACT_PATH, 'utf8');
     const count = (needle: string): number => yaml.split(needle).length - 1;
-    expect(count('$ref: "#/components/parameters/Limit"')).toBe(7);   // + listAnomalyEvents
-    expect(count('$ref: "#/components/parameters/Cursor"')).toBe(21);   // + listScenarios, listScenarioAttempts;   // 13 + listReadinessAttempts, listExpertQuestions, listMyConsents (listJobRoles has its own, longer name cursor)
-    expect(count('$ref: "#/components/parameters/IdempotencyKey"')).toBe(86);   // + the nine scenario writes;   // + anomaly settings, leaving date (set, clear), apply a template
-    expect(count('$ref: "#/components/responses/TooManyRequests"')).toBe(156);
+    expect(count('$ref: "#/components/parameters/Limit"')).toBe(9);   // + getTenantBilling;   // + listInvoices;   // + listAnomalyEvents
+    expect(count('$ref: "#/components/parameters/Cursor"')).toBe(23);   // + getTenantBilling;   // + listInvoices;   // + listScenarios, listScenarioAttempts;   // 13 + listReadinessAttempts, listExpertQuestions, listMyConsents (listJobRoles has its own, longer name cursor)
+    expect(count('$ref: "#/components/parameters/IdempotencyKey"')).toBe(90);   // + setTenantSeatLimit;   // + updateSubscription, startRenewal, recordManualPayment;   // + the nine scenario writes;   // + anomaly settings, leaving date (set, clear), apply a template
+    expect(count('$ref: "#/components/responses/TooManyRequests"')).toBe(165);
     expect(yaml).toContain('openapi: 3.1.0');
   });
 });
@@ -293,7 +293,7 @@ describe('every one of the 47 operations returns a contract-conforming success',
     const all = [...t.app.http.contract.operations.values()].filter((op) => !PHASE2_PATH.test(op.path)).map((op) => op.operationId).sort();
     expect([...hit].sort()).toEqual(all);
     expect(hit.size).toBe(46 + 7);   // Phase 1, plus the seven anomaly-lock and retirement-radar operations of Phase 4
-    expect(t.app.http.contract.operations.size).toBe(46 + 78 + 5 + 7 + 2 + 3 + 15);   // + the fifteen scenario operations (fourteen, and the step a grader reads);   // + the three insight operations (activity, map, map export)
+    expect(t.app.http.contract.operations.size).toBe(46 + 78 + 5 + 7 + 2 + 3 + 15 + 7);   // + the seven billing operations;   // + the fifteen scenario operations (fourteen, and the step a grader reads);   // + the three insight operations (activity, map, map export)
   });
 });
 

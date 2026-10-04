@@ -47,6 +47,11 @@ export async function sessionPermissions(page: Page): Promise<string[]> {
   return ((await res.json()) as { permissions: string[] }).permissions;
 }
 
+/** Billing: puts the company's renewal date this many days from now (the test server writes the company card's dates). */
+export const setTermEnd = (days: number) => control<{ renewal_on: string }>(`/billing-term?days=${days}`);
+/** Billing: the test server plays the payment provider and sends its signed message about the waiting invoice. */
+export const providerSays = (outcome: 'paid' | 'declined') => control<{ http_status: number; status: string | null }>(`/payment-event?outcome=${outcome}`);
+
 /** Makes the readiness material (a released verified item, a topic, a job role) once; returns the job role to type. */
 export const seedReadiness = () => control<{ job_role: string; item_id: string }>('/seed-readiness');
 /** The name of the topic the seed creates (topic names are not redacted). */

@@ -7,7 +7,7 @@ scheduled, run it once a day by hand, or accept what "What happens if it is not 
 
 ## What it does
 
-One command, three jobs, for every company:
+One command, four jobs, for every company:
 
 1. **Cards that have expired are written down as expired** (state, usage history, audit row) and renewal notices
    go out. Whether a card works never depends on this: the API treats a card as expired the moment its date passes.
@@ -17,7 +17,16 @@ One command, three jobs, for every company:
    or expired enrollment tokens, expired idempotency keys and sign-in transactions, old rate-limit windows, sign-in
    attempts older than 90 days. The audit log and the card usage history are never touched.
 
-A job that fails is reported in the output and does not stop the other two; the command then ends with a failure
+4. **Billing:** renewal reminders (30, 14 and 3 days before a company's renewal date, and once during its
+   read-only days) are created, each once; for a company that switched automatic renewal on, a renewal is started
+   from one day before the date (at most 3 attempts). An invoice nobody answered is closed: an automatic one after
+   3 days, one the Owner started after 14. Each company and each step runs by itself; a failure is printed with
+   the company's id and the reason (`billing.failures`), and the command ends with a failure code.
+   With no payment provider connected, automatic renewal does nothing. See docs/phase4/05-billing.md.
+   It also FINISHES payments that are on record but whose next steps did not happen (the service stopped in
+   between): `billing.finished` counts them. Each is put into effect if possible, otherwise reported once.
+
+A job that fails is reported in the output and does not stop the others; the command then ends with a failure
 code.
 
 ## How to run it
@@ -51,6 +60,8 @@ second time.
 - Expired cards are still refused, but their expiry is not written into the usage history and no renewal notice
   goes out.
 - The tables named in job 3 keep growing.
+- **No renewal reminder is created and automatic renewal is never tried.** A company's term still ends on its
+  date, and the Owner can still renew by hand on the billing screen.
 
 ## What it does not do
 

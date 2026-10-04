@@ -1,12 +1,13 @@
 // PUBLIC SURFACE of the identity-access module (backend Part 1).
 // Other modules may import ONLY from this file - never from ./internal/*.
 
-import type { BillingPort } from '../billing/index.ts';
+import type { BillingPort, CompanyTermPort } from '../billing/index.ts';
 import type { AuthPort, Config, Database, ExportRegistry, Notifier, RateLimiter, RouteDef, Tx } from '../platform/index.ts';
 import { AnomalyGuard, type AnomalySettings } from './internal/anomaly.ts';
 import { AuthService, DEFAULT_AUTH_LIMITS, type AuthLimits } from './internal/auth.ts';
 import { Authorizer } from './internal/authz.ts';
 import { CardService } from './internal/cards.ts';
+import { companyTerm } from './internal/company-term.ts';
 import { SeedCipher } from './internal/factors.ts';
 import { sweepRetirementNudges } from './internal/leaving.ts';
 import { identityRoutes } from './internal/routes.ts';
@@ -66,6 +67,8 @@ export interface IdentityAccess {
   hasher: SecretCodeHasher;
   /** Creates the retirement-radar nudges that are due for one company (each once). Run by the housekeeping job. */
   retirementSweep(tx: Tx, tenantId: string, now: Date, requestId: string): Promise<number>;
+  /** The company's term (the company card's dates) for the billing module: read it, renew it. */
+  companyTerm: CompanyTermPort;
   /** Plugs in what the knowledge module holds from a person (job roles, counts), narrowed by the asking card's rights there. */
   usePersonHoldings(loader: PersonHoldingsLoader): void;
 }
@@ -102,7 +105,7 @@ export function createIdentityAccess(deps: IdentityAccessDeps): IdentityAccess {
 
   return {
     routes: [
-      ...identityRoutes({ db, auth, cards, authorizer, notifier: deps.notifier }),
+      ...identityRoutes({ db, auth, cards, authorizer, notifier: deps.notifier, billing: deps.billing }),
       ...safetyRoutes({ authorizer, anomaly }),
       ...leavingRoutes({ authorizer, notifier: deps.notifier, holdings: () => holdings }),
     ],
@@ -131,6 +134,7 @@ export function createIdentityAccess(deps: IdentityAccessDeps): IdentityAccess {
     cards,
     authorizer,
     hasher,
+    companyTerm: companyTerm(cards),
     retirementSweep: (tx, tenantId, now, requestId) => sweepRetirementNudges(tx, tenantId, now, deps.notifier, requestId),
     usePersonHoldings: (loader) => {
       holdings = loader;

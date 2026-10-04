@@ -1,7 +1,7 @@
 // Wires the modules together. This file and main.ts are the ONLY places allowed to do so.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { StubBilling, type BillingPort } from './modules/billing/index.ts';
+import { createBilling, type BillingModule, type BillingPort, type PaymentProvider } from './modules/billing/index.ts';
 import { createIdentityAccess, type AnomalySettings, type AuthLimits, type IdentityAccess } from './modules/identity-access/index.ts';
 import { createKnowledgeGateway } from './modules/knowledge-gateway/index.ts';
 import {
@@ -15,7 +15,12 @@ export interface AppOverrides {
   logger?: Logger;
   notifier?: Notifier;
   rateLimiter?: RateLimiter;
+  /** Replaces the plan-limit answer only (tests of other modules); the billing routes stay the real ones. */
   billing?: BillingPort;
+  /** A stand-in payment provider for tests. Default: what the configuration names ('none' or 'fake'). */
+  paymentProvider?: PaymentProvider;
+  /** For tests: how long a payment provider gets to answer (default 10 seconds). */
+  providerTimeoutMs?: number;
   authLimits?: AuthLimits;
   anomalyDefaults?: AnomalySettings;
   generalLimit?: { limit: number; windowSeconds: number };
@@ -26,6 +31,7 @@ export interface App {
   db: Database;
   log: Logger;
   identity: IdentityAccess;
+  billing: BillingModule;
   exports: ExportRegistry;
   close(): Promise<void>;
 }
@@ -57,8 +63,11 @@ export async function createApp(config: Config, overrides: AppOverrides = {}): P
     orderBy: 'seq',
   });
 
+  // Billing answers the policy decision point's plan-limit question; the identity module gives billing the company's
+  // term (the company card's dates). Each knows the other only through a port.
+  const billing = createBilling({ config, db, notifier, rateLimiter, provider: overrides.paymentProvider, providerTimeoutMs: overrides.providerTimeoutMs });
   const identity = createIdentityAccess({
-    config, db, rateLimiter, notifier, billing: overrides.billing ?? new StubBilling(), exports, limits: overrides.authLimits, anomalyDefaults: overrides.anomalyDefaults, log,
+    config, db, rateLimiter, notifier, billing: overrides.billing ?? billing.port, exports, limits: overrides.authLimits, anomalyDefaults: overrides.anomalyDefaults, log,
   });
 
   const http = await createHttpServer({
@@ -66,7 +75,9 @@ export async function createApp(config: Config, overrides: AppOverrides = {}): P
     contractPath: CONTRACT_PATH, generalLimit: overrides.generalLimit, staticSite,
   });
   http.defineRoutes(platformRoutes({ config, db, exports }));
+  billing.useTerm(identity.companyTerm);
   http.defineRoutes(identity.routes);
+  http.defineRoutes(billing.routes);
   const knowledge = createKnowledgeGateway({ config, db, authorizer: identity.authorizer, notifier, rateLimiter });
   // the retirement radar (identity) shows what is held from a person; the knowledge module answers that, by its own rules
   identity.usePersonHoldings(knowledge.personHoldings);
@@ -82,7 +93,7 @@ export async function createApp(config: Config, overrides: AppOverrides = {}): P
 
   await http.app.ready();
   return {
-    http, db, log, identity, exports,
+    http, db, log, identity, billing, exports,
     close: async () => {
       await http.app.close();
       await db.close();

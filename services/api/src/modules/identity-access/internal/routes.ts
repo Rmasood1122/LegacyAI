@@ -14,6 +14,7 @@ import {
 } from '../../platform/index.ts';
 import { sessionBody, type AuthService } from './auth.ts';
 import type { Authorizer } from './authz.ts';
+import type { BillingPort } from '../../billing/index.ts';
 import {
   CARD_COLUMNS, getCard, lockTenantRoles, maxRank, otherUsableOwners, personDepartment, toApiCard, withSecrets,
   type CardRow, type CardService, type RoleInput,
@@ -29,6 +30,8 @@ export interface IdentityRouteDeps {
   cards: CardService;
   authorizer: Authorizer;
   notifier: Notifier;
+  /** For the seats line of the usage page (numbers of cards, never money). */
+  billing: BillingPort;
 }
 
 const CARD_DESCRIPTOR: ResourceDescriptor = {
@@ -894,6 +897,8 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
                 WHERE c.tenant_id = $1 AND c.state = 'active' AND c.expires_at > $2 AND cr.role_key IN ('company_owner', 'admin')`,
               [tenantId, ctx.now]),
             plan: await getPlan(tx, tenant.plan_code),
+            // the seats paid for this term and how many are taken: what whoever issues cards needs to know
+            seats: (await deps.billing.seats?.(tx, tenantId)) ?? null,
           },
         };
       },

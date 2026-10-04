@@ -6,6 +6,7 @@ import type { CardWithSecrets, OwnerRecoveryResult, Tenant, TenantCreated } from
 import { useSession } from '../../session/session.tsx';
 import { Badge, Banner, Card, ConfirmButton, DataTable, Empty, ErrorNote, Facts, formatDate, humanize, Loading, OneTimeSecrets, Page, PartialListNote, SelectField, TextField } from '../../ui/index.tsx';
 import type { ShownSecrets } from '../../ui/index.tsx';
+import { OperatorBilling } from './OperatorBilling.tsx';
 
 type Shown = ShownSecrets;
 const secretsOf = (title: string, r: CardWithSecrets | OwnerRecoveryResult): Shown =>
@@ -129,6 +130,7 @@ function CompanyActions({ tenant }: { tenant: Tenant }) {
             onConfirm={() => renew.mutate({ path, body: {} }, { onSuccess: (r) => { renew.reset(); setShown(secretsOf(`The company card of ${tenant.name}`, r)); } })} />
         </>
       )}
+      {can('getTenantBilling') && <OperatorBilling tenantId={tenant.id} tenantName={tenant.name} mayRecord={can('recordManualPayment')} />}
       {can('recoverOwnerCard') && (
         <>
           <h3>Owner recovery</h3>

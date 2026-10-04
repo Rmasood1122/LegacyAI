@@ -7,6 +7,7 @@ import { ConsentAdminScreen } from './features/admin/ConsentAdminScreen.tsx';
 import { SettingsScreen } from './features/admin/SettingsScreen.tsx';
 import { AskScreen } from './features/ask/AskScreen.tsx';
 import { QuestionsScreen } from './features/ask/QuestionsScreen.tsx';
+import { BillingScreen } from './features/billing/BillingScreen.tsx';
 import { ConsentScreen } from './features/consent/ConsentScreen.tsx';
 import { DocumentDetailScreen } from './features/documents/DocumentDetailScreen.tsx';
 import { DocumentsScreen } from './features/documents/DocumentsScreen.tsx';
@@ -77,6 +78,7 @@ const COMPONENTS: Readonly<Record<ScreenKey, ComponentType>> = {
   quality: QualityScreen,
   activity: ActivityScreen,
   settings: SettingsScreen,
+  billing: BillingScreen,
   audit: AuditScreen,
   operator: OperatorScreen,
 };

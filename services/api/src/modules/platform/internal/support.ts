@@ -142,8 +142,14 @@ export interface NotificationEvent {
     | 'card_replaced' | 'card_expiring' | 'unlock_capacity_low' | 'credential_added' | 'enrollment_token_issued'
     | 'tenant_created' | 'company_card_renewed' | 'owner_recovered'
     // Phase 4: an anomaly rule fired on the last usable Owner card (which is not locked); a leaving date came closer
-    | 'card_anomaly' | 'retirement_nudge';
+    | 'card_anomaly' | 'retirement_nudge'
+    // Phase 4, billing: the renewal date comes closer; a payment failed; the term was renewed
+    | 'renewal_reminder' | 'payment_failed' | 'subscription_renewed'
+    // a payment is on record that changed nothing by itself (late, repeated, unknown invoice, could not be applied)
+    | 'payment_needs_attention';
   tenantId: string;
+  /** When the notice goes to the platform operator: the company it is about. */
+  aboutTenantId?: string;
   /** The card the event is about. */
   cardId?: string;
   /** Who is told, when that is someone other than the holder of `cardId` (e.g. the other Owners). */
@@ -161,7 +167,10 @@ export class LogNotifier implements Notifier {
     this.#log = log;
   }
   async notify(event: NotificationEvent): Promise<void> {
-    this.#log.info({ notification: event.type, tenant_id: event.tenantId, card_id: event.cardId, recipient_card_id: event.recipientCardId }, 'notification');
+    this.#log.info({
+      notification: event.type, tenant_id: event.tenantId, card_id: event.cardId, recipient_card_id: event.recipientCardId,
+      about_tenant_id: event.aboutTenantId,
+    }, 'notification');
   }
 }
 

@@ -57,6 +57,12 @@ export interface Config {
   exportDir: string;
   /** Folder holding the built web application. null = the API serves no files. */
   webDistDir: string | null;
+  /**
+   * Payments (docs/phase4/05). 'none': nothing can be paid through the product and the provider's messages are all
+   * refused. 'fake': a stand-in that takes no money, for tests and demonstrations - refused in production.
+   * `eventKey` checks the signature on the provider's messages; without it every message is refused.
+   */
+  payment: { provider: 'none' | 'fake'; eventKey: Secret<Buffer> | null };
 }
 
 export class ConfigError extends Error {
@@ -278,12 +284,26 @@ export function loadConfig(env: Env): Config {
     validateResponses: bool('VALIDATE_RESPONSES', nodeEnv !== 'production'),
     exportDir: raw('EXPORT_DIR') ?? './exports',
     webDistDir: raw('WEB_DIST_DIR') ?? null,
+    payment: { provider: oneOf('PAYMENT_PROVIDER', ['none', 'fake'] as const, 'none'), eventKey: null },
   };
+  const eventKeyText = raw('PAYMENT_EVENT_KEY');
+  if (eventKeyText !== undefined) {
+    const key = decodeKey('PAYMENT_EVENT_KEY', eventKeyText, 32);
+    if (key) config.payment.eventKey = new Secret(key);
+  }
+  if (config.payment.provider === 'fake') {
+    // The stand-in "accepts" payments without money, signed with a key that is published in the repository. It runs
+    // only where automated tests run: NODE_ENV must be exactly "test" - not production, not development, not unset.
+    if (nodeEnv !== 'test') problems.push('PAYMENT_PROVIDER=fake takes no money and is allowed only when NODE_ENV=test');
+    if (config.payment.eventKey === null) problems.push('PAYMENT_EVENT_KEY is required when PAYMENT_PROVIDER is set');
+  }
 
   // The placeholder keys from .env.example decode to text starting with "FAKE-". They must
   // never protect real data.
   if (nodeEnv === 'production') {
     const keys = [...config.scPepper.keys.values(), ...config.credentialEnc.keys.values(), config.hmacIndexKey];
+    // the key that makes a "this invoice was paid" message believable is as sensitive as any of them
+    if (config.payment.eventKey !== null) keys.push(config.payment.eventKey);
     if (keys.some((k) => k.reveal().subarray(0, 5).toString('utf8') === 'FAKE-') || serviceToken.startsWith('fake-')) {
       problems.push('a placeholder key from .env.example is in use; generate real keys for production');
     }

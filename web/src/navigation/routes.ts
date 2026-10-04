@@ -93,6 +93,8 @@ export const ROUTES = {
   graph: { path: '/graph', label: 'Knowledge map', requiredOperation: 'getGraphNeighbourhood' },
   graphNode: { path: '/graph/:node', requiredOperation: 'getGraphNeighbourhood' },
   settings: { path: '/settings', label: 'Settings', requiredOperation: 'getTenantSettings', menu: 'manage' },
+  // The renewal center. Only an Owner holds the right to read the subscription.
+  billing: { path: '/billing', label: 'Billing and renewal', requiredOperation: 'getSubscription', menu: 'manage' },
   audit: { path: '/audit', label: 'Audit log', requiredOperation: 'listAuditEvents', menu: 'manage' },
   operator: { path: '/operator', label: 'Operator console', requiredOperation: 'listTenants', menu: 'manage' },
 } as const satisfies Record<string, RouteDef>;

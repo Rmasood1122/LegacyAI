@@ -38,6 +38,9 @@ export function testEnv(overrides: Record<string, string | undefined> = {}): Rec
     ALLOWED_ORIGINS: TEST_ORIGIN,
     VALIDATE_RESPONSES: 'true',
     EXPORT_DIR: process.env.TEST_EXPORT_DIR ?? './.test-exports',
+    // the stand-in payment provider (takes no money) and the fake key its messages are signed with
+    PAYMENT_PROVIDER: 'fake',
+    PAYMENT_EVENT_KEY: fakeKey('payment-ev-'),
     ...overrides,
   };
 }

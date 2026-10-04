@@ -1,11 +1,13 @@
-// Housekeeping: the things that have to be written down or cleaned up as time passes. One command, three jobs:
+// Housekeeping: the things that have to be written down or cleaned up as time passes. One command, four jobs:
 //   1. cards whose expires_at has passed are RECORDED as expired (state -> expired, usage-history event, audit
 //      row) and renewal notices go out. Enforcement never depends on this: the API treats a card as expired the
 //      moment the clock passes expires_at.
 //   2. retirement radar: the nudges that have become due are created, each once, and leaving dates that passed
 //      more than 30 days ago are removed. The radar screen never depends on this: it computes the stage from
 //      the date when it is read. WITHOUT THIS COMMAND NO NUDGE IS EVER CREATED after the day a date was set.
-//   3. rows that otherwise only grow (ended sessions, used tokens, old rate-limit windows) are removed.
+//   3. billing: renewal reminders and the automatic renewal attempt (docs/phase4/05-billing.md). WITHOUT THIS
+//      COMMAND NO REMINDER IS CREATED AND NOTHING RENEWS BY ITSELF.
+//   4. rows that otherwise only grow (ended sessions, used tokens, old rate-limit windows) are removed.
 // Nothing schedules this command yet (docs/runbooks/housekeeping.md): someone has to run it.
 //
 //   npm run housekeeping        (npm run cards:sweep-expired is the old name of the same command)
@@ -45,6 +47,34 @@ export async function sweepRetirementNudges(app: App, now: Date): Promise<number
   return created;
 }
 
+/**
+ * Billing: for every customer company, close invoices nobody answered, create the renewal reminders (each once per
+ * renewal date and stage) and try the automatic renewal. WITHOUT THIS COMMAND none of that happens. Every company
+ * and every step runs by itself: a failure is printed with the company and the reason, counted, and makes the
+ * command end with a non-zero exit code - it does not stop the others.
+ */
+export async function sweepBilling(app: App, now: Date): Promise<{ notices: number; attempts: number; closed: number; finished: number; failed: number; failures: string[] }> {
+  const ctx = { requestId: `sweep-${now.toISOString()}`, ip: '', userAgent: '', now, fetchSite: null };
+  const tenants = await app.db.withTenantTx(PLATFORM_TENANT_ID, (tx) => listTenants(tx, 10_000, null), { platformScope: true });
+  const total = { notices: 0, attempts: 0, closed: 0, finished: 0, failed: 0, failures: [] as string[] };
+  for (const tenant of tenants) {
+    if (tenant.is_platform) continue;
+    const done = await app.billing.sweepCompany(tenant.id, tenant.plan_code, ctx);
+    total.notices += done.notices;
+    total.attempts += done.attempts;
+    total.closed += done.closed;
+    total.finished += done.finished;
+    for (const failure of done.failures) {
+      total.failed += 1;
+      // the company's id and what went wrong; never more than the first 20, so one broken night stays readable
+      if (total.failures.length < 20) total.failures.push(`${tenant.id}: ${failure.slice(0, 200)}`);
+      app.log.error({ tenant_id: tenant.id, job: 'billing', reason: failure.slice(0, 200) }, 'housekeeping: a billing step failed');
+    }
+  }
+  if (total.failed > 0) process.exitCode = 1;
+  return total;
+}
+
 const DAY_MS = 86_400_000;
 
 /**
@@ -81,6 +111,7 @@ export async function runHousekeeping(app: App, now: Date): Promise<Record<strin
   const jobs: Array<[string, () => Promise<unknown>]> = [
     ['swept', () => sweepExpiredCards(app, now)],
     ['retirement_nudges', () => sweepRetirementNudges(app, now)],
+    ['billing', () => sweepBilling(app, now)],
     ['purged', () => purgeOldRows(app, now)],
   ];
   for (const [name, job] of jobs) {

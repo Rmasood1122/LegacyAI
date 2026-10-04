@@ -93,10 +93,10 @@ describe('a route cannot exist without policy metadata', () => {
 });
 
 describe('the list of routes that skip the session check is short and pinned', () => {
-  it('public = exactly these six; there are no service-to-service routes on the public API', () => {
+  it('public = exactly these seven (six without any data, and the signed messages of the payment provider); there are no service-to-service routes on the public API', () => {
     const routes = t.app.http.registeredRoutes();
     expect(routes.filter((r) => r.kind === 'public').map((r) => r.operationId).sort()).toEqual(
-      ['enrollmentBegin', 'enrollmentComplete', 'getHealth', 'getReady', 'loginBegin', 'loginVerify']);
+      ['enrollmentBegin', 'enrollmentComplete', 'getHealth', 'getReady', 'loginBegin', 'loginVerify', 'receivePaymentEvent']);
     expect(routes.every((r) => r.kind === 'public' || r.kind === 'session' || r.kind === 'gateway')).toBe(true);
     for (const r of routes.filter((x) => x.kind === 'public')) expect(r.publicReason!.length).toBeGreaterThan(20);
   });
@@ -106,15 +106,15 @@ describe('the list of routes that skip the session check is short and pinned', (
     const known = new Set((await su.query('SELECT permission_key FROM permissions')).rows.map((r) => r.permission_key as string));
     await su.end();
     const session = t.app.http.registeredRoutes().filter((r) => r.kind === 'session' || r.kind === 'gateway');
-    expect(session).toHaveLength(150);
+    expect(session).toHaveLength(158);
     for (const r of session) expect(known.has(r.permission!), `${r.operationId} uses unknown permission ${r.permission}`).toBe(true);
   });
 
-  it('routes registered in the server == operations in openapi.yaml (156, no more, no fewer)', () => {
+  it('routes registered in the server == operations in openapi.yaml (165, no more, no fewer)', () => {
     const registered = t.app.http.registeredRoutes().map((r) => `${r.method} ${r.path}`).sort();
     const contract = [...t.app.http.contract.operations.values()].map((o) => `${o.method} ${o.path}`).sort();
     expect(registered).toEqual(contract);
-    expect(registered).toHaveLength(156);
+    expect(registered).toHaveLength(165);
     // and Fastify itself knows no route beyond those (HEAD/OPTIONS helpers aside)
     const printed = t.app.http.app.printRoutes({ commonPrefix: false });
     expect(printed).not.toMatch(/rogue/);
@@ -246,7 +246,7 @@ describe('a read of a whole collection must say how it is narrowed to what the c
       listRoles: 'unfiltered', listDepartments: 'unfiltered', listTenants: 'unfiltered', listAuditEvents: 'unfiltered',
       verifyAuditChain: 'unfiltered', listRedactionAllowlist: 'unfiltered', getKnowledgeSettings: 'unfiltered', getAiBudget: 'unfiltered',
       getPlatformStorage: 'unfiltered', getQualitySummary: 'unfiltered', listAnswerFeedback: 'unfiltered',
-      getActivity: 'unfiltered',
+      getActivity: 'unfiltered', listInvoices: 'unfiltered',
     });
     for (const r of t.app.http.registeredRoutes()) {
       if (r.listFilter !== null && typeof r.listFilter !== 'string') expect(r.listFilter.unfiltered.length, r.operationId).toBeGreaterThan(20);
@@ -295,7 +295,7 @@ describe('a read of a whole collection must say how it is narrowed to what the c
 });
 
 describe('real app: a card with almost no permissions cannot get a 2xx from anything it is not granted', () => {
-  it('walks all 150 protected operations as a Successor', async () => {
+  it('walks all 158 protected operations as a Successor', async () => {
     const su = await superuser();
     const granted = new Set((await su.query(`SELECT permission_key FROM role_permissions WHERE role_key = 'successor'`)).rows.map((r) => r.permission_key as string));
     await su.end();
@@ -327,6 +327,9 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
       // Phase 4, step 2
       updateAnomalySettings: { enabled: true }, setLeavingDate: { leaving_on: '2031-06-30' },
       // Phase 4, step 4 (scenario replay)
+      // Phase 4, billing
+      updateSubscription: { auto_renew: false }, setTenantSeatLimit: { seat_limit: 5 },
+      recordManualPayment: { invoice_id: randomUUID(), amount: { amount_minor: 1500, currency: 'USD' }, reference: 'TRANSFER-000001' },
       createScenario: scenarioBody, updateScenario: scenarioBody, proposeScenarioRubric: { item_ids: [randomUUID()] }, overrideScenarioAnswer: { score: 1 },
     };
     let denied = 0;
@@ -357,7 +360,8 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
     // it may not read, and the map it may not take out (an export: export:create).
     // Phase 4 (feature 8): it may see what is offered to it, run a scenario and read its own runs (quiz:take, quiz:read_results);
     // it may not write, read, approve or retire scenarios, ask for proposed points, read a step in order to grade it, or override a grade.
-    expect(denied).toBe(28 + 57 + 2 + 6 + 2 + 9);
+    // Phase 4 (billing): nothing of it - the subscription and invoices are the Owner's, the rest the platform operator's.
+    expect(denied).toBe(28 + 57 + 2 + 6 + 2 + 9 + 8);
   });
 });
 

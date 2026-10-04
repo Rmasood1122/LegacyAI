@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canonicalDetails, ConfigError, createLogger, decodeCursor, decodeIdCursor, decodeNameCursor, encodeCursor, encodeNameCursor, loadConfig, scrub, scrubString, Secret, stripOneTimeSecrets, pageOf,
 } from '../../src/modules/platform/index.ts';
+import { checkedHeaderNames, declaredHeaders, NEVER_DECLARED_HEADERS } from '../../src/modules/platform/index.ts';
 import { testEnv } from '../helpers/env.ts';
 
 describe('config loader fails closed', () => {
@@ -16,7 +17,16 @@ describe('config loader fails closed', () => {
     expect(c.trustProxyHops).toBe(0);
     expect(loadConfig(testEnv({ TRUST_PROXY: '1' })).trustProxyHops).toBe(1);
     expect(loadConfig(testEnv({ TRUST_PROXY: 'false' })).trustProxyHops).toBe(0);
-    expect(() => loadConfig(testEnv({ NODE_ENV: 'production' }))).not.toThrow();
+    expect(() => loadConfig(testEnv({ NODE_ENV: 'production', PAYMENT_PROVIDER: undefined }))).not.toThrow();
+    // the stand-in payment provider takes no money: it must never run where real companies renew
+    expect(() => loadConfig(testEnv({ NODE_ENV: 'production' }))).toThrow(/PAYMENT_PROVIDER=fake/);
+    // ... nor in development, nor with NODE_ENV left out: only where the automated tests run
+    expect(() => loadConfig(testEnv({ NODE_ENV: 'development' }))).toThrow(/allowed only when NODE_ENV=test/);
+    expect(() => loadConfig(testEnv({ NODE_ENV: undefined }))).toThrow(/PAYMENT_PROVIDER=fake/);
+    expect(loadConfig(testEnv({ NODE_ENV: 'test' })).payment.provider).toBe('fake');
+    expect(() => loadConfig(testEnv({ NODE_ENV: 'development', PAYMENT_PROVIDER: undefined }))).not.toThrow();
+    expect(() => loadConfig(testEnv({ PAYMENT_EVENT_KEY: undefined }))).toThrow(/PAYMENT_EVENT_KEY is required/);
+    expect(loadConfig(testEnv({ PAYMENT_PROVIDER: undefined, PAYMENT_EVENT_KEY: undefined })).payment).toEqual({ provider: 'none', eventKey: null });
   });
 
   const SECRETS = ['DATABASE_URL', 'SC_PEPPER_KEYRING', 'CREDENTIAL_ENC_KEYRING', 'HMAC_INDEX_KEY', 'SERVICE_TOKEN_KEY'];
@@ -53,7 +63,8 @@ describe('config loader fails closed', () => {
     ['proxy trust that is not a hop count', { TRUST_PROXY: 'yes' }],
     ['proxy trust "true" (would trust a caller-written X-Forwarded-For)', { TRUST_PROXY: 'true' }],
     ['proxy trust of too many hops', { TRUST_PROXY: '9' }],
-    ['the placeholder keys from .env.example in production', { NODE_ENV: 'production', SC_PEPPER_KEYRING: JSON.stringify({ current: 'v1', keys: { v1: Buffer.from('FAKE-PEPPER-DO-NOT-USE-FAKE-PEPPER-').toString('base64') } }) }],
+    ['the placeholder keys from .env.example in production', { NODE_ENV: 'production', PAYMENT_PROVIDER: undefined, SC_PEPPER_KEYRING: JSON.stringify({ current: 'v1', keys: { v1: Buffer.from('FAKE-PEPPER-DO-NOT-USE-FAKE-PEPPER-').toString('base64') } }) }],
+    ['the placeholder payment key from .env.example in production (it would make a forged "paid" message believable)', { NODE_ENV: 'production', PAYMENT_PROVIDER: undefined, PAYMENT_EVENT_KEY: Buffer.from('FAKE-PAYMENT-EVENT-KEY-DO-NOT-USE-FAKE-').toString('base64') }],
     ['boolean typo', { VALIDATE_RESPONSES: 'yes' }],
     ['unknown environment', { NODE_ENV: 'staging' }],
     ['unknown log level', { LOG_LEVEL: 'chatty' }],
@@ -257,5 +268,26 @@ describe('list cursors', () => {
   it('a numbered cursor (the audit log is ordered by sequence number) is still accepted by the general decoder', () => {
     expect(decodeCursor(encodeCursor(1234))).toBe('1234');
     expect(() => decodeCursor(encodeCursor('not hex'))).toThrowError();
+  });
+});
+
+describe('a public handler receives only the headers its route declared', () => {
+  const sent = { cookie: '__Host-lai_session=abc', authorization: 'Bearer x', 'x-csrf-token': 't', 'x-provider-signature': 'sig', 'user-agent': 'ua', 'x-twice': ['a', 'b'] };
+
+  it('nothing is declared: nothing is passed on', () => {
+    expect(declaredHeaders(sent, checkedHeaderNames('anyRoute', undefined))).toEqual({});
+    expect(declaredHeaders(sent, [])).toEqual({});
+  });
+
+  it('a declared header is passed on (first value of a repeated one); everything else is not', () => {
+    expect(declaredHeaders(sent, checkedHeaderNames('providerRoute', ['X-Provider-Signature', 'x-twice', 'x-absent']))).toEqual({ 'x-provider-signature': 'sig', 'x-twice': 'a' });
+  });
+
+  it('a route cannot declare a cookie, Authorization or the CSRF token - it is refused when the route is defined', () => {
+    for (const name of ['cookie', 'Cookie', 'authorization', 'x-csrf-token', 'proxy-authorization', 'set-cookie', 'bad name', '']) {
+      expect(() => checkedHeaderNames('providerRoute', [name]), name).toThrow(/may not receive/);
+    }
+    // and even a hand-made list cannot get them through
+    expect(declaredHeaders(sent, [...NEVER_DECLARED_HEADERS])).toEqual({});
   });
 });
