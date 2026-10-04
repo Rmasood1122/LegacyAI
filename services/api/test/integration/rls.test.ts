@@ -240,7 +240,9 @@ const OUR_FUNCTIONS = [
 ];
 const OUR_DEFINER_FUNCTIONS = [
   'audit_log_chain', 'audit_write', 'cards_register_directory', 'chunks_count', 'consents_hide_on_withdrawal', 'erase_version',
-  'knowledge_items_guard', 'purge_login_attempts', 'resolve_card', 'sources_guard',
+  // knowledge_items_end_conflicts: runs with the owner's rights so that a consent withdrawal recorded from any
+  // session also removes the conflict excerpts of the items it hides (same reason as consents_hide_on_withdrawal)
+  'knowledge_items_end_conflicts', 'knowledge_items_guard', 'purge_login_attempts', 'resolve_card', 'sources_guard',
 ];
 
 describe('SECURITY DEFINER functions cannot be hijacked', () => {
