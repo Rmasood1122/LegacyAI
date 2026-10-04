@@ -391,7 +391,9 @@ def test_retention_removes_what_learners_wrote_after_grading_keeps_the_scores_an
 
     upkeep.run(db, world.tenant_id)
     assert (words(graded["id"]), words(waiting["id"])) == (2, 2)                  # nothing is old enough yet
-    admin.execute("UPDATE knowledge_settings SET quiz_answer_retention_days = 30 WHERE tenant_id = %s", (world.tenant_id,))
+    # an upsert: a company that never changed its knowledge settings has no settings row, and an UPDATE would change nothing
+    admin.execute("""INSERT INTO knowledge_settings (tenant_id, quiz_answer_retention_days) VALUES (%s, 30)
+                     ON CONFLICT (tenant_id) DO UPDATE SET quiz_answer_retention_days = 30""", (world.tenant_id,))
     # both runs were started 40 days ago; the graded one was graded 35 days ago
     admin.execute("UPDATE scenario_attempts SET started_at = now() - interval '40 days', expires_at = now() - interval '39 days' WHERE id = ANY(%s)",
                   ([graded["id"], waiting["id"]],))

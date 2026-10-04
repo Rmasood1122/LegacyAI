@@ -285,7 +285,10 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
     } else if (op.binaryTypes.length > 0 && !op.validateBody) {
       errors.push({ path: 'body', message: `send the file as one of: ${op.binaryTypes.join(', ')}` });
     } else if (op.validateBody) {
-      if (!op.validateBody(body ?? null)) errors.push(...validationErrors(op.validateBody, 'body'));
+      // No body at all is fine where the contract says the body is optional (found by CI: approveScenario answered 400
+      // to a request without a body although its contract says `required: false`). A body that IS sent is always checked.
+      const absent = body === undefined || body === null;
+      if (!(absent && op.bodyOptional) && !op.validateBody(body ?? null)) errors.push(...validationErrors(op.validateBody, 'body'));
     } else if (body !== undefined && body !== null) {
       errors.push({ path: 'body', message: 'this operation does not accept a body' });
     }

@@ -13,7 +13,8 @@ if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
   # Annotation messages are single-line: newlines become %0A. These steps use throwaway values only.
   clean() { sed -e 's/\x1b\[[0-9;]*m//g' -e 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}'; }
   if [ "$status" -ne 0 ]; then
-    echo "::error title=${title} (exit ${status})::$(tail -n 45 "$log" | clean)"
+    # First the names of what failed and the error lines (a long warnings section can push them out of the tail), then the tail.
+    echo "::error title=${title} (exit ${status})::$({ grep -aE '^(FAILED|ERROR) |^E   ' "$log" | cut -c1-400 | head -n 30; echo '--- last lines ---'; tail -n 45 "$log"; } | clean)"
   elif [ -n "${EVIDENCE:-}" ]; then
     echo "::notice title=${title}::$(grep -aE -- "$EVIDENCE" "$log" | tail -n 40 | cut -c1-600 | clean)"
   fi

@@ -18,6 +18,8 @@ export interface Operation {
   isService: boolean;
   idempotent: boolean;
   hasBody: boolean;
+  /** The contract says `requestBody.required: false` in so many words: a request with NO body is then accepted as it is. */
+  bodyOptional: boolean;
   /** Content types of a raw-file body (uploads). Empty for JSON operations. */
   binaryTypes: string[];
   validateBody: ValidateFunction | null;
@@ -117,6 +119,7 @@ export function loadContract(filePath: string): Contract {
         isService,
         idempotent: op['x-idempotent'] === true,
         hasBody: bodySchema !== undefined || binaryTypes.length > 0,
+        bodyOptional: (op.requestBody as Json | undefined)?.required === false,
         binaryTypes,
         validateBody: bodySchema ? strict.compile(bodySchema.schema as Json) : null,
         validateParams: group('path'),
