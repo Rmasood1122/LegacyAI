@@ -89,8 +89,13 @@ test('seats: when they are used up the screen says so; asking for more is not en
   expect(await subscription(page)).toMatchObject({ seats_requested: null, seat_limit: used + 50, seat_state: 'ok' });
 });
 
-test('billing is for the owner: a learner is offered no such screen and the API refuses', async ({ page }) => {
-  await signIn(page, 'learner');
+// Signed in as the author (an Expert), not the learner: step2-safety.spec.ts locks the learner's card and an admin
+// unlocks it with a NEW 3-digit code that only the screen shows, so the test server's code for the learner is stale
+// from then on (the first CI run failed exactly there). A renewal itself does not touch people's cards: only the
+// company card is renewed and gets a new code (identity-access/internal/company-term.ts).
+test('billing is for the owner: a card of another role is offered no such screen and the API refuses', async ({ page }) => {
+  await signIn(page, 'author');
+  await expect(page.getByRole('navigation', { name: 'Manage' }).getByRole('link', { name: 'Billing and renewal', exact: true })).toHaveCount(0);
   await page.goto('/billing');
   await expect(page.getByRole('heading', { name: 'This screen is not available' })).toBeVisible();
   expect((await page.request.get('/v1/billing/subscription')).status()).toBe(403);

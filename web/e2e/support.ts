@@ -5,6 +5,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { expect, type Page, type TestInfo } from '@playwright/test';
 
 const CONTROL = process.env.E2E_CONTROL_URL ?? 'http://127.0.0.1:8788';
+// NOTE: after step2-safety.spec.ts the 'learner' can no longer sign in through this helper (its card was unlocked with
+// a new 3-digit code the test server does not know). Specs that sort after it must use another persona.
 export type Persona = 'owner' | 'author' | 'reviewer' | 'reviewer2' | 'learner' | 'admin';
 
 async function control<T>(path: string): Promise<T> {

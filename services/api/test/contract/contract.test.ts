@@ -293,7 +293,7 @@ describe('every one of the 47 operations returns a contract-conforming success',
     const all = [...t.app.http.contract.operations.values()].filter((op) => !PHASE2_PATH.test(op.path)).map((op) => op.operationId).sort();
     expect([...hit].sort()).toEqual(all);
     expect(hit.size).toBe(46 + 7);   // Phase 1, plus the seven anomaly-lock and retirement-radar operations of Phase 4
-    expect(t.app.http.contract.operations.size).toBe(46 + 78 + 5 + 7 + 2 + 3 + 15 + 7);   // + the seven billing operations;   // + the fifteen scenario operations (fourteen, and the step a grader reads);   // + the three insight operations (activity, map, map export)
+    expect(t.app.http.contract.operations.size).toBe(46 + 78 + 5 + 7 + 2 + 3 + 15 + 9);   // + the nine billing operations (seven, then getInvoice and setTenantSeatLimit);   // + the fifteen scenario operations (fourteen, and the step a grader reads);   // + the three insight operations (activity, map, map export)
   });
 });
 
