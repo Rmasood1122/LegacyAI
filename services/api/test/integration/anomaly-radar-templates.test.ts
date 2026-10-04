@@ -92,7 +92,9 @@ describe('anomaly lock: refused actions of a signed-in card', () => {
     expect(unlocked.status).toBe(200);
     expect(await lockState(learner.card.id)).toEqual({ locked: false, reason: null });
     // the audit trail says that this unlock followed an anomaly lock
-    const unlockAudit = await su.query(`SELECT details FROM audit_log WHERE tenant_id = $1 AND resource_id = $2 AND action = 'card:unlock'`,
+    // (the policy's own "allow" row has the same action and no details; the event row is the one that says why)
+    const unlockAudit = await su.query(
+      `SELECT details FROM audit_log WHERE tenant_id = $1 AND resource_id = $2 AND action = 'card:unlock' AND decision = 'event'`,
       [tenant.tenantId, learner.card.id]);
     expect(unlockAudit.rows.map((r) => JSON.parse(r.details))).toEqual([{ reason: 'anomaly' }]);
     learner.card.sc = unlocked.body.sc;
@@ -182,10 +184,15 @@ describe('anomaly lock: sign-in from a second network address (off unless switch
     expect(await lockState(member.card.id)).toEqual({ locked: false, reason: null });
 
     expect((await tenant.owner.patch('/v1/tenants/current/anomaly-settings', { enabled: true, second_address_enabled: true, second_address_window_minutes: 10 })).status).toBe(200);
-    // the same address again: no anomaly
+    // The rule compares a new sign-in with every OTHER session of the card that was used inside the window. The two
+    // sessions above (127.0.0.1 and 203.0.113.9) are let go idle first, so that "in use" means what it says.
+    t.clock.advance(11 * 60_000);
     expect((await tryLogin(t, member.card.number, member.card.sc, { passkey: member.passkey }, '203.0.113.9')).res.status).toBe(200);
     expect(await lockState(member.card.id)).toEqual({ locked: false, reason: null });
-    // a third address while the others were just used: the sign-in fails like any failed sign-in, and the card is locked
+    // the same address again while that session is in use: no anomaly
+    expect((await tryLogin(t, member.card.number, member.card.sc, { passkey: member.passkey }, '203.0.113.9')).res.status).toBe(200);
+    expect(await lockState(member.card.id)).toEqual({ locked: false, reason: null });
+    // another address while those were just used: the sign-in fails like any failed sign-in, and the card is locked
     const third = await tryLogin(t, member.card.number, member.card.sc, { passkey: member.passkey }, '198.51.100.7');
     expect(third.res.status).toBe(401);
     expect(await lockState(member.card.id)).toEqual({ locked: true, reason: 'anomaly' });
@@ -337,7 +344,13 @@ describe('department templates', () => {
     expect(first.body).toMatchObject({ template_key: 'maintenance', topics_created: 5, topics_existing: 1, topics_skipped: 0, links_created: 9, links_existing: 0 });
     expect(first.body.created_topic_ids).toHaveLength(5);
     expect(first.body.created_topic_ids).not.toContain(mine.body.id);
-    expect(stub.ofAction('topic.embed')).toHaveLength(5);                       // each new topic got its search vector, as with createTopic
+    // each new topic is sent for its search vector, as with createTopic - and so is the company's own topic, which has
+    // none yet (the stand-in AI service of this test stores no vector)
+    expect(stub.ofAction('topic.embed')).toHaveLength(6);
+    // from here on the topics HAVE their vector, as they would after the real AI service answered
+    await su.query(
+      `UPDATE topics SET embedding = ('[' || array_to_string(array_fill(0.1, ARRAY[384]), ',') || ']')::halfvec(384), embedding_model = 'test'
+        WHERE tenant_id = $1`, [tenant.tenantId]);
     const topics = await tenant.owner.get('/v1/topics?limit=50');
     const kept = topics.body.items.find((x: any) => x.id === mine.body.id);
     expect(kept).toMatchObject({ name: 'lubrication', description: 'Our own wording.' });
@@ -394,7 +407,9 @@ describe('anomaly lock: what does NOT count, and what must not break', () => {
     for (let i = 0; i < 50; i += 1) expect((await m.client.get('/v1/roles')).status).toBe(403);
     expect(await lockState(m.card.id)).toEqual({ locked: false, reason: null });
     expect(await counter(m.card.id)).toBeNull();
-    expect((await m.client.get('/v1/auth/session')).status).toBe(200);
+    // still signed in: asking for the session is refused for the hours (403) like everything else, not "not signed in" (401)
+    expect((await m.client.get('/v1/auth/session')).status).toBe(403);
+    expect((await su.query('SELECT count(*)::int AS n FROM sessions WHERE card_id = $1 AND revoked_at IS NULL', [m.card.id])).rows[0].n).toBeGreaterThan(0);
   });
 
   it('a request a page of another address made the browser send is refused before the policy and counts nothing; forging that mark blocks the forger', async () => {

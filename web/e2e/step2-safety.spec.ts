@@ -45,7 +45,8 @@ test('an admin looks at a department template, adds it, and its topics and job r
 
   // the job roles of the template can be picked on the gap screen
   await manage(page, 'Job roles and gaps').click();
-  await expect(page.getByText('Warehouse operative', { exact: true }).first()).toBeVisible();
+  // (each job role is offered with its number of topics, e.g. "Warehouse operative (4 topics)")
+  await expect(page.getByText(/^Warehouse operative \(\d+ topics?\)$/).first()).toBeVisible();
 });
 
 test('the owner records when a person plans to leave, and the retirement radar lists the person', async ({ page }) => {
@@ -56,7 +57,7 @@ test('the owner records when a person plans to leave, and the retirement radar l
   const date = new Date(Date.now() + 300 * 86_400_000).toISOString().slice(0, 10);                // about ten months from now
   await page.getByLabel('Leaves on').fill(date);
   await page.getByRole('button', { name: 'Save the date' }).click();
-  await expect(page.getByText(new RegExp(`Leaves on ${date} — within a year`))).toBeVisible();
+  await expect(page.getByText(new RegExp(`Leaves on ${date} — less than a year`))).toBeVisible();
   await checkScreen(page, '42-leaving-date');
 
   await manage(page, 'Retirement radar').click();
