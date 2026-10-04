@@ -70,16 +70,68 @@ say an answer was helpful, unhelpful or wrong. **Nothing is deployed, and no rea
 
 $0. Total real-AI spend of the project stays $0.642.
 
-## Step 2 — features 5, 11, 26 (in progress, NOT yet proven)
+## Step 2 — features 5 (anomaly lock), 11 (retirement radar), 26 (department templates)
 
-> Written and reviewed; **not pushed and not run in CI when this note was written**. Design:
-> `docs/phase4/02-anomaly-radar-templates.md`, decision D26.
+> Written 2026-10-04. Evidence: CI run 37193320840 on commit `c7f0bc8`, 10 of 10 jobs green.
+> Design: `docs/phase4/02-anomaly-radar-templates.md`. Decision D26.
 
-Known before any CI run: **the retirement nudges after the first one are created only when the housekeeping
-command is run, and nothing schedules it** (`docs/runbooks/housekeeping.md`). The radar screen itself does not
-depend on it. The anomaly rule finds bursts of refused actions, not slow probing.
+### In plain language
+
+A card that keeps asking for things it may not have is locked and an admin is told. People managers can record when
+a person plans to leave and see who is leaving within two years. An admin can start a department's topic list from
+a built-in template. **Nothing is deployed.**
+
+### What was measured
+
+| Claim | Evidence | Limits |
+|---|---|---|
+| The lock works end to end | Browser test: a card makes refused requests, the card page shows "Locked by an anomaly rule", an admin unlocks it with a new code | Threshold lowered to 5 for the test; one scenario |
+| A card number alone locks nothing; failed sign-ins and anonymous requests do not count | Integration tests | — |
+| Ordinary use does not trip it | A card outside its working hours makes 50 requests: refused each time, never locked. Every refusal reason in the code is classified as counted or not by a unit test | The "company in read-only grace" case is covered by the classification only |
+| The only usable Owner is not locked by a rule | Integration test; the event is recorded as "not locked" | An Owner who enters wrong codes IS still locked, as Phase 1 decided |
+| A failure of the counter does not break a refusal | Integration test with a broken counter table: the request still gets 403 and its audit row | — |
+| Requests marked as coming from another site are refused before the policy | Integration test (`DENY_FETCH_SITE`) | Relies on the browser's Sec-Fetch-Site header; very old browsers do not send it |
+| Leaving dates, radar, nudges | Browser test: the owner records a date and the radar lists the person; integration tests for who may read a date, removal on departure, the sweep | **Nothing schedules the sweep**: nudges appear only when the housekeeping command is run (`docs/runbooks/housekeeping.md`) |
+| Templates | Browser test: an admin applies a template and sees its topics and job roles; applying twice adds nothing | Seven templates written by us, **not validated by an industry expert** |
+| Totals | 23 of 23 browser tests; 128 web unit tests; 734 API tests (1 skipped; statements 88.78 %, branches 83.32 %); migrations apply, roll back, re-apply; 138 operations | Chromium only |
+
+### What it cannot do
+
+- The lock catches bursts. Someone who stays one below the threshold in every window is never caught.
+- "Not found" answers are not counted, so guessing ids does not trip it.
+- The second-address rule compares network addresses, not places; it is off by default because people on mobile
+  networks change address in normal use. It depends on the proxy setting (`TRUST_PROXY`) matching the real set-up.
+- The radar shows job roles and counts of verified items and interviews (only to viewers who may read that
+  knowledge). It does not list the specific topics still uncaptured for a person; it links to the gap report.
+- No screen shows a person their own leaving date (the API allows it).
+- No e-mail (Batch B). Leaving dates and anomaly settings are not in the company data export.
+
+### What reviews and CI found before this was green
+
+- **Three security reads.** Ordinary refusals (working hours, limits, read-only grace) would have locked honest
+  users — fixed with an allow-list of counted reasons. A page on a sibling web address could have locked a signed-in
+  visitor — fixed; and the first fix could be dodged by a thief forging a header — fixed by refusing such requests
+  outright. Radar counts included items above the viewer's clearance — fixed. A departed person's leaving date had
+  no end — fixed.
+- **Three design reviews:** no critical finding; fifteen warnings fixed. Among them: two different definitions of
+  "another usable Owner" (a locked Owner still counted when the last working Owner was suspended or revoked); the
+  lock implemented twice; a failure of the counter would have turned "not allowed" into a server error; the settings
+  form could save a value it was not showing.
+- **CI:** five wrong expectations in the new tests and one ambiguous browser selector; no product fault found by CI
+  in this step.
+
+### Open
+
+- Scheduling of the housekeeping command (plan-only Terraform not touched).
+- A card outside its working hours cannot read even its own session, so the screens treat it as signed out instead
+  of saying "come back later" (Phase 1 behaviour, now more visible).
+- Slow probing and id guessing are not detected (see above).
+- The last small fix round (the fetch-site rule) was checked by CI, not by another security read.
+
+### Cost
+
+$0. Total real-AI spend of the project stays $0.642.
 
 ## Not built yet (from the plan)
 
-Batch A: 5 (anomaly lock), 11 (retirement radar), 26 (department templates), 27 (outcome analytics), 30 (knowledge
-graph), 8 (scenario replay), 4 (QR). Batch B and Batch C: nothing.
+Batch A: 27 (outcome analytics), 30 (knowledge graph), 8 (scenario replay), 4 (QR). Batch B and Batch C: nothing.
