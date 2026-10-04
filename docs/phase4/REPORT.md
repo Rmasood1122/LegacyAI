@@ -132,6 +132,61 @@ a built-in template. **Nothing is deployed.**
 
 $0. Total real-AI spend of the project stays $0.642.
 
+## Step 3 — features 4 (QR format), 27 (activity numbers), 30 (knowledge map)
+
+> Written 2026-10-04. Evidence: CI run 37197218314 on commit `bb4aef5`, 10 of 10 jobs green.
+> Design: `docs/phase4/03-analytics-graph-scenarios-qr.md`. Decision D27.
+
+### In plain language
+
+A card can be shown and printed as a QR code that opens the sign-in screen with the card number filled in. Owners
+and admins get monthly activity numbers. Anyone who may read knowledge can walk a map of topics, items, documents
+and job roles; the Owner can export it. **Nothing is deployed.**
+
+### What was measured
+
+| Claim | Evidence | Limits |
+|---|---|---|
+| The QR code holds the sign-in address and the card number, nothing else | Unit test reads the code back with an independent decoder; browser test: the link pre-fills the card number | The 3-digit code and the second factor are still needed; a link can pre-fill anybody's card number |
+| "Print this card" prints the card only | Unit test of the print section and of the page mark | Not tried on a real phone or printer |
+| Activity numbers respect the viewer's rights | Database tests: an Admin with a level-1 ceiling does not see level-3 documents, items or interviews in the counts; a viewer without the right gets a blank, not a company total | Activity, not business outcomes; no money claims |
+| Test results per job role are held back for small groups | Database test: fewer than 5 different people → "too few to show", no numbers; fixed window of 12 complete months; only for viewers who may read results company-wide | 5 is a choice. Comparing the table from one month to the next can still hint at one person's result; acceptable only because those viewers may read individual results anyway |
+| The map shows only what the viewer may read | Database tests: a hidden node answers exactly like a missing one; a withdrawn item with a leftover conflict appears in neither view; every exported edge joins two readable nodes | Built from existing links only; people are not shown; a group above 50 neighbours is cut short with a flag |
+| The map export is limited and recorded | Tests: needs the export right (Owner), 5 an hour per card, audit entry with counts only; browser test: the download fires | Up to 10 are possible across an hour boundary |
+| Totals | 26 of 26 browser tests; 152 web unit tests; 736 API tests (1 skipped; statements 88.83 %, branches 83.09 %); both-services walk; leakage 16 groups / 64 queries / 0 leaks; 141 operations | Chromium only |
+
+### What it cannot do
+
+- NFC cards are not built (hardware).
+- There is no pass rate, because the product has no pass mark; the mean score is shown.
+- The activity numbers are not part of the company data export; they can be saved as a file made in the browser,
+  which the audit log cannot tell apart from looking at the screen.
+- The map does not discover new relations and has no drawing of the graph, only lists.
+
+### What reviews and CI found before this was green
+
+- **Two security reads:** two activity numbers ignored the viewer's clearance (fixed); any reader, learners
+  included, could take the whole readable map in one call (now an export with its own right, limit and audit entry);
+  the card number stayed in the address bar for a signed-in visitor (fixed); printing could show roles and history
+  (fixed, and fixed again for browsers that return from printing early).
+- **Three design reviews:** no critical finding; ten warnings fixed, among them a map query that lacked the
+  "not withdrawn" condition every other query had, and a small-group rule that could be worked around by asking for
+  two overlapping periods.
+- **CI:** six wrong expectations in the new tests (rows seeded in a state the database forbids, identical test
+  documents refused as duplicates, an older browser test confused by the new menu entry). No product fault found by
+  CI in this step.
+
+### Open
+
+- Feature 8 (scenario replay) was planned for this step and is **not built**; it needs new tables and its own
+  security read.
+- The map's rule for documents matches the existing reads, which do not check the status of single passages.
+- The last small change (printing) was checked by a unit test, not by a review.
+
+### Cost
+
+$0. Total real-AI spend of the project stays $0.642.
+
 ## Not built yet (from the plan)
 
-Batch A: 27 (outcome analytics), 30 (knowledge graph), 8 (scenario replay), 4 (QR). Batch B and Batch C: nothing.
+Batch A: 8 (scenario replay). Batch B and Batch C: nothing.
