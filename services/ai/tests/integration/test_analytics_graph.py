@@ -102,8 +102,11 @@ def test_interviews_are_counted_by_the_callers_right_to_read_interviews_and_are_
         db: Database, world: World, embedder: FakeEmbedder, admin: psycopg.Connection[dict[str, Any]]) -> None:
     consent = give_consent(admin, world, "expert", "own_words")
     owner = world.people["owner"]
-    for level in (1, 3, 3):          # one interview about ordinary material, two about level-3 material
-        source = company_document(db, world, embedder, f"Synthetic interview material at level {level}.", title=f"Interview {level}", sensitivity=level)
+    # one interview about ordinary material, two about level-3 material; each document has its own words, because the
+    # same text added twice is refused as a duplicate (the two level-3 documents were identical in the first CI run)
+    for level, subject in ((1, "the rinser nozzles"), (3, "the supplier terms"), (3, "the alarm panel wiring")):
+        source = company_document(db, world, embedder, f"Synthetic interview material about {subject}.", title=f"Interview about {subject}",
+                                  sensitivity=level)
         # the database lets an interview start only as "invited" and move on step by step (interviews_guard)
         interview = admin.execute(
             """INSERT INTO interviews (tenant_id, expert_person_id, source_id, consent_id, job_role, max_turns, invited_by_card_id)
