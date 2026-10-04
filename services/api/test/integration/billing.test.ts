@@ -34,8 +34,10 @@ afterAll(async () => {
 /** Puts the company's term where a test needs it: days from now until the renewal date (negative = already past). */
 async function termEndsIn(tenant: TestTenant, days: number, graceDays = 14, noticeDays = 14): Promise<void> {
   const end = t.clock.now().getTime() + days * DAY;
-  await su.query('UPDATE cards SET expires_at = $2, grace_until = $3, renewal_due = $4 WHERE id = $1',
-    [tenant.companyCard.id, new Date(end), new Date(end + graceDays * DAY), new Date(end - noticeDays * DAY)]);
+  // A card cannot expire before it was issued (database constraint), so a term that ended in the past needs an issue
+  // date before that: the card is back-dated to one term (366 days) before its end.
+  await su.query('UPDATE cards SET expires_at = $2, grace_until = $3, renewal_due = $4, issued_at = LEAST(issued_at, $5) WHERE id = $1',
+    [tenant.companyCard.id, new Date(end), new Date(end + graceDays * DAY), new Date(end - noticeDays * DAY), new Date(end - 366 * DAY)]);
 }
 const companyCard = async (tenant: TestTenant): Promise<{ expires_at: Date; renewal_count: number; state: string }> =>
   (await su.query('SELECT expires_at, renewal_count, state FROM cards WHERE id = $1', [tenant.companyCard.id])).rows[0];
