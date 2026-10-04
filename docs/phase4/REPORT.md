@@ -245,12 +245,80 @@ with the fake AI only.** This completes Batch A of the plan.
 
 $0. Total real-AI spend of the project stays $0.642.
 
+## Step 5 — billing against a stand-in payment provider (features 29 billing part, 31, 32, 33, 34, 35)
+
+> Written 2026-10-05. Evidence: CI run 37217346142 on commit `b3f5f31`, 10 of 10 jobs green.
+> Design: `docs/phase4/05-billing.md`. Decision D29 (with the rules the founder must confirm).
+
+### In plain language
+
+The Owner has a renewal center: the term, the renewal date, seats, invoices, renew now, auto-renew. A paid invoice
+renews the company's term exactly once. **There is no real payment provider**: everything was built and tested
+against a stand-in that exists only in tests. No money can be taken with this code as it is, and no payment-card
+data is stored. **Nothing is deployed.**
+
+### What was measured
+
+| Claim | Evidence | Limits |
+|---|---|---|
+| The renewal center works in a real browser | Browser tests: the Owner opens it, changes seats, renews with the stand-in succeeding (term extended, new invoice); a declined payment gives a clear message and renews nothing; a card without the right sees no billing screen and the API refuses | Stand-in provider only |
+| A payment is applied once | Database tests: duplicate and simultaneous identical messages apply once; a redelivery or the sweep completes unfinished work | Tested with the stand-in's messages |
+| A payment is never lost | Database tests: a payment for a cancelled invoice, or one that cannot be applied (term not renewable, more cards than paid seats), is stored, audited and reported to Owner and operator | **There is no refund function**; returning money happens outside the system |
+| The Owner cannot shrink the bill | Tests: seats frozen while an invoice is unpaid; an invoice covers at least the cards in use; issuing beyond an unpaid or paid invoice's seats is refused; the count is taken again when a payment is applied | **A new company has no seat limit until its first paid renewal** (founder to confirm) |
+| A message cannot be forged without the key | Unit and database tests of the signature, time window, replay and uniform refusal; the endpoint refuses everything when no provider is connected; production refuses the example key | The key handling was not tested against a real provider's format |
+| A lapsed company's Owner can still pay; everything else stays closed | Policy unit tests per card and company state; database test | — |
+| Totals | 33 of 33 browser tests; 187 web unit tests; 850 API tests (1 skipped; statements 89.78 %, branches 83.68 %); migrations apply, roll back, re-apply; 165 operations | Chromium only |
+
+### What it cannot do
+
+- **Take real money.** A real provider needs: an account, its message format behind the port, and a platform change
+  so the public endpoint keeps the raw request bytes a real signature check needs. A real provider must also
+  de-duplicate payment requests by invoice id (a timed-out request is retried).
+- **Taxes are not handled at all.** No VAT or sales tax logic, no tax fields on invoices. This needs an accountant.
+- No refunds, no part-term pricing, no change of plan, no invoice documents, no e-mail.
+- Person cards are not aligned to the company's date: at a renewal only the company card is renewed; people's cards
+  keep their own expiry and their codes do not change.
+- **Nothing schedules housekeeping.** Closing unanswered invoices, reminders, automatic renewal and finishing
+  unfinished payments happen only when that command is run.
+- The plan catalogue (names, limits, 15.00 USD per seat and term) is a PLACEHOLDER.
+
+### What reviews and CI found before this was green
+
+- **Four security reads.** Production would have accepted the published example key; the Owner could pay for one
+  seat and keep all cards (found three times in three forms: by changing seats on an open invoice, by re-issuing cards
+  while an invoice was open, and through a timing gap); a late payment was dropped without trace; two invoices could
+  be paid for one term; a manual payment had no real confirmation and no amount check; a stored payment could be
+  left without audit entry or notice if the service stopped between steps. All fixed.
+- **Three design reviews:** no critical finding; fourteen warnings fixed, among them a payment request made inside
+  the database transaction (a charge could have existed with no invoice) and a free-plan company shown no way to renew.
+- **CI:** four wrong expectations in the new tests; no product fault found by CI in this step.
+
+### Open — for the founder to confirm (D29)
+
+1. Plans, prices, currency and the term length.
+2. Whether unused days carry over at renewal (now: no; renewing early needs an explicit yes from the operator).
+3. Whether a new company gets a seat limit from day one (now: none until its first paid renewal).
+4. Whether added seats cost the full term price (now: yes).
+5. How money for a cancelled invoice is returned (now: outside the system).
+6. Days before an unanswered invoice is closed (3 automatic, 14 Owner-started), reminder days (30/14/3), three
+   automatic attempts.
+7. Whether Admins may see billing (now: Owner only).
+8. Which payment provider, and when.
+
+### Other open points
+
+- The billing screen's own seat notice shows the paid limit while a renewal invoice waits (the refusal and the usage
+  page show the tighter number).
+- `/v1/billing/*` is a second way to address "my company" beside `/v1/tenants/current/*`; documented as an exception.
+- Subscription rows are protected by code and permissions, not by a database guard.
+- The last change (a lock taken in one more case) was checked by unit tests and CI, not by another review.
+
+### Cost
+
+$0. Total real-AI spend of the project stays $0.642.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is not
-built).
-
-Batch B step 1 (billing and renewal: features 29 billing part, 31, 32, 33, 34, 35) is **written and not proven**:
-the code, its unit tests and its database and browser tests exist (docs/phase4/05-billing.md, D29), but the
-database and browser tests had not run on GitHub when this line was written. The payment provider is a stand-in;
-no money can be taken and the prices are placeholders. The rest of Batch B and Batch C: nothing.
+built). Batch B: billing is built against a stand-in (above); 28 (open API, webhooks, connectors), 16 (SSO and SCIM),
+21 (bring-your-own-key) and e-mail delivery are not built. Batch C: nothing.
