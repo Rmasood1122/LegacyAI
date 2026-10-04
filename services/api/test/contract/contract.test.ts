@@ -300,7 +300,7 @@ describe('every one of the 47 operations returns a contract-conforming success',
     // Phase 2 operations need the AI service: they are walked, with the real service, by test/contract/phase2-walk.test.ts.
     const all = [...t.app.http.contract.operations.values()].filter((op) => !PHASE2_PATH.test(op.path)).map((op) => op.operationId).sort();
     expect([...hit].sort()).toEqual(all);
-    expect(hit.size).toBe(46 + 7 + 3);   // ... and the three API-key operations   // Phase 1, plus the seven anomaly-lock and retirement-radar operations of Phase 4
+    expect(hit.size).toBe(46 + 7 + 4);   // ... and the four API-key operations (create, list, options, revoke)   // Phase 1, plus the seven anomaly-lock and retirement-radar operations of Phase 4
     expect(t.app.http.contract.operations.size).toBe(46 + 78 + 5 + 7 + 2 + 3 + 15 + 9 + 4);   // + the four API-key operations (three, and the options for the form);   // + the nine billing operations (seven, then getInvoice and setTenantSeatLimit);   // + the fifteen scenario operations (fourteen, and the step a grader reads);   // + the three insight operations (activity, map, map export)
   });
 });
