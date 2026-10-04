@@ -71,7 +71,7 @@ describe('every tenant table has forced row-level security', () => {
     // global on purpose (documented): sign-in tables, and the per-company chunk counter that holds counts only
     const exempt = new Set(['auth_transactions', 'card_directory', 'login_attempts', 'tenant_usage_counters']);
     const scoped = rows.filter((r) => !exempt.has(r.table));
-    expect(scoped.length).toBe(49); // 24 from Phase 1 + 25 from Phase 2 (docs/phase2/02)
+    expect(scoped.length).toBe(51); // 24 from Phase 1 + 25 from Phase 2 (docs/phase2/02) + 2 from Phase 4 (answer_feedback, knowledge_item_conflicts)
     for (const r of scoped) {
       expect(r, `table ${r.table}`).toMatchObject({ enabled: true, forced: true });
       expect(r.policies, `table ${r.table} has no policy`).toBeGreaterThanOrEqual(1);
@@ -234,7 +234,7 @@ const OUR_FUNCTIONS = [
   'ai_usage_ledger_guard', 'app_current_tenant', 'audit_field', 'audit_log_chain', 'audit_log_reject_change',
   'audit_write', 'cards_enforce_lifecycle', 'cards_register_directory', 'chunks_count', 'chunks_guard',
   'citations_guard', 'consent_is_valid', 'consents_guard', 'consents_hide_on_withdrawal', 'erase_version', 'expert_questions_guard',
-  'interviews_guard', 'knowledge_items_guard', 'knowledge_versions_immutable', 'purge_login_attempts',
+  'interviews_guard', 'knowledge_items_end_conflicts', 'knowledge_items_guard', 'knowledge_versions_immutable', 'purge_login_attempts',
   'quiz_attempts_guard', 'quiz_items_guard', 'relabel', 'resolve_card', 'review_tasks_guard', 'sources_guard',
   'topics_delete_guard', 'topics_guard',
 ];

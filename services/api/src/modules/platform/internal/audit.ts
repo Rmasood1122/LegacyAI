@@ -34,6 +34,8 @@ export const ALLOWED_DETAIL_KEYS: ReadonlySet<string> = new Set([
   'source_id', 'chunk_count', 'redactions', 'item_id', 'version_no', 'feature', 'model', 'cost_micro_usd', 'task_id',
   'consent_id', 'attempt_id', 'candidates', 'approved', 'policy_disagreements', 'sensitivity_from', 'sensitivity_to',
   'department_from', 'department_to', 'interview_id', 'topic_id',
+  // Phase 4 (answer feedback): the opinion and whether the question was shared - never the comment or the question
+  'verdict', 'question_shared',
 ]);
 
 const FORBIDDEN_VALUE = /\b\d{16}\b/;
