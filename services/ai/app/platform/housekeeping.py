@@ -5,14 +5,21 @@ ordinary requests. Every step is idempotent, so running it twice or concurrently
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from app.platform.db import Database
 
 BATCH = 50
+# How long answer-log rows are kept when a company has no setting of its own. The one place this number is written.
+DEFAULT_ANSWER_LOG_RETENTION_DAYS = 90
+
+# Steps other modules add (wired by `app.knowledge.upkeep`): this module knows nothing about what they do.
+AfterStale = Callable[[Any, str, list[str]], None]      # (cursor, company, ids of the items that just became stale)
+AfterPrune = Callable[[Any, str], None]                 # (cursor, company), after old answer-log rows were deleted
 
 
-def run(db: Database, tenant_id: str) -> dict[str, int]:
+def run(db: Database, tenant_id: str, *, after_stale: Sequence[AfterStale] = (), after_prune: Sequence[AfterPrune] = ()) -> dict[str, int]:
     done: dict[str, int] = {}
     with db.tenant_tx(tenant_id) as cur:
         # verified items past their date become stale; their search copy is marked; their questions retire
@@ -30,6 +37,8 @@ def run(db: Database, tenant_id: str) -> dict[str, int]:
                 """INSERT INTO review_tasks (tenant_id, kind, subject_type, subject_id, department_id, sensitivity, owner_person_id, priority, due_at)
                    SELECT tenant_id, 'stale_item', 'knowledge_item', id, department_id, sensitivity, owner_person_id, usage_count, now() + interval '14 days'
                      FROM knowledge_items WHERE tenant_id = %s AND id = ANY(%s) ON CONFLICT DO NOTHING""", (tenant_id, stale))
+            for step in after_stale:
+                step(cur, tenant_id, [str(i) for i in stale])
         done["stale"] = len(stale)
         cur.execute("UPDATE expert_questions SET status = 'expired' WHERE id IN (SELECT id FROM expert_questions WHERE tenant_id = %s "
                     "AND status = 'open' AND expires_at <= now() LIMIT %s)", (tenant_id, BATCH))
@@ -46,6 +55,8 @@ def run(db: Database, tenant_id: str) -> dict[str, int]:
             """DELETE FROM answer_logs WHERE id IN (SELECT id FROM answer_logs WHERE tenant_id = %s
                   AND created_at < now() - make_interval(days => %s) LIMIT %s)""", (tenant_id, settings["answer_log_retention_days"], BATCH))
         done["answer_logs_pruned"] = cur.rowcount
+        for prune_step in after_prune:
+            prune_step(cur, tenant_id)
         # failed uploads leave nothing behind
         cur.execute("DELETE FROM chunks WHERE tenant_id = %s AND status = 'pending' AND source_id IN "
                     "(SELECT id FROM sources WHERE tenant_id = %s AND status = 'failed')", (tenant_id, tenant_id))
@@ -55,4 +66,4 @@ def run(db: Database, tenant_id: str) -> dict[str, int]:
 def _settings(cur: Any, tenant_id: str) -> dict[str, Any]:
     cur.execute("SELECT answer_log_retention_days FROM knowledge_settings WHERE tenant_id = %s", (tenant_id,))
     row = cur.fetchone()
-    return dict(row) if row else {"answer_log_retention_days": 90}
+    return dict(row) if row else {"answer_log_retention_days": DEFAULT_ANSWER_LOG_RETENTION_DAYS}

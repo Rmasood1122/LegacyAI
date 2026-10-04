@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.capture import condition, topic_condition
+from app.knowledge import item_conflicts
 from app.knowledge.items import ItemRefused, item_topics
 from app.platform import Database, ServiceContext, one, write_audit
 
@@ -75,12 +76,14 @@ def get_item(db: Database, ctx: ServiceContext, item_id: str) -> dict[str, Any]:
         # only topics this reader may READ: the token's topic filter (permission topic:read), not the knowledge filter
         twhere, tparams = topic_condition(ctx.topic_filter, ctx.tenant_id)
         topics = item_topics(cur, ctx.tenant_id, item_id, twhere, tparams)
+        conflicts = item_conflicts.of_item(cur, ctx.tenant_id, item_id, item["title"], where, params)
     current = next((v for v in versions if v["id"] == item["current_version_id"]), None)
     item["body"] = current["body"] if current else ""
     keep = ("version_no", "change_kind", "author_person_id", "created_at", "erased_at")
     item["versions"] = [{k: v[k] for k in keep} | {"current": v["id"] == item["current_version_id"]} for v in versions]
     item["provenance"] = provenance
     item["topics"] = topics
+    item["conflicts"] = conflicts
     del item["current_version_id"]
     return item
 

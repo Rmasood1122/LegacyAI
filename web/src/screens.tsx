@@ -23,6 +23,8 @@ import { AttemptScreen } from './features/readiness/AttemptScreen.tsx';
 import { QuestionBankScreen } from './features/readiness/QuestionBankScreen.tsx';
 import { ReadinessScreen } from './features/readiness/ReadinessScreen.tsx';
 import { ReportScreen } from './features/readiness/ReportScreen.tsx';
+import { ConflictsScreen } from './features/quality/ConflictsScreen.tsx';
+import { QualityScreen } from './features/quality/QualityScreen.tsx';
 import { ReviewScreen } from './features/review/ReviewScreen.tsx';
 import { GapsScreen } from './features/topics/GapsScreen.tsx';
 import { TopicsScreen } from './features/topics/TopicsScreen.tsx';
@@ -43,6 +45,7 @@ const COMPONENTS: Readonly<Record<ScreenKey, ComponentType>> = {
   knowledge: KnowledgeScreen,
   knowledgeItem: KnowledgeItemScreen,
   review: ReviewScreen,
+  conflicts: ConflictsScreen,
   interviews: InterviewsScreen,
   interview: InterviewScreen,
   readiness: ReadinessScreen,
@@ -56,6 +59,7 @@ const COMPONENTS: Readonly<Record<ScreenKey, ComponentType>> = {
   cards: CardsScreen,
   card: CardScreen,
   consentAdmin: ConsentAdminScreen,
+  quality: QualityScreen,
   settings: SettingsScreen,
   audit: AuditScreen,
   operator: OperatorScreen,

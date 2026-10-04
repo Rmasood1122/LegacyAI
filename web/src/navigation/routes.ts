@@ -36,6 +36,8 @@ export const ROUTES = {
     home: { title: 'Documents', text: 'Add a document so its content can be found and cited.', linkText: 'Open documents' },
   },
   document: { path: '/documents/:sourceId', requiredOperation: 'getSource' },
+  // Review tasks of two kinds only (items that disagree, items verified long ago): the same right as the review queue.
+  conflicts: { path: '/conflicts', label: 'Conflicts and old items', requiredOperation: 'listReviewTasks' },
   knowledge: {
     path: '/knowledge', label: 'Knowledge', requiredOperation: 'listKnowledgeItems',
     home: { title: 'Knowledge', text: 'Read, write and verify pieces of know-how.', linkText: 'Open knowledge' },
@@ -72,6 +74,7 @@ export const ROUTES = {
   // administering roles (Owner, Admin, Auditor), so it is used as the second condition. The API remains the authority:
   // a card with an own-scope grant gets only its own records from it.
   consentAdmin: { path: '/consents', label: 'Consents', requiredOperation: 'listConsents', alsoRequires: ['getTenantSettings'], menu: 'manage' },
+  quality: { path: '/quality', label: 'Answer quality', requiredOperation: 'getQualitySummary', menu: 'manage' },
   settings: { path: '/settings', label: 'Settings', requiredOperation: 'getTenantSettings', menu: 'manage' },
   audit: { path: '/audit', label: 'Audit log', requiredOperation: 'listAuditEvents', menu: 'manage' },
   operator: { path: '/operator', label: 'Operator console', requiredOperation: 'listTenants', menu: 'manage' },

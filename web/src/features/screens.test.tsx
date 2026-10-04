@@ -21,6 +21,7 @@ const as = (...ops: Parameters<typeof permissionsFor>) => sessionValue(makeSessi
 describe('ask', () => {
   const answered: KAnswer = {
     outcome: 'answered', answer: 'The relief valve lifts at 6 bar.', reason: null, confidence: 'high', contains_unverified_sources: true, can_ask_expert: false,
+    answer_id: ID(90), conflict_found_by: null, conflicts: [], conflict_check_partial: false,
     citations: [
       { ref: 'S1', kind: 'item', id: ID(1), title: 'Relief valve', snippet: 'lifts at 6 bar', verification_status: 'verified', expert_display_name: 'Synthetic Expert', derived_from: [] },
       { ref: 'S2', kind: 'source', id: ID(2), title: 'Boiler notes', snippet: 'tested monthly', verification_status: 'unverified', expert_display_name: null, derived_from: [] },
@@ -48,7 +49,11 @@ describe('ask', () => {
   it('says "I don\'t know" plainly, explains a conflict, and lets the person ask an expert', async () => {
     const user = userEvent.setup();
     const api = new FakeApi({
-      askKnowledge: () => ({ outcome: 'dont_know', answer: null, reason: 'sources_conflict', confidence: null, contains_unverified_sources: false, citations: [], can_ask_expert: true }),
+      askKnowledge: () => ({
+        outcome: 'dont_know', answer: null, reason: 'sources_conflict', confidence: null, contains_unverified_sources: false, citations: [], can_ask_expert: true,
+        answer_id: ID(91), conflict_found_by: 'value_check' as const, conflict_check_partial: false,
+        conflicts: [{ measure: 'pressure' as const, a: { kind: 'item' as const, id: ID(71), title: 'Handbook', value: '3.0 bar' }, b: { kind: 'source' as const, id: ID(72), title: 'Fault table', value: '3.2 bar' } }],
+      }),
       listPeople: () => page([{ id: ID(7), display_name: 'Synthetic Expert', email: null, department_id: null, status: 'active' as const, created_at: T }]),
       createExpertQuestion: () => ({ id: ID(8), status: 'open', expires_at: T }),
     });
@@ -195,7 +200,7 @@ describe('knowledge', () => {
     usage_count: 0, verified_at: null, stale_after: null, updated_at: T, ...over,
   });
   const detail = (over: Partial<KItemDetail> = {}): KItemDetail => ({
-    ...summary(), body: 'The relief valve lifts at 6 bar.', self_verified: false, provenance: [], topics: [],
+    ...summary(), body: 'The relief valve lifts at 6 bar.', self_verified: false, provenance: [], topics: [], conflicts: [],
     versions: [{ version_no: 1, change_kind: 'created', author_person_id: null, created_at: T, erased_at: null, current: true }], ...over,
   });
   const at = { at: `/knowledge/${ID(30)}`, route: '/knowledge/:itemId' };

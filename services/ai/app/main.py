@@ -27,7 +27,7 @@ from app.ai_gateway import Caller, ChatProvider, Embedder, FakeProvider, Gateway
 from app.ai_gateway.remote import AnthropicProvider, OpenAIProvider
 from app.capture import ingest, interviews, topics, withdrawal
 from app.capture.gaps import gap_report
-from app.knowledge import answers, expert, items, readiness, reads
+from app.knowledge import answers, expert, items, quality, readiness, reads, upkeep
 from app.platform import (
     ConfigError,
     Database,
@@ -41,7 +41,6 @@ from app.platform import (
     verify_service_token,
     write_audit,
 )
-from app.platform import housekeeping as housekeeping_mod
 
 SERVICE_VERSION = "0.2.0"
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024        # hard ceiling; the company setting is lower
@@ -67,6 +66,22 @@ class SourceCreate(Body):
 class Question(Body):
     question: str = Field(min_length=1, max_length=2000)
     expert_person_id: Uuid | None = None
+
+
+class Feedback(Body):
+    verdict: Literal["helpful", "unhelpful", "wrong"]
+    comment: str | None = Field(default=None, max_length=500)
+    share_question: bool = False
+
+
+class QualityQuery(Body):
+    weeks: int = Field(default=8, ge=1, le=26)
+
+
+class FeedbackList(Body):
+    verdict: Literal["helpful", "unhelpful", "wrong"] | None = None
+    limit: int = Field(default=25, ge=1, le=50)
+    cursor: Uuid | None = None
 
 
 class ItemWrite(Body):
@@ -274,7 +289,7 @@ def create_app(services: Services | None = None) -> FastAPI:
     def _config_error(request: Request, exc: ConfigError) -> JSONResponse:
         return JSONResponse({"error": "not_configured"}, status_code=503)   # fail closed; the reason is not echoed
 
-    for cls in (ingest.CaptureRefused, items.ItemRefused, interviews.InterviewRefused, topics.TopicRefused, Refused):
+    for cls in (ingest.CaptureRefused, items.ItemRefused, interviews.InterviewRefused, topics.TopicRefused, quality.QualityRefused, Refused):
         @app.exception_handler(cls)
         def _refused(request: Request, exc: Any) -> JSONResponse:
             return JSONResponse({"error": exc.code}, status_code=exc.status)
@@ -349,6 +364,29 @@ def create_app(services: Services | None = None) -> FastAPI:
         result = answers.answer(s.db, ctx, s.gateway, s.embedder, caller or _no_caller(ctx), body.question, body.expert_person_id,
                                 unavailable)
         return result.public()
+
+    # ------------------------------------------------------------------ answer quality (feature 22)
+    @app.post("/internal/answers/{answer_id}/feedback")
+    def answer_feedback(answer_id: str, body: Feedback, ctx: Annotated[ServiceContext, Depends(token("answer.feedback", "answer_id"))]) -> dict[str, Any]:
+        return quality.put_feedback(svc().db, ctx, answer_id, body.verdict, body.comment, body.share_question)
+
+    @app.post("/internal/answers/{answer_id}/feedback/read")
+    def answer_feedback_read(answer_id: str, ctx: Annotated[ServiceContext, Depends(token("answer.feedback_read", "answer_id"))]) -> dict[str, Any]:
+        return quality.get_feedback(svc().db, ctx, answer_id)
+
+    @app.post("/internal/answers/{answer_id}/feedback/withdraw")
+    def answer_feedback_withdraw(answer_id: str,
+                                 ctx: Annotated[ServiceContext, Depends(token("answer.feedback_withdraw", "answer_id"))]) -> dict[str, Any]:
+        quality.withdraw_feedback(svc().db, ctx, answer_id)
+        return {"answer_id": answer_id, "withdrawn": True}
+
+    @app.post("/internal/quality/summary")
+    def quality_summary(body: QualityQuery, ctx: Annotated[ServiceContext, Depends(token("quality.summary"))]) -> dict[str, Any]:
+        return quality.summary(svc().db, ctx, body.weeks)
+
+    @app.post("/internal/quality/feedback/list")
+    def quality_feedback(body: FeedbackList, ctx: Annotated[ServiceContext, Depends(token("quality.feedback"))]) -> dict[str, Any]:
+        return quality.list_feedback(svc().db, ctx, verdict=body.verdict, limit=body.limit, before=body.cursor)
 
     # ------------------------------------------------------------------ knowledge items (feature 12)
     @app.post("/internal/items")
@@ -570,7 +608,7 @@ def create_app(services: Services | None = None) -> FastAPI:
     # ------------------------------------------------------------------ housekeeping
     @app.post("/internal/housekeeping")
     def housekeeping(ctx: Annotated[ServiceContext, Depends(token("housekeeping.run"))]) -> dict[str, Any]:
-        return {"done": housekeeping_mod.run(svc().db, ctx.tenant_id)}
+        return {"done": upkeep.run(svc().db, ctx.tenant_id)}
 
     return app
 

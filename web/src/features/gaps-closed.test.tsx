@@ -21,7 +21,7 @@ describe('a knowledge item and its topics', () => {
   const item = (topics: KItemDetail['topics']): KItemDetail => ({
     id: ID(30), title: 'Relief valve', status: 'verified', origin: 'manual', ai_extracted: false, department_id: null, sensitivity: 0, owner_person_id: null,
     usage_count: 0, verified_at: T, stale_after: null, updated_at: T, body: 'The relief valve lifts at 6 bar.', self_verified: false, provenance: [],
-    versions: [{ version_no: 1, change_kind: 'created', author_person_id: null, created_at: T, erased_at: null, current: true }], topics,
+    versions: [{ version_no: 1, change_kind: 'created', author_person_id: null, created_at: T, erased_at: null, current: true }], topics, conflicts: [],
   });
   const at = { at: `/knowledge/${ID(30)}`, route: '/knowledge/:itemId' };
 

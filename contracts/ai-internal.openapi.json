@@ -141,6 +141,84 @@
         "title": "ExpertReply",
         "type": "object"
       },
+      "Feedback": {
+        "additionalProperties": false,
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "share_question": {
+            "default": false,
+            "title": "Share Question",
+            "type": "boolean"
+          },
+          "verdict": {
+            "enum": [
+              "helpful",
+              "unhelpful",
+              "wrong"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verdict"
+        ],
+        "title": "Feedback",
+        "type": "object"
+      },
+      "FeedbackList": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-fA-F-]{36}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor"
+          },
+          "limit": {
+            "default": 25,
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "enum": [
+                  "helpful",
+                  "unhelpful",
+                  "wrong"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          }
+        },
+        "title": "FeedbackList",
+        "type": "object"
+      },
       "GapQuery": {
         "additionalProperties": false,
         "properties": {
@@ -380,6 +458,20 @@
           "score"
         ],
         "title": "Override",
+        "type": "object"
+      },
+      "QualityQuery": {
+        "additionalProperties": false,
+        "properties": {
+          "weeks": {
+            "default": 8,
+            "maximum": 26.0,
+            "minimum": 1.0,
+            "title": "Weeks",
+            "type": "integer"
+          }
+        },
+        "title": "QualityQuery",
         "type": "object"
       },
       "Question": {
@@ -800,6 +892,193 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/internal/answers/{answer_id}/feedback": {
+      "post": {
+        "operationId": "answer_feedback_internal_answers__answer_id__feedback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "answer_id",
+            "required": true,
+            "schema": {
+              "title": "Answer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Feedback"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Answer Feedback Internal Answers  Answer Id  Feedback Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Answer Feedback",
+        "x-action": "answer.feedback",
+        "x-subject": "answer_id"
+      }
+    },
+    "/internal/answers/{answer_id}/feedback/read": {
+      "post": {
+        "operationId": "answer_feedback_read_internal_answers__answer_id__feedback_read_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "answer_id",
+            "required": true,
+            "schema": {
+              "title": "Answer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Answer Feedback Read Internal Answers  Answer Id  Feedback Read Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Answer Feedback Read",
+        "x-action": "answer.feedback_read",
+        "x-subject": "answer_id"
+      }
+    },
+    "/internal/answers/{answer_id}/feedback/withdraw": {
+      "post": {
+        "operationId": "answer_feedback_withdraw_internal_answers__answer_id__feedback_withdraw_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "answer_id",
+            "required": true,
+            "schema": {
+              "title": "Answer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Answer Feedback Withdraw Internal Answers  Answer Id  Feedback Withdraw Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Answer Feedback Withdraw",
+        "x-action": "answer.feedback_withdraw",
+        "x-subject": "answer_id"
       }
     },
     "/internal/consents/{consent_id}/erase": {
@@ -2436,6 +2715,126 @@
         "summary": "Labels",
         "x-action": "label.change",
         "x-subject": "target_id"
+      }
+    },
+    "/internal/quality/feedback/list": {
+      "post": {
+        "operationId": "quality_feedback_internal_quality_feedback_list_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackList"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Quality Feedback Internal Quality Feedback List Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Quality Feedback",
+        "x-action": "quality.feedback",
+        "x-subject": null
+      }
+    },
+    "/internal/quality/summary": {
+      "post": {
+        "operationId": "quality_summary_internal_quality_summary_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QualityQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Quality Summary Internal Quality Summary Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Quality Summary",
+        "x-action": "quality.summary",
+        "x-subject": null
       }
     },
     "/internal/readiness/answers/{answer_id}/override": {

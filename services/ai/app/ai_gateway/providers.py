@@ -59,6 +59,10 @@ class FakeProvider:
         input_tokens = _approx_tokens(req.system) + sum(_approx_tokens(b.text) for b in req.data_blocks)
         return ProviderResult(raw_json=raw, input_tokens=input_tokens, output_tokens=_approx_tokens(raw))
 
+    def rule_based(self, req: GenerateRequest) -> dict[str, object]:
+        """The answer this provider gives when nothing is scripted - for scripts that change one feature and keep the rest."""
+        return self._default(req)
+
     # Rule-based answers for each prompt, so the pipeline works end to end without a model.
     def _default(self, req: GenerateRequest) -> dict[str, object]:
         blocks = req.data_blocks

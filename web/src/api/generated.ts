@@ -89,13 +89,92 @@ export interface KCitation {
 }
 
 export interface KAnswer {
-  outcome: "answered" | "dont_know" | "search_only";
+  answer_id: string | null;
+  conflict_found_by: "value_check" | "ai_model" | null;
+  conflicts: KSourceConflict[];
+  conflict_check_partial: boolean;
+  outcome: KAnswerOutcome;
   answer: string | null;
-  reason: string | null;
-  confidence: "high" | "medium" | null;
+  reason: KAnswerReason;
+  confidence: KAnswerConfidence;
   contains_unverified_sources: boolean;
   citations: KCitation[];
   can_ask_expert: boolean;
+}
+
+export type KFeedbackVerdict = "helpful" | "unhelpful" | "wrong";
+
+export type KAnswerOutcome = "answered" | "dont_know" | "search_only";
+
+export type KAnswerReason = "no_relevant_sources" | "not_grounded" | "sources_conflict" | "low_confidence" | "budget_exhausted" | "ai_disabled" | "ai_unavailable" | "grace" | null;
+
+export type KAnswerConfidence = "high" | "medium" | null;
+
+export type KConflictMeasure = "time" | "pressure" | "torque" | "length" | "mass" | "volume" | "percent" | "rotation" | "frequency" | "power" | "voltage" | "current" | "ppm" | "concentration" | "temperature" | "interval" | "rate" | "count" | "requirement";
+
+export interface KConflictSide {
+  kind: "item" | "source";
+  id: string;
+  title: string;
+  value: string;
+}
+
+export interface KSourceConflict {
+  measure: KConflictMeasure;
+  a: KConflictSide;
+  b: KConflictSide;
+}
+
+export interface KItemConflict {
+  restricted: boolean;
+  measure: KConflictMeasure | null;
+  this: KConflictSide | null;
+  other: KConflictSide | null;
+  detected_at: string | null;
+}
+
+export interface KQualityWeek {
+  week_start: string;
+  questions: number;
+  answered: number;
+  search_only: number;
+  dont_know: number;
+  dont_know_no_relevant_sources: number;
+  dont_know_not_grounded: number;
+  dont_know_low_confidence: number;
+  dont_know_sources_conflict: number;
+  conflicts_found_by_value_check: number;
+  conflicts_found_by_ai_model: number;
+  citations_removed: number;
+  answers_naming_an_unknown_source: number;
+  answers_containing_unverified_sources: number;
+  feedback_helpful: number;
+  feedback_unhelpful: number;
+  feedback_wrong: number;
+}
+
+export interface KQualitySummary {
+  weeks: KQualityWeek[];
+  kept_for_days: number;
+  waiting_for_review: {
+    item_conflicts: number;
+    stale_items: number;
+    answers_marked_wrong: number;
+  };
+}
+
+export interface KAnswerFeedback {
+  id: string;
+  answer_id: string;
+  verdict: KFeedbackVerdict;
+  comment: string | null;
+  question_shared: boolean;
+  question: string | null;
+  created_at: string;
+  outcome: KAnswerOutcome;
+  reason: KAnswerReason;
+  confidence: KAnswerConfidence;
+  contains_unverified_sources: boolean;
 }
 
 export interface KItemSummary {
@@ -114,6 +193,7 @@ export interface KItemSummary {
 }
 
 export interface KItemDetail {
+  conflicts: KItemConflict[];
   id: string;
   title: string;
   status: string;
@@ -952,6 +1032,11 @@ export const operations = {
   reopenKnowledgeItem: { method: "POST", path: "/v1/knowledge/items/{item_id}/reopen", status: 200, idempotent: true, public: false, permission: "knowledge:verify", contentTypes: ["application/json"] },
   retireKnowledgeItem: { method: "POST", path: "/v1/knowledge/items/{item_id}/retire", status: 200, idempotent: true, public: false, permission: "knowledge:verify", contentTypes: [] },
   setItemLabels: { method: "PATCH", path: "/v1/knowledge/items/{item_id}/labels", status: 200, idempotent: true, public: false, permission: "knowledge:label", contentTypes: ["application/json"] },
+  putAnswerFeedback: { method: "PUT", path: "/v1/knowledge/answers/{knowledge_answer_id}/feedback", status: 200, idempotent: true, public: false, permission: "knowledge:ask", contentTypes: ["application/json"] },
+  getAnswerFeedback: { method: "GET", path: "/v1/knowledge/answers/{knowledge_answer_id}/feedback", status: 200, idempotent: false, public: false, permission: "knowledge:ask", contentTypes: [] },
+  withdrawAnswerFeedback: { method: "DELETE", path: "/v1/knowledge/answers/{knowledge_answer_id}/feedback", status: 204, idempotent: true, public: false, permission: "knowledge:ask", contentTypes: [] },
+  getQualitySummary: { method: "GET", path: "/v1/quality/summary", status: 200, idempotent: false, public: false, permission: "knowledge_settings:read", contentTypes: [] },
+  listAnswerFeedback: { method: "GET", path: "/v1/quality/feedback", status: 200, idempotent: false, public: false, permission: "knowledge_settings:read", contentTypes: [] },
   setItemTopics: { method: "PUT", path: "/v1/knowledge/items/{item_id}/topics", status: 200, idempotent: true, public: false, permission: "knowledge:label", contentTypes: ["application/json"] },
   revertVerifications: { method: "POST", path: "/v1/knowledge/verifications/revert", status: 200, idempotent: true, public: false, permission: "knowledge:revert", contentTypes: ["application/json"] },
   listMyContributions: { method: "GET", path: "/v1/me/contributions", status: 200, idempotent: false, public: false, permission: "knowledge:read", contentTypes: [] },
@@ -1464,6 +1549,43 @@ export interface OperationTypes {
     };
     response: KLabelResult;
   };
+  putAnswerFeedback: {
+    path: { knowledge_answer_id: string };
+    query: undefined;
+    body: {
+      verdict: KFeedbackVerdict;
+      comment?: string;
+      share_question?: boolean;
+    };
+    response: KAnswerFeedback;
+  };
+  getAnswerFeedback: {
+    path: { knowledge_answer_id: string };
+    query: undefined;
+    body: undefined;
+    response: KAnswerFeedback;
+  };
+  withdrawAnswerFeedback: {
+    path: { knowledge_answer_id: string };
+    query: undefined;
+    body: undefined;
+    response: undefined;
+  };
+  getQualitySummary: {
+    path: undefined;
+    query: { weeks?: number };
+    body: undefined;
+    response: KQualitySummary;
+  };
+  listAnswerFeedback: {
+    path: undefined;
+    query: { verdict?: KFeedbackVerdict; limit?: number; cursor?: string };
+    body: undefined;
+    response: {
+      items: KAnswerFeedback[];
+      next_cursor: string | null;
+    };
+  };
   setItemTopics: {
     path: { item_id: string };
     query: undefined;
@@ -1832,7 +1954,7 @@ export interface OperationTypes {
   };
   listReviewTasks: {
     path: undefined;
-    query: { status?: "open" | "assigned" | "resolved" | "dismissed"; kind?: "verify_item" | "redaction_review" | "expert_question" | "quiz_item_approval" | "grading_override" | "stale_item"; limit?: number; cursor?: string };
+    query: { status?: "open" | "assigned" | "resolved" | "dismissed"; kind?: "verify_item" | "redaction_review" | "expert_question" | "quiz_item_approval" | "grading_override" | "stale_item" | "item_conflict" | "answer_feedback"; limit?: number; cursor?: string };
     body: undefined;
     response: {
       items: KTask[];

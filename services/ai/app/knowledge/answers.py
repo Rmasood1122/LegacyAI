@@ -16,9 +16,11 @@ from typing import Any
 
 from app.ai_gateway import AnswerOutput, Caller, DataBlock, Embedder, Gateway
 from app.capture import condition, load_approved, redact, retrieve
+from app.knowledge.conflicts import check as check_conflicts
 from app.platform import Database, ServiceContext, one, write_audit
 
 PROMPT_SOURCES = 6
+MAX_CONFLICTS_SHOWN = 5
 HIGH_SIMILARITY_MARGIN = 0.15
 SNIPPET_CHARS = 300
 
@@ -62,6 +64,10 @@ class AnswerResult:
     fabricated: bool = False
     cost_micro_usd: int = 0
     ledger_id: str | None = None
+    log_id: str | None = None
+    conflict_found_by: str | None = None         # "value_check" | "ai_model" when the reason is sources_conflict
+    conflicts: list[dict[str, Any]] = field(default_factory=list)   # what disagrees, in the sources' own words
+    conflict_check_partial: bool = False         # the check in code reached one of its limits and did not read everything
 
     def public(self) -> dict[str, Any]:
         return {
@@ -69,6 +75,10 @@ class AnswerResult:
             "contains_unverified_sources": any(c.verification_status not in ("verified", "corrected") for c in self.citations),
             "citations": [c.public() for c in self.citations],
             "can_ask_expert": self.outcome == "dont_know",
+            "answer_id": self.log_id,
+            "conflict_found_by": self.conflict_found_by,
+            "conflicts": self.conflicts,
+            "conflict_check_partial": self.conflict_check_partial,
         }
 
 
@@ -189,10 +199,15 @@ def answer(db: Database, ctx: ServiceContext, gateway: Gateway, embedder: Embedd
         valid.append(_citation(claim.source, row, named[row["id"]], at))
 
     total = result.claims_valid + result.claims_rejected
+    # The check in code (feature 23): does another approved source state a different value for something the answer
+    # says? It runs whatever the model reported, on the same passages the model saw.
+    code_conflicts, result.conflict_check_partial = _conflicts_in_code(labels, named, valid, parsed.answer) if parsed.answerable and valid else ([], False)
     if not parsed.answerable:
         result.reason = "no_relevant_sources"
     elif parsed.conflict:
-        result.reason = "sources_conflict"
+        result.reason, result.conflict_found_by, result.conflicts = "sources_conflict", "ai_model", code_conflicts
+    elif code_conflicts:
+        result.reason, result.conflict_found_by, result.conflicts = "sources_conflict", "value_check", code_conflicts
     elif result.claims_valid == 0 or result.claims_rejected * 2 > total:
         result.reason = "not_grounded"
     else:
@@ -214,6 +229,29 @@ def answer(db: Database, ctx: ServiceContext, gateway: Gateway, embedder: Embedd
     return _finish(db, ctx, question, expert_person_id, result, started)
 
 
+def _conflicts_in_code(labels: dict[str, dict[str, Any]], named: dict[str, Named], valid: list[Citation],
+                       answer_text: str) -> tuple[list[dict[str, Any]], bool]:
+    """(what disagrees, whether the check was cut short). Passages of one document or item are ONE source: a
+    document is never set against itself. Only passages that passed the reader's filter and the re-check are here."""
+    texts: dict[str, str] = {}
+    offset: dict[str, int] = {}          # where each passage starts inside its source's joined text
+    sides: dict[str, dict[str, str]] = {}
+    for label, row in labels.items():
+        kind, target_id, title, _ = named[row["id"]]
+        key = f"{kind}:{target_id}"
+        offset[label] = len(texts[key]) + 1 if key in texts else 0
+        texts[key] = texts[key] + "\n" + row["text"] if key in texts else row["text"]
+        sides[key] = {"kind": kind, "id": target_id, "title": title}
+    cited = []
+    for c in valid:
+        kind, target_id, _, _ = named[labels[c.ref]["id"]]
+        cited.append((f"{kind}:{target_id}", offset[c.ref] + c.quote_start, offset[c.ref] + c.quote_end))
+    report = check_conflicts(texts, cited=cited, answer=answer_text)
+    out = [{"measure": c.measure, "a": sides[c.a.source] | {"value": c.a.raw[:200]}, "b": sides[c.b.source] | {"value": c.b.raw[:200]}}
+           for c in report.conflicts[:MAX_CONFLICTS_SHOWN]]
+    return out, report.truncated
+
+
 def _search_only(result: AnswerResult, top: list[dict[str, Any]], named: dict[str, Any], reason: str) -> AnswerResult:
     result.outcome, result.reason = "search_only", reason
     result.citations = [_citation(f"S{i + 1}", r, named[r["id"]], None) for i, r in enumerate(top)]
@@ -225,12 +263,15 @@ def _finish(db: Database, ctx: ServiceContext, question_redacted: str, expert_pe
     with db.tenant_tx(ctx.tenant_id) as cur:
         cur.execute(
             """INSERT INTO answer_logs (tenant_id, card_id, question_redacted, expert_person_id, outcome, reason, confidence, candidates,
-                   approved, policy_disagreements, claims_valid, claims_rejected, fabricated_citation, prompt_version, ledger_id, latency_ms)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s, %s, 'answer@v1', %s, %s) RETURNING id::text AS id""",
+                   approved, policy_disagreements, claims_valid, claims_rejected, fabricated_citation, prompt_version, ledger_id, latency_ms,
+                   conflict_found_by, contains_unverified_sources)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s, %s, 'answer@v1', %s, %s, %s, %s) RETURNING id::text AS id""",
             (ctx.tenant_id, ctx.card_id, question_redacted[:500] or "-", expert_person_id, result.outcome, result.reason, result.confidence,
              result.candidates, result.approved, result.claims_valid, result.claims_rejected, result.fabricated, result.ledger_id,
-             int((time.monotonic() - started) * 1000)))
+             int((time.monotonic() - started) * 1000), result.conflict_found_by if result.reason == "sources_conflict" else None,
+             result.outcome == "answered" and any(c.verification_status not in ("verified", "corrected") for c in result.citations)))
         log_id = one(cur)["id"]
+        result.log_id = log_id
         for c in result.citations:
             if result.outcome != "answered":
                 break

@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { addMember, createTenant, platformOperator, startApp, superuser, type Res, type TestApp, type TestTenant } from '../helpers/harness.ts';
 
 const REAL = process.env.AI_SERVICE_URL_REAL;
-const PHASE2_OPERATIONS = 78;
+const PHASE2_OPERATIONS = 78 + 5;   // Phase 2, plus the five quality operations of Phase 4 (features 22, 23)
 
 describe.skipIf(!REAL)('Phase 2 walk with the real AI service', () => {
   let t: TestApp;
@@ -205,6 +205,32 @@ describe.skipIf(!REAL)('Phase 2 walk with the real AI service', () => {
     ok('withdrawConsent', await e.post(`/v1/consents/${docs.id}/withdraw`), 200);
     ok('releaseConsentHold', await o.post(`/v1/consents/${docs.id}/release-hold`), 200);
     ok('recordWithdrawalForPerson', await o.post(`/v1/people/${expert.personId}/consent-withdrawals`, { reference: 'WALK-REQ-0001' }), 200);
+
+    // ---- answer quality (features 22, 23)
+    expect(typeof answer.body.answer_id).toBe('string');
+    expect(answer.body.conflicts).toEqual([]);
+    const feedbackUrl = `/v1/knowledge/answers/${answer.body.answer_id}/feedback`;
+    expect((await e.put(feedbackUrl, { verdict: 'wrong' })).status).toBe(404);                                         // not the card that asked
+    expect((await l.get(feedbackUrl)).status).toBe(404);                                                               // no opinion given yet
+    ok('putAnswerFeedback', await l.put(feedbackUrl, { verdict: 'helpful', share_question: true }), 200);
+    const myOpinion = ok('getAnswerFeedback', await l.get(feedbackUrl), 200);
+    expect(myOpinion.body.verdict).toBe('helpful');
+    expect(typeof myOpinion.body.question).toBe('string');                                                                 // shared, so it comes back
+    ok('withdrawAnswerFeedback', await l.request('DELETE', feedbackUrl, undefined, { idem: `k-${randomUUID()}` }), 204);
+    expect((await l.get(feedbackUrl)).status).toBe(404);
+    const wrong = ok('putAnswerFeedback', await l.put(feedbackUrl, { verdict: 'wrong', comment: 'Synthetic: the lever is tested weekly here.' }), 200);
+    expect(wrong.body.question).toBeNull();                                                                            // not shared: nobody reads the question
+    expect((await l.get('/v1/quality/summary')).status).toBe(403);                                                     // a learner may not read the company's numbers
+    const quality = ok('getQualitySummary', await o.get('/v1/quality/summary?weeks=2'), 200);
+    expect(quality.body.weeks[0].questions).toBeGreaterThanOrEqual(2);
+    expect(quality.body.weeks[0].feedback_wrong).toBe(1);
+    expect(quality.body.waiting_for_review.answers_marked_wrong).toBe(1);
+    const said = ok('listAnswerFeedback', await o.get('/v1/quality/feedback?verdict=wrong'), 200);
+    expect(said.body.items.map((f: any) => f.answer_id)).toEqual([answer.body.answer_id]);
+    expect(said.body.items[0].question).toBeNull();
+    expect(said.body.items[0].question_shared).toBe(false);
+    const wrongTasks = await o.get('/v1/review/tasks?kind=answer_feedback');
+    expect(wrongTasks.body.items.map((x: any) => x.subject_id)).toEqual([answer.body.answer_id]);
 
     expect(hit.size).toBe(PHASE2_OPERATIONS);
   });

@@ -40,6 +40,7 @@ from app.capture import ingest, interviews, topics
 from app.capture.gaps import gap_report
 from app.knowledge import answers, items, readiness
 from app.platform import Database, Logger, ServiceContext
+from eval.one_sided import answer_from_one_side
 from eval.pdfs import make_pdf
 
 GOLDEN = Path(__file__).resolve().parent / "golden"
@@ -162,6 +163,7 @@ def ask(db: Database, c: Company, gateway: Gateway, rec: RecordingProvider, embe
         "model_called": len(rec.raw) > calls_before, "raw": [raw for _, raw in rec.raw[calls_before:]], "cost_micro_usd": r.cost_micro_usd,
         "latency_ms": round((done - started) * 1000), "retrieval_ms": round((retrieved - started) * 1000),
         "citation_chunks": [c_.chunk_id for c_ in r.citations],
+        "conflict_found_by": r.conflict_found_by, "conflicts": r.conflicts, "conflict_check_partial": r.conflict_check_partial,
     }
 
 
@@ -202,6 +204,9 @@ def main() -> None:
         inner = OpenAIProvider(os.environ["OPENAI_API_KEY"], args.model, reasoning_effort=os.environ.get("AI_REASONING_EFFORT", "low") or None)
     else:
         inner = FakeProvider()
+        # Answer like a model that picks the most fitting sentence from ONE source and never reports a conflict, so
+        # this run shows what the check in code (feature 23) catches by itself.
+        answer_from_one_side(inner)
     rec = RecordingProvider(inner)
     cap = int(args.cap_usd * 1_000_000)
 
@@ -423,7 +428,11 @@ def main() -> None:
         "abstention": {
             "unanswerable": counts("unanswerable", "dont_know"), "restricted": counts("restricted", "dont_know"),
             "conflicting": {**counts("conflicting", "dont_know"),
-                            "with_reason_sources_conflict": sum(1 for o in rows.get("conflicting", []) if o["reason"] == "sources_conflict")},
+                            "with_reason_sources_conflict": sum(1 for o in rows.get("conflicting", []) if o["reason"] == "sources_conflict"),
+                            "refused_by_code_check": sum(1 for o in rows.get("conflicting", []) if o.get("conflict_found_by") == "value_check"),
+                            "refused_by_model": sum(1 for o in rows.get("conflicting", []) if o.get("conflict_found_by") == "ai_model")},
+            # the check in code must not cost answers: answerable questions it refused for a conflict
+            "answerable_refused_by_code_check": sum(1 for o in ans if o.get("conflict_found_by") == "value_check"),
             "answerable_wrongly_refused": {"n": len(ans), "refused": sum(1 for o in ans if o["outcome"] != "answered")},
             "restricted_look_like_unanswerable": all(o["outcome"] != "answered" for o in rows.get("restricted", [])),
         },
@@ -461,7 +470,9 @@ def main() -> None:
     a = result["abstention"]
     print(f"eval: {args.provider} {args.model} embedder={embedder.model_id} cut_short={result['cut_short']}")
     print(f"eval: unanswerable refused {a['unanswerable']['dont_know']}/{a['unanswerable']['n']}; restricted refused {a['restricted']['dont_know']}/{a['restricted']['n']}; "
-          f"conflicts refused {a['conflicting']['dont_know']}/{a['conflicting']['n']} (reason conflict {a['conflicting']['with_reason_sources_conflict']}); "
+          f"conflicts refused {a['conflicting']['dont_know']}/{a['conflicting']['n']} (reason conflict {a['conflicting']['with_reason_sources_conflict']}: "
+          f"by the check in code {a['conflicting']['refused_by_code_check']}, by the model {a['conflicting']['refused_by_model']}); "
+          f"answerable refused by the check in code {a['answerable_refused_by_code_check']}; "
           f"answerable wrongly refused {a['answerable_wrongly_refused']['refused']}/{a['answerable_wrongly_refused']['n']}")
     ci = result["citations"]
     print(f"eval: citations valid on re-check {ci['valid_on_recheck']}/{ci['returned']}; removed by validator {ci['removed_by_validator']}; "

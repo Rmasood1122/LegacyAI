@@ -51,12 +51,19 @@ const DEFAULTS: Record<string, Answer> = {
   'knowledge.candidates': () => ({ candidates: [] }),
   'knowledge.answer': () => ({
     outcome: 'dont_know', answer: null, reason: 'no_relevant_sources', confidence: null, contains_unverified_sources: false, citations: [], can_ask_expert: true,
+    answer_id: id(), conflict_found_by: null, conflicts: [], conflict_check_partial: false,
   }),
+  'answer.feedback': (c) => ({ id: id(), answer_id: c.claims.subject, verdict: c.body?.verdict ?? 'helpful', comment: c.body?.comment ?? null, question_shared: c.body?.share_question === true, question: null, created_at: now(), outcome: 'answered', reason: null, confidence: 'high', contains_unverified_sources: false }),
+  'answer.feedback_read': (c) => ({ id: id(), answer_id: c.claims.subject, verdict: c.body?.verdict ?? 'helpful', comment: c.body?.comment ?? null, question_shared: c.body?.share_question === true, question: null, created_at: now(), outcome: 'answered', reason: null, confidence: 'high', contains_unverified_sources: false }),
+  'answer.feedback_withdraw': (c) => ({ answer_id: c.claims.subject, withdrawn: true }),
+  'quality.summary': () => ({ weeks: [], kept_for_days: 90, waiting_for_review: { item_conflicts: 0, stale_items: 0, answers_marked_wrong: 0 } }),
+  'quality.feedback': () => ({ items: [], next_cursor: null }),
   'item.list': () => ({ items: [], next_cursor: null }),
   'item.read': (c) => ({
     id: c.claims.subject, title: 'Synthetic item', status: 'verified', origin: 'manual', ai_extracted: false, department_id: null, sensitivity: 1,
     owner_person_id: null, usage_count: 0, verified_at: now(), stale_after: null, updated_at: now(), body: 'Synthetic body.', self_verified: false,
     versions: [{ version_no: 1, change_kind: 'written', author_person_id: null, created_at: now(), erased_at: null, current: true }], provenance: [],
+    conflicts: [],
   }),
   'item.write': () => ({ id: id(), status: 'candidate' }),
   'item.topics': (c) => ({

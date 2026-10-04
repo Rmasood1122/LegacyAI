@@ -614,3 +614,74 @@ describe('item topics, job roles and tests taken (the screens no longer need the
     expect((await o.put(`/v1/job-roles/${encodeURIComponent(long)}/topics`, { topics: [] })).status).toBe(200);
   });
 });
+
+describe('answer quality: readers\' feedback and the weekly counts (features 22 and 23)', () => {
+  it('an answer names its record, who found a conflict and what disagrees; nothing else from the AI service gets through', async () => {
+    const answerId = randomUUID();
+    const a = { kind: 'item', id: randomUUID(), title: 'Handbook', value: '3.0 bar' };
+    const b = { kind: 'source', id: randomUUID(), title: 'Fault table', value: '3.2 bar' };
+    stub.answers.set('knowledge.answer', () => ({
+      outcome: 'dont_know', answer: null, reason: 'sources_conflict', confidence: null, contains_unverified_sources: false, citations: [],
+      can_ask_expert: true, answer_id: answerId, conflict_found_by: 'value_check', conflict_check_partial: true,
+      conflicts: [{ measure: 'pressure', a: { ...a, chunk_text: 'must not pass' }, b, internal_note: 'must not pass' }],
+    }));
+    const res = await learner.client.post('/v1/knowledge/ask', { question: 'At what pressure does the alarm come?' });
+    expect(res.status).toBe(200);
+    expect(res.body.answer_id).toBe(answerId);
+    expect(res.body.conflict_found_by).toBe('value_check');
+    expect(res.body.conflict_check_partial).toBe(true);
+    expect(res.body.conflicts).toEqual([{ measure: 'pressure', a, b }]);
+    stub.answers.delete('knowledge.answer');
+  });
+
+  it('feedback is replaced, read and withdrawn bound to that one answer, with the card that gives it', async () => {
+    const answerId = randomUUID();
+    const url = `/v1/knowledge/answers/${answerId}/feedback`;
+    expect((await learner.client.put(url, { verdict: 'excellent' })).status).toBe(400);
+    expect((await learner.client.put(url, { verdict: 'wrong', share_question: 'yes' })).status).toBe(400);
+    expect((await learner.client.request('PUT', url, { verdict: 'wrong' }, { idem: false })).status).toBe(400);
+    expect((await learner.client.post(url, { verdict: 'wrong' })).status).toBe(404);                 // there is no POST: an opinion is put
+    const res = await learner.client.put(url, { verdict: 'wrong', comment: 'Synthetic comment.' });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ answer_id: answerId, verdict: 'wrong', comment: 'Synthetic comment.', question_shared: false, question: null });
+    const calls = stub.ofAction('answer.feedback');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.claims.subject).toBe(answerId);
+    expect(calls[0]!.claims.card_id).toBe(learner.card.id);
+    expect(calls[0]!.body).toEqual({ verdict: 'wrong', comment: 'Synthetic comment.', share_question: false });   // not shared unless the reader says so
+    await learner.client.put(url, { verdict: 'wrong', share_question: true });
+    expect(stub.ofAction('answer.feedback')[1]!.body).toEqual({ verdict: 'wrong', comment: null, share_question: true });
+
+    expect((await learner.client.get(url)).status).toBe(200);
+    expect(stub.ofAction('answer.feedback_read')[0]!.claims.subject).toBe(answerId);
+    expect((await learner.client.request('DELETE', url, undefined, { idem: false })).status).toBe(400);            // a change needs a key
+    const gone = await learner.client.request('DELETE', url, undefined, { idem: `k-${randomUUID()}` });
+    expect(gone.status).toBe(204);
+    expect(gone.raw).toBe('');
+    expect(stub.ofAction('answer.feedback_withdraw')[0]!.claims.subject).toBe(answerId);
+
+    // the AI service says "not found" for an answer that was given to another card: the caller gets the same, for every verb
+    const actions = ['answer.feedback', 'answer.feedback_read', 'answer.feedback_withdraw'];
+    for (const action of actions) stub.answers.set(action, () => new StubError(404, 'not_found'));
+    expect((await expert.client.put(url, { verdict: 'helpful' })).status).toBe(404);
+    expect((await expert.client.get(url)).status).toBe(404);
+    expect((await expert.client.request('DELETE', url, undefined, { idem: `k-${randomUUID()}` })).status).toBe(404);
+    for (const action of actions) stub.answers.delete(action);
+  });
+
+  it('the company\'s quality numbers and the readers\' feedback are for the Owner; an Expert and a Successor are refused before any call', async () => {
+    for (const who of [expert, learner]) {
+      expect((await who.client.get('/v1/quality/summary')).status).toBe(403);
+      expect((await who.client.get('/v1/quality/feedback')).status).toBe(403);
+    }
+    expect(stub.ofAction('quality.summary')).toHaveLength(0);
+    expect(stub.ofAction('quality.feedback')).toHaveLength(0);
+    expect((await tenant.owner.get('/v1/quality/summary?weeks=27')).status).toBe(400);
+    const summary = await tenant.owner.get('/v1/quality/summary?weeks=4');
+    expect(summary.status).toBe(200);
+    expect(summary.body).toEqual({ weeks: [], kept_for_days: 90, waiting_for_review: { item_conflicts: 0, stale_items: 0, answers_marked_wrong: 0 } });
+    expect(stub.ofAction('quality.summary')[0]!.body).toEqual({ weeks: 4 });
+    expect((await tenant.owner.get('/v1/quality/feedback?verdict=wrong&limit=5')).body).toEqual({ items: [], next_cursor: null });
+    expect((await tenant.owner.get('/v1/quality/feedback?cursor=not-an-id')).status).toBe(400);
+  });
+});

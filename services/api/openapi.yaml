@@ -2414,6 +2414,230 @@ paths:
           $ref: "#/components/responses/TooManyRequests"
         "502":
           $ref: "#/components/responses/BadGateway"
+  /v1/knowledge/answers/{knowledge_answer_id}/feedback:
+    put:
+      operationId: "putAnswerFeedback"
+      summary: "Say what you think of an answer you received (helpful, unhelpful or wrong), or replace what you said before. The whole opinion is replaced: a comment that is left out is removed, and share_question is what this call says (false if left out). A change to 'wrong' opens a review task; a change away from 'wrong' closes it; saying 'wrong' again does not reopen a task a reviewer dismissed. Only the card the answer was given to may do this; for any other card the answer is 'not found'."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:ask"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/KnowledgeAnswerId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              additionalProperties: false
+              required:
+                - "verdict"
+              properties:
+                verdict:
+                  $ref: "#/components/schemas/KFeedbackVerdict"
+                comment:
+                  type: "string"
+                  minLength: 1
+                  maxLength: 500
+                  description: "Optional. Personal details are blanked out before it is stored. Left out = no comment (an earlier one is removed)."
+                share_question:
+                  type: "boolean"
+                  default: false
+                  description: "Your choice: may the people who look after answer quality (Owner, Admin) see the question you asked, with personal details blanked out? Without it they see your opinion, your comment and how the answer ended, not what you asked."
+      responses:
+        "200":
+          description: "The opinion as stored"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KAnswerFeedback"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+    get:
+      operationId: "getAnswerFeedback"
+      summary: "Your own opinion on an answer you received. 'Not found' if you gave none, or if the answer was not given to this card."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:ask"
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/KnowledgeAnswerId"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KAnswerFeedback"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+    delete:
+      operationId: "withdrawAnswerFeedback"
+      summary: "Take your opinion on an answer back. It is deleted; a review task that 'wrong' had opened is closed."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:ask"
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/KnowledgeAnswerId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: "Done"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  /v1/quality/summary:
+    get:
+      operationId: "getQualitySummary"
+      summary: "Weekly counts from the answer log and from readers' feedback (newest week first), and what is waiting for review. It reports what was logged; it cannot know whether an answer was true. A week (Monday 00:00 UTC to the next) in which nothing was asked and nothing was said is left out. The current week is not over, so its counts are partial. Answers older than the company's answer-log retention (kept_for_days) are deleted, so earlier weeks may be missing or incomplete."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge_settings:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "weeks"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 26
+            default: 8
+          description: "How many calendar weeks (Monday start, UTC), counting the current one."
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KQualitySummary"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  /v1/quality/feedback:
+    get:
+      operationId: "listAnswerFeedback"
+      summary: "What readers said about answers, of every department, newest first: the opinion, the comment (personal details blanked out) and how the answer ended. The question an answer was for is included only where its reader chose to share it."
+      tags:
+        - "knowledge"
+      x-permission: "knowledge_settings:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "verdict"
+          in: "query"
+          required: false
+          schema:
+            $ref: "#/components/schemas/KFeedbackVerdict"
+        - name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 50
+            default: 25
+          description: "Page size."
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "items"
+                  - "next_cursor"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      $ref: "#/components/schemas/KAnswerFeedback"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
   /v1/knowledge/items/{item_id}/topics:
     put:
       operationId: "setItemTopics"
@@ -4677,6 +4901,8 @@ paths:
               - "quiz_item_approval"
               - "grading_override"
               - "stale_item"
+              - "item_conflict"
+              - "answer_feedback"
         - name: "limit"
           in: "query"
           required: false
@@ -5392,6 +5618,14 @@ components:
       schema:
         type: string
         format: uuid
+    KnowledgeAnswerId:
+      name: "knowledge_answer_id"
+      in: "path"
+      required: true
+      schema:
+        type: "string"
+        format: "uuid"
+      description: "The answer_id returned by askKnowledge (an answer to a question - not an answer in a readiness test)."
     AnswerId:
       name: answer_id
       in: path
@@ -5979,29 +6213,44 @@ components:
         - "contains_unverified_sources"
         - "citations"
         - "can_ask_expert"
+        - "answer_id"
+        - "conflict_found_by"
+        - "conflicts"
+        - "conflict_check_partial"
       properties:
-        outcome:
-          type: "string"
+        answer_id:
+          type:
+            - "string"
+            - "null"
+          format: "uuid"
+          description: "The record of this answer, for giving feedback on it (putAnswerFeedback). Null only if the answer could not be recorded; feedback is then not possible."
+        conflict_found_by:
+          type:
+            - "string"
+            - "null"
           enum:
-            - "answered"
-            - "dont_know"
-            - "search_only"
+            - "value_check"
+            - "ai_model"
+            - null
+          description: "Null unless the reason is sources_conflict. Then: who found the conflict - 'value_check' (the comparison of stated values, done in code after the model answered) or 'ai_model' (the model itself said its sources disagree)."
+        conflicts:
+          type: "array"
+          description: "What the value check found to disagree, in the sources' own words (at most 5). Only sources this card may read are compared. AN EMPTY LIST DOES NOT MEAN THE SOURCES AGREE: the check reads numbers with units, intervals, rates, counts and plain must / must-not sentences in English. It does not catch contradictions in prose without such a value, values written as words, values spread over several sentences, tables whose header carries the meaning, or other languages; and when the model itself reported the conflict the list may be empty."
+          items:
+            $ref: "#/components/schemas/KSourceConflict"
+        conflict_check_partial:
+          type: "boolean"
+          description: "True when the value check reached one of its size limits and did not read all of the material."
+        outcome:
+          $ref: "#/components/schemas/KAnswerOutcome"
         answer:
           type:
             - "string"
             - "null"
         reason:
-          type:
-            - "string"
-            - "null"
+          $ref: "#/components/schemas/KAnswerReason"
         confidence:
-          type:
-            - "string"
-            - "null"
-          enum:
-            - "high"
-            - "medium"
-            - null
+          $ref: "#/components/schemas/KAnswerConfidence"
         contains_unverified_sources:
           type: "boolean"
         citations:
@@ -6009,6 +6258,264 @@ components:
           items:
             $ref: "#/components/schemas/KCitation"
         can_ask_expert:
+          type: "boolean"
+    KFeedbackVerdict:
+      type: "string"
+      enum:
+        - "helpful"
+        - "unhelpful"
+        - "wrong"
+    KAnswerOutcome:
+      type: "string"
+      enum:
+        - "answered"
+        - "dont_know"
+        - "search_only"
+    KAnswerReason:
+      type:
+        - "string"
+        - "null"
+      enum:
+        - "no_relevant_sources"
+        - "not_grounded"
+        - "sources_conflict"
+        - "low_confidence"
+        - "budget_exhausted"
+        - "ai_disabled"
+        - "ai_unavailable"
+        - "grace"
+        - null
+      description: "Why there is no written answer; null when there is one."
+    KAnswerConfidence:
+      type:
+        - "string"
+        - "null"
+      enum:
+        - "high"
+        - "medium"
+        - null
+    KConflictMeasure:
+      type: "string"
+      description: "What kind of value differs. 'requirement' = one source says must, the other must not."
+      enum:
+        - "time"
+        - "pressure"
+        - "torque"
+        - "length"
+        - "mass"
+        - "volume"
+        - "percent"
+        - "rotation"
+        - "frequency"
+        - "power"
+        - "voltage"
+        - "current"
+        - "ppm"
+        - "concentration"
+        - "temperature"
+        - "interval"
+        - "rate"
+        - "count"
+        - "requirement"
+    KConflictSide:
+      type: "object"
+      additionalProperties: false
+      description: "One of the two statements that disagree. kind and id are the same as in a citation, so a client can link to the source."
+      required:
+        - "kind"
+        - "id"
+        - "title"
+        - "value"
+      properties:
+        kind:
+          type: "string"
+          enum:
+            - "item"
+            - "source"
+        id:
+          type: "string"
+          format: "uuid"
+        title:
+          type: "string"
+        value:
+          type: "string"
+          description: "The words as written in the source, e.g. '3.2 bar', 'every 30 minutes'."
+    KSourceConflict:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "measure"
+        - "a"
+        - "b"
+      properties:
+        measure:
+          $ref: "#/components/schemas/KConflictMeasure"
+        a:
+          $ref: "#/components/schemas/KConflictSide"
+        b:
+          $ref: "#/components/schemas/KConflictSide"
+    KItemConflict:
+      type: "object"
+      additionalProperties: false
+      description: "A verified item this item disagrees with. When the other item is one this card may not read, there is ONE entry with restricted = true and nothing else: not the measure, not either value, not how many such items there are."
+      required:
+        - "restricted"
+        - "measure"
+        - "this"
+        - "other"
+        - "detected_at"
+      properties:
+        restricted:
+          type: "boolean"
+        measure:
+          oneOf:
+            - $ref: "#/components/schemas/KConflictMeasure"
+            - type: "null"
+        this:
+          oneOf:
+            - $ref: "#/components/schemas/KConflictSide"
+            - type: "null"
+        other:
+          oneOf:
+            - $ref: "#/components/schemas/KConflictSide"
+            - type: "null"
+        detected_at:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+    KQualityWeek:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "week_start"
+        - "questions"
+        - "answered"
+        - "search_only"
+        - "dont_know"
+        - "dont_know_no_relevant_sources"
+        - "dont_know_not_grounded"
+        - "dont_know_low_confidence"
+        - "dont_know_sources_conflict"
+        - "conflicts_found_by_value_check"
+        - "conflicts_found_by_ai_model"
+        - "citations_removed"
+        - "answers_naming_an_unknown_source"
+        - "answers_containing_unverified_sources"
+        - "feedback_helpful"
+        - "feedback_unhelpful"
+        - "feedback_wrong"
+      properties:
+        week_start:
+          type: "string"
+          format: "date"
+        questions:
+          type: "integer"
+        answered:
+          type: "integer"
+        search_only:
+          type: "integer"
+        dont_know:
+          type: "integer"
+        dont_know_no_relevant_sources:
+          type: "integer"
+        dont_know_not_grounded:
+          type: "integer"
+        dont_know_low_confidence:
+          type: "integer"
+        dont_know_sources_conflict:
+          type: "integer"
+        conflicts_found_by_value_check:
+          type: "integer"
+        conflicts_found_by_ai_model:
+          type: "integer"
+        citations_removed:
+          type: "integer"
+        answers_naming_an_unknown_source:
+          type: "integer"
+        answers_containing_unverified_sources:
+          type: "integer"
+        feedback_helpful:
+          type: "integer"
+        feedback_unhelpful:
+          type: "integer"
+        feedback_wrong:
+          type: "integer"
+    KQualitySummary:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "weeks"
+        - "kept_for_days"
+        - "waiting_for_review"
+      properties:
+        weeks:
+          type: "array"
+          items:
+            $ref: "#/components/schemas/KQualityWeek"
+        kept_for_days:
+          type: "integer"
+          description: "The company's answer-log retention: older answers and their feedback are deleted and no longer counted."
+        waiting_for_review:
+          type: "object"
+          additionalProperties: false
+          required:
+            - "item_conflicts"
+            - "stale_items"
+            - "answers_marked_wrong"
+          properties:
+            item_conflicts:
+              type: "integer"
+            stale_items:
+              type: "integer"
+            answers_marked_wrong:
+              type: "integer"
+    KAnswerFeedback:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "id"
+        - "answer_id"
+        - "verdict"
+        - "comment"
+        - "question_shared"
+        - "question"
+        - "created_at"
+        - "outcome"
+        - "reason"
+        - "confidence"
+        - "contains_unverified_sources"
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+        answer_id:
+          type: "string"
+          format: "uuid"
+        verdict:
+          $ref: "#/components/schemas/KFeedbackVerdict"
+        comment:
+          type:
+            - "string"
+            - "null"
+        question_shared:
+          type: "boolean"
+          description: "Whether the reader chose to let the people who look after quality see the question."
+        question:
+          type:
+            - "string"
+            - "null"
+          description: "The question the answer was for, with personal details blanked out. Null unless the reader shared it."
+        created_at:
+          type: "string"
+          format: "date-time"
+        outcome:
+          $ref: "#/components/schemas/KAnswerOutcome"
+        reason:
+          $ref: "#/components/schemas/KAnswerReason"
+        confidence:
+          $ref: "#/components/schemas/KAnswerConfidence"
+        contains_unverified_sources:
           type: "boolean"
     KItemSummary:
       type: "object"
@@ -6088,7 +6595,13 @@ components:
         - "versions"
         - "provenance"
         - "topics"
+        - "conflicts"
       properties:
+        conflicts:
+          type: "array"
+          description: "Verified items that state a different value for the same thing (found by the value check among items sharing a topic). AN EMPTY LIST DOES NOT MEAN NOTHING DISAGREES: the check reads numbers with units, intervals, rates, counts and plain must / must-not sentences in English, compares only items linked to a common topic, and does not catch contradictions in prose."
+          items:
+            $ref: "#/components/schemas/KItemConflict"
         id:
           type: "string"
           format: "uuid"

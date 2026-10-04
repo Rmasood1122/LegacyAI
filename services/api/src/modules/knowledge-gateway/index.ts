@@ -9,6 +9,7 @@ import type { Config, Database, Notifier, RouteDef } from '../platform/index.ts'
 import { AiServiceClient, loadInternalContract } from './internal/client.ts';
 import { adminRoutes, knowledgePolicySettings } from './internal/routes-admin.ts';
 import { knowledgeRoutes } from './internal/routes-knowledge.ts';
+import { qualityRoutes } from './internal/routes-quality.ts';
 import { workflowRoutes } from './internal/routes-workflow.ts';
 
 export { TOKEN_LIFETIME_SECONDS } from './internal/client.ts';
@@ -34,5 +35,5 @@ export function createKnowledgeGateway(deps: KnowledgeGatewayDeps): KnowledgeGat
   // The policy decision point needs two of this module's settings; it is given a way to read them.
   deps.authorizer.useKnowledgeSettings(knowledgePolicySettings);
   const g = { db: deps.db, authorizer: deps.authorizer, ai, notifier: deps.notifier };
-  return { routes: [...knowledgeRoutes(g), ...workflowRoutes(g), ...adminRoutes(g)] };
+  return { routes: [...knowledgeRoutes(g), ...workflowRoutes(g), ...adminRoutes(g), ...qualityRoutes(g)] };
 }

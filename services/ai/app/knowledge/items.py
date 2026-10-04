@@ -19,6 +19,7 @@ from pgvector import HalfVector
 
 from app.ai_gateway import Caller, DataBlock, Embedder, Gateway, ItemExtractOutput
 from app.capture import consent_family, redact, topic_condition
+from app.knowledge import item_conflicts
 from app.platform import Database, ServiceContext, one, write_audit
 
 BODY_MAX = 2000
@@ -108,6 +109,9 @@ def _move(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str, status: str, v
                 WHERE tenant_id = %s AND id = %s""", (status, verifier_card, tenant_id, tenant_id, item_id))
     else:
         cur.execute("UPDATE knowledge_items SET status = %s WHERE tenant_id = %s AND id = %s", (status, tenant_id, item_id))
+        # The ONE place an item leaves the verified state: whatever the reason, it is no longer a verified statement,
+        # so its conflicts with other items end here (feature 23). Callers do not have to remember it.
+        item_conflicts.clear(cur, tenant_id, item_id)
 
 
 def _search_copy(cur: psycopg.Cursor[Any], tenant_id: str, item: dict[str, Any], status: str, embedder: Embedder) -> None:
@@ -214,6 +218,8 @@ def verify(db: Database, ctx: ServiceContext, item_id: str, embedder: Embedder) 
             raise ItemRefused("self_review", 403) from exc
         _search_copy(cur, ctx.tenant_id, item, status, embedder)
         _resolve_tasks(cur, ctx.tenant_id, item_id, ctx.card_id, status)
+        # after the item's own tasks are closed: a conflict with another verified item opens a new one (feature 23)
+        item_conflicts.sync(cur, ctx.tenant_id, item_id)
         _audit(cur, ctx, item_id, f"knowledge:{status}", f"ITEM_{status.upper()}", int(item["version_no"]))
         return status
 
@@ -355,6 +361,8 @@ def set_topics(db: Database, ctx: ServiceContext, item_id: str, topic_ids: list[
             cur.execute("""INSERT INTO knowledge_item_topics (tenant_id, item_id, topic_id, link_source) VALUES (%s, %s, %s, 'reviewer')
                            ON CONFLICT DO NOTHING""", (ctx.tenant_id, item_id, topic_id))
         _audit_topic_changes(cur, ctx, item_id, wanted=len(wanted), removed=to_remove, added=sorted(to_add))
+        if (to_add or to_remove) and item["status"] in ("verified", "corrected"):
+            item_conflicts.sync(cur, ctx.tenant_id, item_id)      # topics decide which items are compared with each other
         return item_topics(cur, ctx.tenant_id, item_id, where, params)
 
 
@@ -452,6 +460,9 @@ def erase_withdrawn_items(cur: psycopg.Cursor[Any], tenant_id: str, consent_id: 
         for v in cur.fetchall():
             cur.execute("SELECT erase_version(%s)", (v["id"],))
         cur.execute("UPDATE knowledge_items SET title = '' WHERE tenant_id = %s AND id = %s", (tenant_id, item_id))
+    # The withdrawal itself is recorded by the database (migration 15), not through _move: the words a stored conflict
+    # quotes from the erased text must go here, and the partner item loses its mark and its task.
+    item_conflicts.clear_many(cur, tenant_id, erased)
     sla = int(_settings(cur, tenant_id)["review_sla_days"])
     for item_id in mixed_item_ids:
         item = _item(cur, tenant_id, item_id)
@@ -476,6 +487,7 @@ def withdraw_items(cur: psycopg.Cursor[Any], tenant_id: str, only: list[str], mi
         for v in cur.fetchall():
             cur.execute("SELECT erase_version(%s)", (v["id"],))
         cur.execute("UPDATE knowledge_items SET title = '' WHERE tenant_id = %s AND id = %s", (tenant_id, item_id))
+        item_conflicts.clear(cur, tenant_id, item_id)        # the stored conflict quotes words of the erased text
     sla = int(_settings(cur, tenant_id)["review_sla_days"])
     for item_id in mixed:
         item = _item(cur, tenant_id, item_id)

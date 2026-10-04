@@ -18,12 +18,16 @@ const KIND_TEXT: Readonly<Record<string, string>> = {
   quiz_item_approval: 'Approve a test question',
   grading_override: 'Check a test grade',
   stale_item: 'Re-check an old item',
+  item_conflict: 'Two verified items disagree',
+  answer_feedback: 'A reader marked an answer wrong',
 };
 
 /** The screen on which the thing to review can be opened, if this application has one for it. */
 function subjectScreen(task: KTask): ScreenTarget | null {
   if (task.subject_type === 'knowledge_item') return { screen: 'knowledgeItem', id: task.subject_id };
   if (task.subject_type === 'source') return { screen: 'document', id: task.subject_id };
+  // A reader marked an answer wrong: what the reader said is on the quality page (for those who may open it).
+  if (task.subject_type === 'answer') return { screen: 'quality' };
   return null;
 }
 

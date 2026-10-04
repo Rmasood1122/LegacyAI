@@ -52,6 +52,21 @@ export function KnowledgeItemScreen() {
               {i.ai_extracted && <Badge tone="neutral">Drafted by AI</Badge>}
               {i.self_verified && <Badge tone="warning">Verified by its own author</Badge>}
             </div>
+            {i.conflicts.length > 0 && (
+              <Banner tone="warning" title="This item disagrees with another verified item">
+                <ul>
+                  {i.conflicts.map((c) => (c.restricted || c.this === null || c.other === null
+                    ? <li key="restricted">It disagrees with an item you may not read. What that item says is not shown.</li>
+                    : (
+                      <li key={`${c.other.id}:${c.measure ?? ''}:${c.detected_at ?? ''}`}>
+                        This item says {c.this.value}.{' '}
+                        <ScreenLink screen="knowledgeItem" id={c.other.id}>{c.other.title || 'Another item'}</ScreenLink> says {c.other.value}.
+                      </li>
+                    )))}
+                </ul>
+                <p>Answers that rely on either statement are refused until one of the two is corrected or reopened.</p>
+              </Banner>
+            )}
             <p className="prose">{i.body}</p>
             <dl className="facts">
               <dt>Who may read it</dt><dd>{sensitivityLabel(i.sensitivity)}</dd>

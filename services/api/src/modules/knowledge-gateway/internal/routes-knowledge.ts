@@ -67,6 +67,9 @@ async function addExpertNames(tx: Tx, tenantId: string, citations: Array<Record<
   for (const c of citations) if (c.kind === 'item' && names.has(c.id as string)) c.expert_display_name = names.get(c.id as string);
 }
 
+// One side of a conflict, in the shape of a citation (KConflictSide).
+const CONFLICT_SIDE = ['kind', 'id', 'title', 'value'] as const;
+
 export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
   const { authorizer, ai } = deps;
   const status = (id: string, s: string): Record<string, unknown> => ({ id, status: s });
@@ -206,6 +209,13 @@ export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
               body: {
                 outcome: answer.outcome, answer: answer.answer ?? null, reason: answer.reason ?? null, confidence: answer.confidence ?? null,
                 contains_unverified_sources: answer.contains_unverified_sources === true, citations, can_ask_expert: answer.can_ask_expert === true,
+                // feature 23/22: the record to give feedback on, who found a conflict, and what disagrees (titles and values
+                // of the passages that were approved for this card - nothing it could not read anyway)
+                answer_id: typeof answer.answer_id === 'string' ? answer.answer_id : null,
+                conflict_found_by: answer.conflict_found_by === 'value_check' || answer.conflict_found_by === 'ai_model' ? answer.conflict_found_by : null,
+                conflicts: (Array.isArray(answer.conflicts) ? answer.conflicts : []).slice(0, 5)
+                  .map((c: any) => ({ measure: c.measure, a: pick(c.a ?? {}, CONFLICT_SIDE), b: pick(c.b ?? {}, CONFLICT_SIDE) })),
+                conflict_check_partial: answer.conflict_check_partial === true,
               },
             };
           },
@@ -231,6 +241,11 @@ export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
           versions: (r.versions ?? []).map((v: any) => pick(v, ['version_no', 'change_kind', 'author_person_id', 'created_at', 'erased_at', 'current'])),
           provenance: (r.provenance ?? []).map((p: any) => pick(p, ['source_id', 'title', 'page_from', 'page_to'])),
           topics: (r.topics ?? []).map((t: any) => pick(t, ['topic_id', 'name', 'link_source'])),
+          // a conflict with an item this card may not read arrives as one entry with restricted = true and nothing else
+          conflicts: (r.conflicts ?? []).map((c: any) => ({
+            restricted: c.restricted === true, measure: c.measure ?? null, this: c.this ? pick(c.this, CONFLICT_SIDE) : null,
+            other: c.other ? pick(c.other, CONFLICT_SIDE) : null, detected_at: c.detected_at ?? null,
+          })),
         }),
       })),
     gatewayRoute(deps, 'createKnowledgeItem',
