@@ -5,8 +5,8 @@ Status on 2026-10-06:
 | Part | What | State |
 |---|---|---|
 | A | API keys for machines (read and ask only) | Built; CI green on 2026-10-04 (run 37225661324), database and browser tests included. |
-| B | Outgoing webhooks, one example receiver | Built (2026-10-06). See Part B. |
-| C | E-mail delivery of notices | Built against a stand-in sender; **no real e-mail service is connected** (the founder chooses one). See Part C. |
+| B | Outgoing webhooks, one example receiver | Built; CI green on 2026-10-20 (run 39383861491), database and browser tests included. See Part B. |
+| C | E-mail delivery of notices | Built against a stand-in sender; CI green in the same run. **No real e-mail service is connected** (the founder chooses one). See Part C. |
 
 Nothing here calls an outside service in tests. No new library was added: webhooks use `node:https`, `node:dns` and
 `node:net`; the signature format is the open Standard Webhooks specification (checked 2026-10-06), implemented with
@@ -362,7 +362,7 @@ just being issued, and drop the e-mail). A request transaction open longer than 
   the e-mail texts and recipients, which addresses can be handed to a sender, the configuration; and the real https
   sender against a local TLS server (2xx, 5xx, redirect not followed, timeout, untrusted certificate, a name that
   resolves to 127.0.0.1 refused before any connection). 7 new screen tests.
-- **Written but run only by GitHub:** the database tests (the trigger writes the right events and none for a
+- **Run by GitHub (CI run 39383861491, green):** the database tests (the trigger writes the right events and none for a
   rolled-back change; owner-only access; the secret shown once, stored encrypted, absent from audit, retry records
   and log; address refusals; at most 10 endpoints; removal is final and cancels waiting messages; delivery, retries
   with the same id and body, giving up after 8, pausing and un-pausing, a new secret signing the next attempt;

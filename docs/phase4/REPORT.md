@@ -317,8 +317,83 @@ data is stored. **Nothing is deployed.**
 
 $0. Total real-AI spend of the project stays $0.642.
 
+## Step 6 — feature 28 (open API: API keys, webhooks, one example receiver) and e-mail of notices (features 11, 33)
+
+> Written 2026-10-20. Evidence: part A - CI run 37225661324 on commit `d1e8f86`, 10 of 10 jobs green; parts B and
+> C - CI run 39383861491 on commit `4ce834b`, 10 of 10 jobs green. Design: `docs/phase4/06-open-api-webhooks-email.md`.
+> Decisions D30 (keys) and D31 (webhooks, e-mail).
+
+### In plain language
+
+Other systems can now work with LegacyAI. **API keys** let a machine read knowledge and ask questions without a
+person signing in. **Webhooks** tell another system when knowledge is verified, changes or is withdrawn: a signed
+message naming the item and its level, never its text. **E-mail**: every notice the product already raises
+(card locked, renewal reminder, retirement nudge, ...) can also go out by e-mail, in fixed wording without codes,
+numbers or links. **Nothing is sent by default** (webhooks and e-mail are off until the configuration is changed),
+**no real e-mail service is connected**, and **nothing is deployed**.
+
+### What was measured
+
+| Claim | Evidence | Limits |
+|---|---|---|
+| A key reads and asks only, never more than its maker, and ends with its maker's sign-in | Database tests (part A): the table walk of every operation with a key carrying everything a key may carry; each change of the maker's card ends its keys; browser test: a cookie-less connection uses the key, it stops when revoked | Run against the test server only; no real outside system used a key |
+| An event exists exactly when the change was committed | Database tests: verify, relabel, stale each write the right event; a change that is rolled back writes none; the event holds no title or text | Tested through direct database changes and the walks; the AI service's own paths write through the same trigger |
+| What is sent can be checked by a receiver | Unit tests: our signature equals the example published with the Standard Webhooks specification; the example receiver accepts what we send and refuses a changed body, another secret, a moved timestamp and a message older than 5 minutes | — |
+| Messages go only to public https addresses | Unit tests: 21 address forms refused or accepted at registration (IP literals in odd notations, internal names, other ports), 30 address checks (private, loopback, link-local, IPv4-mapped, NAT64, 6to4, ...); the real sender against a local TLS server refuses a name resolving to 127.0.0.1 before connecting, follows no redirect, gives up on time (the name lookup included), closes the connection at the status line, refuses an untrusted certificate | Real DNS and the production network were not used |
+| Delivery, retries and pausing behave as designed | Database tests with a recording sender: delivered once with the right signature; only what an endpoint subscribed to, within its level, not from before it existed; retried with the same id and body, given up after 8; paused after 15 failures and a day, Owners told, cleared by switching on; a narrower choice cancels waiting messages; a new secret signs the next attempt; nothing sent with delivery off | A stand-in sender; no real receiver |
+| The signing secret is shown once and kept encrypted | Database tests: absent from replayed answers, the stored row, the audit log, retry records and the log | — |
+| E-mail goes to the right people, holds no data, keeps no addresses | Unit tests: every text checked for digits, links, `@` and placeholders; recipients per notice type. Database tests: a card issued reaches its holder; company notices (API key made, renewal reminder, retirement nudge) reach the Owners; no address in the queue; people without an address or who left are not written to; retries, and no retry of a refused address; nothing queued with e-mail off | The stand-in sender only; **no real e-mail service** |
+| Only the Owner manages endpoints | Database tests: an Admin is refused every webhook operation; another company's endpoint is not found; the route walk: a Successor gets nothing from the 8 operations | — |
+| Totals | 37 of 37 browser tests; 1131 API tests (1 skipped; statements 91.13 %, branches 85.3 %); migrations apply, roll back, re-apply with both engines; 177 operations | Chromium only |
+
+### What it cannot do
+
+- **Send real e-mail.** Needs the founder's choice of service, a sending domain with SPF, DKIM and DMARC, and one
+  new sender class. Until then `MAIL_SENDER` can only be `none` or the test stand-in.
+- **Send anything on its own.** Nothing schedules `npm run outbound:deliver`; webhooks and e-mail go out only when
+  it (or housekeeping) is run. In production it should run every minute (docs/runbooks/outbound-delivery.md).
+- Webhooks report three knowledge events only. Events that happen while an endpoint is off or paused are not sent
+  later. Delivery is at least once (a receiver must ignore a repeated `webhook-id`).
+- A notice raised in a request that is later rolled back is still e-mailed if what it names exists (as it was always
+  still logged). A request open longer than 30 seconds could lose its e-mail.
+- The "one example connector" is a documented example receiver, not a connector to a named product.
+- Keys cannot add documents; no OAuth, no developer portal; keys are not in the company export.
+
+### What reviews and CI found before this was green
+
+- **Part A** (before the step-5 report): three design reviews and three security reads; a key changed from "a card
+  with a mark" to its own kind of caller; wrong secrets no longer suspend a key.
+- **Parts B and C: one security read, one correctness read.** Security: a receiver that answered and then sent its
+  body very slowly could hold the delivery job for every company (now: the connection is closed at the status line);
+  the name lookup was outside the time limit; a lower level did not cancel waiting messages; test messages were
+  unlimited; any port was allowed (now 443 only). Correctness: an e-mail could be lost when a delivery run read a
+  notice before the request that raised it had committed (now: notices wait 30 seconds); new messages used the
+  database's clock and the run the server's; a test expected the wrong messages. All fixed.
+- **The tests found one real defect while writing:** node's address block list counted every IPv4 address as
+  private (a range for IPv4-mapped IPv6 addresses covered them), so no webhook would ever have been sent. Fixed with
+  separate lists.
+- **CI:** five pinned lists and counts needed the new operations, tables and functions; one test changed a label in
+  a way the database refuses. No product fault found by CI in this step.
+
+### Open — for the founder to confirm (D30, D31)
+
+1. Owner only for keys and webhooks, or Admins too?
+2. Which outside systems and which events matter first?
+3. The limits: keys (366 days, 50 keys, 120 a minute, 30/600 questions an hour); webhooks (10 endpoints, 8 attempts
+   over about two days, pause after 15 failures and a day).
+4. Whether keys may add documents (now no) and ask questions (now yes, limited per key).
+5. That any change to the maker's card ends that person's keys.
+6. Which e-mail service and sending domain; whether people may opt out of some notices; the recipient table and the
+   wording of each e-mail.
+7. How often the delivery job should run once scheduled (suggested: every minute).
+
+### Cost
+
+$0. Total real-AI spend of the project stays $0.642.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is not
-built). Batch B: billing is built against a stand-in (above); 28 (open API, webhooks, connectors), 16 (SSO and SCIM),
-21 (bring-your-own-key) and e-mail delivery are not built. Batch C: nothing.
+built). Batch B: billing is built against a stand-in (step 5); 28 (API keys, webhooks, an example receiver) and the
+e-mail of notices are built, e-mail against a stand-in (step 6); 16 (SSO and SCIM) and 21 (bring-your-own-key) are
+not built. Batch C: nothing.
