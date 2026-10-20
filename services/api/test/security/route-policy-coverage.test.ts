@@ -249,6 +249,7 @@ describe('a read of a whole collection must say how it is narrowed to what the c
       verifyAuditChain: 'unfiltered', listRedactionAllowlist: 'unfiltered', getKnowledgeSettings: 'unfiltered', getAiBudget: 'unfiltered',
       getPlatformStorage: 'unfiltered', getQualitySummary: 'unfiltered', listAnswerFeedback: 'unfiltered',
       getActivity: 'unfiltered', listInvoices: 'unfiltered', listApiKeys: 'unfiltered', getApiKeyOptions: 'unfiltered',
+      listWebhookEndpoints: 'unfiltered', getWebhookOptions: 'unfiltered', listWebhookDeliveries: 'unfiltered',
     });
     for (const r of t.app.http.registeredRoutes()) {
       if (r.listFilter !== null && typeof r.listFilter !== 'string') expect(r.listFilter.unfiltered.length, r.operationId).toBeGreaterThan(20);
@@ -297,7 +298,7 @@ describe('a read of a whole collection must say how it is narrowed to what the c
 });
 
 describe('real app: a card with almost no permissions cannot get a 2xx from anything it is not granted', () => {
-  it('walks all 162 protected operations as a Successor', async () => {
+  it('walks all 170 protected operations as a Successor', async () => {
     const su = await superuser();
     const granted = new Set((await su.query(`SELECT permission_key FROM role_permissions WHERE role_key = 'successor'`)).rows.map((r) => r.permission_key as string));
     await su.end();
@@ -333,6 +334,9 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
       updateSubscription: { auto_renew: false }, setTenantSeatLimit: { seat_limit: 5 },
       // Phase 4, API keys
       createApiKey: { name: 'x', scope: ['topic:read'], max_sensitivity: 0, expires_in_days: 1 },
+      // Phase 4, webhooks
+      createWebhookEndpoint: { name: 'x', url: 'https://hooks.example.com/x', topics: ['knowledge.item_released'], max_sensitivity: 0 },
+      updateWebhookEndpoint: { enabled: false },
       recordManualPayment: { invoice_id: randomUUID(), amount: { amount_minor: 1500, currency: 'USD' }, reference: 'TRANSFER-000001' },
       createScenario: scenarioBody, updateScenario: scenarioBody, proposeScenarioRubric: { item_ids: [randomUUID()] }, overrideScenarioAnswer: { score: 1 },
     };
@@ -366,7 +370,8 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
     // it may not write, read, approve or retire scenarios, ask for proposed points, read a step in order to grade it, or override a grade.
     // Phase 4 (billing): nothing of it - the subscription and invoices are the Owner's, the rest the platform operator's.
     // Phase 4 (API keys): nothing of it - making, listing and revoking keys, and asking what a key could carry, is the Owner's.
-    expect(denied).toBe(28 + 57 + 2 + 6 + 2 + 9 + 8 + 4);
+    // Phase 4 (webhooks): nothing of it - the eight webhook operations are the Owner's.
+    expect(denied).toBe(28 + 57 + 2 + 6 + 2 + 9 + 8 + 4 + 8);
   });
 });
 
