@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { createBilling, type BillingModule, type BillingPort, type PaymentProvider } from './modules/billing/index.ts';
 import { createIdentityAccess, type AnomalySettings, type AuthLimits, type IdentityAccess } from './modules/identity-access/index.ts';
 import { createKnowledgeGateway } from './modules/knowledge-gateway/index.ts';
+import { createMail, type MailModule, type MailSender } from './modules/mail/index.ts';
+import { createWebhooks, type WebhookTransport, type WebhooksModule } from './modules/webhooks/index.ts';
 import {
   createHttpServer, createLogger, Database, ExportRegistry, LogNotifier, platformRoutes, PostgresIdempotencyStore,
   PostgresRateLimiter, StaticSite, type Config, type HttpServer, type Logger, type Notifier, type RateLimiter,
@@ -24,6 +26,10 @@ export interface AppOverrides {
   authLimits?: AuthLimits;
   anomalyDefaults?: AnomalySettings;
   generalLimit?: { limit: number; windowSeconds: number };
+  /** A stand-in webhook sender for tests. Default: what WEBHOOK_DELIVERY names ('none' sends nothing). */
+  webhookTransport?: WebhookTransport;
+  /** A stand-in e-mail sender for tests. Default: what MAIL_SENDER names ('none' queues and sends nothing). */
+  mailSender?: MailSender;
 }
 
 export interface App {
@@ -32,6 +38,8 @@ export interface App {
   log: Logger;
   identity: IdentityAccess;
   billing: BillingModule;
+  webhooks: WebhooksModule;
+  mail: MailModule;
   exports: ExportRegistry;
   close(): Promise<void>;
 }
@@ -55,7 +63,9 @@ export async function createApp(config: Config, overrides: AppOverrides = {}): P
 
   const clock = overrides.clock ?? systemClock;
   const rateLimiter = overrides.rateLimiter ?? new PostgresRateLimiter(db, config.hmacIndexKey.reveal());
-  const notifier = overrides.notifier ?? new LogNotifier(log);
+  // Notices are logged as before; when an e-mail sender is configured they are also queued for e-mail (part C).
+  const mail = createMail({ config, db, log, notifier: overrides.notifier ?? new LogNotifier(log), sender: overrides.mailSender });
+  const notifier = mail.notifier;
   const exports = new ExportRegistry();
   exports.register({
     table: 'audit_log',
@@ -82,6 +92,10 @@ export async function createApp(config: Config, overrides: AppOverrides = {}): P
   // the retirement radar (identity) shows what is held from a person; the knowledge module answers that, by its own rules
   identity.usePersonHoldings(knowledge.personHoldings);
   http.defineRoutes(knowledge.routes);
+  // who receives a notice by e-mail is the identity module's answer; the mail module only asks
+  mail.useDirectory(identity.recipients);
+  const webhooks = createWebhooks({ config, db, notifier, transport: overrides.webhookTransport });
+  http.defineRoutes(webhooks.routes);
 
   // Every operation in openapi.yaml must have a route, and vice versa.
   const registered = new Set(http.registeredRoutes().map((r) => r.operationId));
@@ -93,9 +107,10 @@ export async function createApp(config: Config, overrides: AppOverrides = {}): P
 
   await http.app.ready();
   return {
-    http, db, log, identity, billing, exports,
+    http, db, log, identity, billing, webhooks, mail, exports,
     close: async () => {
       await http.app.close();
+      await mail.flush();
       await db.close();
     },
   };

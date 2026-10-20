@@ -1437,6 +1437,75 @@ export interface ManualPaymentRequest {
   discard_remaining_days?: boolean;
 }
 
+export type WebhookTopic = "knowledge.item_released" | "knowledge.item_changed" | "knowledge.item_withdrawn";
+
+export interface WebhookEndpointFields {
+  id: string;
+  name: string;
+  url: string;
+  topics: WebhookTopic[];
+  max_sensitivity: SensitivityLevel;
+  status: "active" | "disabled" | "paused" | "removed";
+  paused_reason: "failing" | null;
+  consecutive_failures: number;
+  secret_hint: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  created_by_card_id: string;
+  created_at: string;
+  updated_at: string;
+  removed_at: string | null;
+}
+
+export type WebhookEndpoint = WebhookEndpointFields;
+
+export type WebhookEndpointWithSecret = WebhookEndpointFields & {
+  signing_secret?: string;
+  secret_already_shown: boolean;
+};
+
+export interface NewWebhookEndpointRequest {
+  name: string;
+  url: string;
+  topics: WebhookTopic[];
+  max_sensitivity: SensitivityLevel;
+}
+
+export interface WebhookEndpointChange {
+  name?: string;
+  topics?: WebhookTopic[];
+  max_sensitivity?: SensitivityLevel;
+  enabled?: boolean;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  event_id: string;
+  topic: string;
+  status: "pending" | "sending" | "delivered" | "failed" | "cancelled";
+  attempts: number;
+  next_attempt_at: string | null;
+  last_attempt_at: string | null;
+  last_status_code: number | null;
+  last_error: "address_refused" | "dns" | "connect" | "tls" | "timeout" | "http_status" | "secret_unreadable" | null;
+  delivered_at: string | null;
+  created_at: string;
+}
+
+export interface WebhookOptions {
+  topics: {
+    topic: WebhookTopic;
+    description: string;
+  }[];
+  delivery_enabled: boolean;
+  limits: {
+    max_endpoints: number;
+    max_attempts: number;
+    timeout_seconds: number;
+    pause_after_failures: number;
+  };
+}
+
 export const operations = {
   getHealth: { method: "GET", path: "/v1/health", status: 200, idempotent: false, public: true, permission: null, contentTypes: [] },
   getReady: { method: "GET", path: "/v1/ready", status: 200, idempotent: false, public: true, permission: null, contentTypes: [] },
@@ -1607,6 +1676,14 @@ export const operations = {
   getTenantBilling: { method: "GET", path: "/v1/tenants/{tenant_id}/billing", status: 200, idempotent: false, public: false, permission: "billing:operate", contentTypes: [] },
   setTenantSeatLimit: { method: "PATCH", path: "/v1/tenants/{tenant_id}/billing", status: 200, idempotent: true, public: false, permission: "billing:operate", contentTypes: ["application/json"] },
   recordManualPayment: { method: "POST", path: "/v1/tenants/{tenant_id}/billing/manual-payments", status: 200, idempotent: true, public: false, permission: "billing:operate", contentTypes: ["application/json"] },
+  listWebhookEndpoints: { method: "GET", path: "/v1/webhooks", status: 200, idempotent: false, public: false, permission: "webhook:read", contentTypes: [] },
+  createWebhookEndpoint: { method: "POST", path: "/v1/webhooks", status: 201, idempotent: true, public: false, permission: "webhook:manage", contentTypes: ["application/json"] },
+  getWebhookOptions: { method: "GET", path: "/v1/webhooks/options", status: 200, idempotent: false, public: false, permission: "webhook:read", contentTypes: [] },
+  updateWebhookEndpoint: { method: "PATCH", path: "/v1/webhooks/{webhook_id}", status: 200, idempotent: true, public: false, permission: "webhook:manage", contentTypes: ["application/json"] },
+  removeWebhookEndpoint: { method: "POST", path: "/v1/webhooks/{webhook_id}/remove", status: 200, idempotent: true, public: false, permission: "webhook:manage", contentTypes: [] },
+  rotateWebhookSecret: { method: "POST", path: "/v1/webhooks/{webhook_id}/rotate-secret", status: 200, idempotent: true, public: false, permission: "webhook:manage", contentTypes: [] },
+  sendWebhookTest: { method: "POST", path: "/v1/webhooks/{webhook_id}/test", status: 202, idempotent: true, public: false, permission: "webhook:manage", contentTypes: [] },
+  listWebhookDeliveries: { method: "GET", path: "/v1/webhooks/{webhook_id}/deliveries", status: 200, idempotent: false, public: false, permission: "webhook:read", contentTypes: [] },
 } as const;
 
 export type OperationId = keyof typeof operations;
@@ -2869,5 +2946,59 @@ export interface OperationTypes {
     query: undefined;
     body: ManualPaymentRequest;
     response: Invoice;
+  };
+  listWebhookEndpoints: {
+    path: undefined;
+    query: { limit?: number; cursor?: string };
+    body: undefined;
+    response: {
+      items: WebhookEndpoint[];
+      next_cursor: string | null;
+    };
+  };
+  createWebhookEndpoint: {
+    path: undefined;
+    query: undefined;
+    body: NewWebhookEndpointRequest;
+    response: WebhookEndpointWithSecret;
+  };
+  getWebhookOptions: {
+    path: undefined;
+    query: undefined;
+    body: undefined;
+    response: WebhookOptions;
+  };
+  updateWebhookEndpoint: {
+    path: { webhook_id: string };
+    query: undefined;
+    body: WebhookEndpointChange;
+    response: WebhookEndpoint;
+  };
+  removeWebhookEndpoint: {
+    path: { webhook_id: string };
+    query: undefined;
+    body: undefined;
+    response: WebhookEndpoint;
+  };
+  rotateWebhookSecret: {
+    path: { webhook_id: string };
+    query: undefined;
+    body: undefined;
+    response: WebhookEndpointWithSecret;
+  };
+  sendWebhookTest: {
+    path: { webhook_id: string };
+    query: undefined;
+    body: undefined;
+    response: WebhookDelivery;
+  };
+  listWebhookDeliveries: {
+    path: { webhook_id: string };
+    query: { limit?: number; cursor?: string };
+    body: undefined;
+    response: {
+      items: WebhookDelivery[];
+      next_cursor: string | null;
+    };
   };
 }

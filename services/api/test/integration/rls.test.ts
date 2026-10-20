@@ -303,7 +303,7 @@ describe('least privilege on global and design-only tables', () => {
     ['rewrite card history', `UPDATE card_events SET event_type = 'issued'`],
     ['delete card history', 'DELETE FROM card_events'],
     ['write the audit chain head', `UPDATE audit_chain_heads SET last_seq = 0`],
-    ['read webhooks (design-only table)', 'SELECT * FROM webhook_endpoints'],
+    ['read analytics events (design-only table)', 'SELECT * FROM analytics_events'],   // webhook_endpoints is a real table since Phase 4 (docs/phase4/06)
     ['read SSO connections (design-only table)', 'SELECT * FROM sso_connections'],
     ['create a table', 'CREATE TABLE intruder (id int)'],
     ['disable row-level security', 'ALTER TABLE cards DISABLE ROW LEVEL SECURITY'],

@@ -55,6 +55,7 @@
     "platform:bootstrap": "node --env-file-if-exists=.env src/cli/bootstrap-platform.ts",
     "platform:recover-operator": "node --env-file-if-exists=.env src/cli/recover-operator.ts",
     "housekeeping": "node --env-file-if-exists=.env src/cli/housekeeping.ts",
+    "outbound:deliver": "node --env-file-if-exists=.env src/cli/deliver-outbound.ts",
     "cards:sweep-expired": "node --env-file-if-exists=.env src/cli/housekeeping.ts"
   }
 }

@@ -11,6 +11,7 @@ import { auditDetailsOf, Authorizer } from './internal/authz.ts';
 import { CardService } from './internal/cards.ts';
 import { companyTerm } from './internal/company-term.ts';
 import { SeedCipher } from './internal/factors.ts';
+import { recipientDirectory } from './internal/recipients.ts';
 import { sweepRetirementNudges } from './internal/leaving.ts';
 import { identityRoutes } from './internal/routes.ts';
 import { leavingRoutes, type PersonHoldingsLoader } from './internal/routes-leaving.ts';
@@ -79,6 +80,8 @@ export interface IdentityAccess {
   companyTerm: CompanyTermPort;
   /** Plugs in what the knowledge module holds from a person (job roles, counts), narrowed by the asking card's rights there. */
   usePersonHoldings(loader: PersonHoldingsLoader): void;
+  /** Who receives a notice by e-mail (the mail module's RecipientDirectory port; app.ts connects them). */
+  recipients: typeof recipientDirectory;
 }
 
 export function createIdentityAccess(deps: IdentityAccessDeps): IdentityAccess {
@@ -162,5 +165,6 @@ export function createIdentityAccess(deps: IdentityAccessDeps): IdentityAccess {
     usePersonHoldings: (loader) => {
       holdings = loader;
     },
+    recipients: recipientDirectory,
   };
 }

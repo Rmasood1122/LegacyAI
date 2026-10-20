@@ -4,9 +4,9 @@
 import {
   generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse,
 } from '@simplewebauthn/server';
-import { createCipheriv, createDecipheriv, generateKeyPairSync, randomBytes, verify as cryptoVerify, type KeyObject } from 'node:crypto';
+import { generateKeyPairSync, randomBytes, verify as cryptoVerify, type KeyObject } from 'node:crypto';
 import { generateSecret, generateURI, verify as totpVerify } from 'otplib';
-import type { Keyring } from '../../platform/index.ts';
+import type { SealingCipher } from '../../platform/index.ts';
 
 const MINT = Symbol('StrongFactorProof');
 
@@ -48,35 +48,9 @@ export interface WebAuthnSettings {
 
 // ------------------------------------------------------------- TOTP seed at rest
 
-/** AES-256-GCM. Output layout: 12-byte nonce | 16-byte tag | ciphertext. */
-export class SeedCipher {
-  readonly #keyring: Keyring;
-  constructor(keyring: Keyring) {
-    if (!keyring.keys.has(keyring.currentId)) throw new Error('credential encryption keyring has no current key');
-    this.#keyring = keyring;
-  }
-  encrypt(plaintext: string, aad: string): { ciphertext: Buffer; keyId: string } {
-    const key = (this.#keyring.keys.get(this.#keyring.currentId) as NonNullable<ReturnType<Keyring['keys']['get']>>).reveal();
-    const nonce = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', key, nonce);
-    cipher.setAAD(Buffer.from(aad, 'utf8'));
-    const body = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
-    return { ciphertext: Buffer.concat([nonce, cipher.getAuthTag(), body]), keyId: this.#keyring.currentId };
-  }
-  /** Returns null (never throws) if the key is unknown or the data was altered. */
-  decrypt(ciphertext: Buffer, keyId: string, aad: string): string | null {
-    const key = this.#keyring.keys.get(keyId);
-    if (!key || ciphertext.length < 29) return null;
-    try {
-      const decipher = createDecipheriv('aes-256-gcm', key.reveal(), ciphertext.subarray(0, 12));
-      decipher.setAAD(Buffer.from(aad, 'utf8'));
-      decipher.setAuthTag(ciphertext.subarray(12, 28));
-      return Buffer.concat([decipher.update(ciphertext.subarray(28)), decipher.final()]).toString('utf8');
-    } catch {
-      return null;
-    }
-  }
-}
+/** AES-256-GCM with the credential keyring. The class lives in the platform module (webhook secrets use it too). */
+export { SealingCipher as SeedCipher } from '../../platform/index.ts';
+type SeedCipher = SealingCipher;
 
 // ------------------------------------------------------------------------ passkeys
 

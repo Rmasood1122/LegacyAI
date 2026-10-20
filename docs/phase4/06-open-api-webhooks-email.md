@@ -1,14 +1,16 @@
 # Phase 4, Batch B step 2 — open API, webhooks, e-mail
 
-Status on 2026-10-05:
+Status on 2026-10-06:
 
 | Part | What | State |
 |---|---|---|
-| A | API keys for machines (read and ask only) | Built, reviewed and reworked once (a key is its own kind of caller; it ends with its maker's sign-in). Local checks pass. Database and browser tests are written but **have not run** (they run only in GitHub Actions). |
-| B | Outgoing webhooks, one example connector | **Not started.** |
-| C | E-mail delivery of notices | **Not started.** |
+| A | API keys for machines (read and ask only) | Built; CI green on 2026-10-04 (run 37225661324), database and browser tests included. |
+| B | Outgoing webhooks, one example receiver | Built (2026-10-06). See Part B. |
+| C | E-mail delivery of notices | Built against a stand-in sender; **no real e-mail service is connected** (the founder chooses one). See Part C. |
 
-Nothing here calls an outside service. No new library was added.
+Nothing here calls an outside service in tests. No new library was added: webhooks use `node:https`, `node:dns` and
+`node:net`; the signature format is the open Standard Webhooks specification (checked 2026-10-06), implemented with
+`node:crypto`.
 
 ## Part A — API keys
 
@@ -193,16 +195,175 @@ statement and put back, as in the other Phase 4 migrations), then restores the o
 - There is no way to "resume" a suspended or revoked key; a new one is made.
 - Keys are not OAuth: no per-user tokens, no consent screen, no developer portal.
 
-## Part B — webhooks (not started)
+## Part B — outgoing webhooks
 
-Nothing was built. Planned shape, for the next step: endpoints registered by the Owner; deliveries taken from the
-existing outbox; each delivery signed (HMAC-SHA256, timestamp, id); only `https` to public addresses, with the
-address checked again at connect time (so a name cannot be re-pointed at an internal address), no redirects, short
-time-outs, small bodies; retries with back-off; an endpoint that keeps failing is paused; one documented example
-receiver.
+### What it does
 
-## Part C — e-mail (not started)
+A company's Owner registers an `https` address (an "endpoint") on the "Webhooks" screen and chooses which events it
+receives. When knowledge in the company changes, LegacyAI sends a signed `POST` to that address. A typical
+receiver is an intranet search: it hears "item X was verified" and reads the item with an API key (part A).
 
-Nothing was built. Planned shape: a `MailSender` port with a fake sender for tests and `none` as the default, so
-that no message leaves until the founder chooses and configures a provider. Features 11 and 33 keep writing their
-notices as they do now.
+Events (the only three; the founder may want more - see "For the founder to confirm"):
+
+| Topic | When |
+|---|---|
+| `knowledge.item_released` | an item became verified or corrected (usable in answers) |
+| `knowledge.item_changed` | a released item stayed released but its version, label, department or title changed |
+| `knowledge.item_withdrawn` | a released item stopped being released (back in review, stale, rejected, withdrawn) |
+
+A message holds **identifiers and labels only**: `{ item_id, status, department_id, sensitivity,
+previous_sensitivity }`. Never the title, the text or a name. Plus `webhook.test`, sent when the Owner presses
+"Send a test message".
+
+### How an event is made: in the same transaction, by the database
+
+A trigger on `knowledge_items` writes the event into the outbox (`outbox_events`, the table Phase 1 reserved for
+this) **in the same transaction as the change**. So an event exists exactly when the change was committed, and every
+way an item can change - the API, the AI service, the consent-withdrawal trigger, a housekeeping job - writes it;
+no code path can forget. The trigger runs as the table owner, so neither service has any right on the outbox for
+it (the AI service has none at all).
+
+### How a message is sent
+
+The delivery job (`npm run outbound:deliver`, also part of housekeeping; nothing schedules it - see
+`docs/runbooks/outbound-delivery.md`) works per company in three short steps:
+
+1. **Fan-out:** new events become one delivery per endpoint that gets them; the events are marked published in the
+   same transaction (exactly once). An endpoint gets an event only if it subscribed to the topic, existed when the
+   event happened, is switched on and not paused, and may know about the item: the item's label before or after the
+   change is within the endpoint's level (so it also learns that an item it knew was relabelled out of its reach -
+   it is told the new label, a number).
+2. **Claim:** due deliveries are marked "sending" for a minute and the attempt is counted; committed.
+3. **Send** (no transaction open), then record the result. 2xx = delivered. Anything else is retried after 1 min,
+   5 min, 30 min, 2 h, 6 h, 12 h and 24 h; after the 8th attempt it is given up. An endpoint with 15 failed attempts
+   in a row and no success for a day is **paused**, an audit row (`WEBHOOK_PAUSED`) is written and the Owners are
+   told; switching it on again clears the pause.
+
+**At least once, not exactly once:** a sender that dies between sending and recording leaves the delivery
+"sending"; it is tried again after its minute. The `webhook-id` is the same on every attempt, so a receiver ignores
+a repeat. Events that happen while an endpoint is off or paused are not sent later.
+
+### The signature
+
+The open Standard Webhooks format, so receivers can use an existing library:
+
+- `webhook-id` (the event id, the same on every retry), `webhook-timestamp` (seconds), and
+  `webhook-signature: v1,<base64 HMAC-SHA256(secret, "<id>.<timestamp>.<body>")>`;
+- the secret is `whsec_` + base64 of 32 random bytes, **shown once** (creation and "new secret"); the copy of the
+  answer kept for a retried request has it removed (`x-one-time-secrets`);
+- the server must read the secret again to sign, so it is stored **encrypted** (AES-256-GCM with the credential
+  keyring, bound to the company and endpoint), not hashed; removing an endpoint wipes it;
+- a new secret replaces the old one at once (no overlap period).
+
+A unit test checks our signature against the example published with the specification, and checks that the example
+receiver accepts what we send and refuses a changed body, another secret and a message older than 5 minutes.
+
+### Where messages may go (server-side request forgery)
+
+The API server itself makes the request, so a careless address could make it talk to things inside the hosting
+network (the cloud metadata server, the database, the AI service). Protections:
+
+- **At registration:** `https://` only; a host name, never an IP address in any notation; no user name, password or
+  fragment; no internal names (`localhost`, `.internal`, `.local`, `.corp`, names without a dot, ...).
+- **At every delivery:** the name is looked up again and **every** address it resolves to must be ordinary public
+  unicast (private, loopback, link-local, carrier-grade NAT, documentation, multicast, reserved, 6to4, NAT64,
+  IPv4-mapped forms, ... are refused); the connection is made to the checked address (pinned lookup), so the name
+  cannot be re-pointed between the check and the connection.
+- No redirects are followed; 5 seconds for the whole attempt; at most 2 KB of the answer is read and thrown away -
+  only the status code is kept and shown.
+- `WEBHOOK_DELIVERY=none` (the default) sends nothing at all.
+
+### The example receiver ("one example connector")
+
+`examples/webhook-receiver/` - a small Node.js program with no dependency, showing what every receiver must do:
+check the signature over the raw body, refuse old messages, ignore repeated ids, answer quickly. It is the
+"connector" of feature 28 in the sense of a documented, tested example; it is not a connector to a named product.
+
+### Operations (177 in total)
+
+| Operation | Path | Permission |
+|---|---|---|
+| `listWebhookEndpoints` | `GET /v1/webhooks` | `webhook:read` |
+| `getWebhookOptions` | `GET /v1/webhooks/options` | `webhook:read` |
+| `createWebhookEndpoint` | `POST /v1/webhooks` | `webhook:manage` |
+| `updateWebhookEndpoint` | `PATCH /v1/webhooks/{webhook_id}` | `webhook:manage` |
+| `removeWebhookEndpoint` | `POST /v1/webhooks/{webhook_id}/remove` | `webhook:manage` |
+| `rotateWebhookSecret` | `POST /v1/webhooks/{webhook_id}/rotate-secret` | `webhook:manage` |
+| `sendWebhookTest` | `POST /v1/webhooks/{webhook_id}/test` | `webhook:manage` |
+| `listWebhookDeliveries` | `GET /v1/webhooks/{webhook_id}/deliveries` | `webhook:read` |
+
+Company Owner only, like API keys. None of them accepts an API key. At most 10 endpoints per company. The address of
+an endpoint never changes (a new address is a new endpoint with a new secret); the database refuses it too.
+
+## Part C — e-mail of notices
+
+### What it does
+
+The product already raises notices (a card was locked, a renewal date comes closer, a retirement nudge, an API key
+was made, ...); until now they were only written to the log. When an e-mail sender is configured, each notice is
+**also** queued and sent by the delivery job to the people it is for:
+
+- a notice about a card goes to the person holding it (or to the card named as the recipient);
+- a company notice (billing, retirement nudges, API keys, webhooks paused) goes to the company's Owners;
+- a lock goes to both.
+
+The table is in code (`services/api/src/modules/mail/internal/templates.ts`); the compiler refuses a notice type
+without an entry. Features 11 (retirement radar) and 33 (renewal reminders) keep raising their notices as before.
+
+### What an e-mail can and cannot contain
+
+Fixed plain text per notice type, no link and no placeholder: never a code, a key, a card number, an amount, a
+date, a name or anything a company wrote. A unit test checks every text for digits, links, `@` and placeholder
+characters. An e-mail read by the wrong person, or kept in a mailbox forever, gives away nothing a stranger can use.
+
+### Addresses
+
+The queue keeps **people's ids, never their addresses**. The address is read from the person's record when the
+message is sent, so a corrected or removed address takes effect at once, and people who have left are not written
+to. A person without an address gets status `no_address`. An address that could carry extra mail headers (line
+breaks, angle brackets, ...) is never handed to the sender.
+
+### The sender
+
+A `MailSender` port with one stand-in: `fake` (sends nothing, keeps what it was given; accepted only when
+`NODE_ENV=test`). With `MAIL_SENDER=none` (the default) **nothing is queued and nothing is sent**; notices are
+logged as before. A real service is one more `MailSender`; which service and which sending domain (SPF, DKIM,
+DMARC) is the founder's choice.
+
+### Known and accepted
+
+- A notice raised inside a request that is rolled back afterwards is still queued (as it was always still logged).
+  If it names a card that was never committed, nobody is found and nothing is sent; otherwise the e-mail may
+  describe something that did not happen. Fixing this needs the notifier to write in the caller's transaction,
+  which changes about 25 call sites; not done.
+- At least once: a sender that dies mid-send means the message is sent again after a minute.
+- Queuing runs in the background on its own connection (never blocking the caller); if it fails, the notice is
+  logged as before and an error line says it could not be queued.
+
+## What was tested, and what was not (parts B and C)
+
+- **Run on the developer's machine (no database):** 100 new unit tests - which addresses can be registered and
+  connected to (IPv4, IPv6 and their odd notations), the pinned lookup, the signature against the published
+  Standard Webhooks example and against the example receiver, which endpoint gets which event, retries and pausing,
+  the e-mail texts and recipients, which addresses can be handed to a sender, the configuration; and the real https
+  sender against a local TLS server (2xx, 5xx, redirect not followed, timeout, untrusted certificate, a name that
+  resolves to 127.0.0.1 refused before any connection). 7 new screen tests.
+- **Written but run only by GitHub:** the database tests (the trigger writes the right events and none for a
+  rolled-back change; owner-only access; the secret shown once, stored encrypted, absent from audit, retry records
+  and log; address refusals; at most 10 endpoints; removal is final and cancels waiting messages; delivery, retries
+  with the same id and body, giving up after 8, pausing and un-pausing, a new secret signing the next attempt;
+  nothing sent with delivery off; housekeeping; e-mail recipients, retries, people who left, no addresses in the
+  queue, nothing queued with mail off) and the browser test (the Owner registers an endpoint, copies the secret,
+  queues a test message, removes it).
+- **Not tested at all:** a real receiver on the internet; real DNS; behaviour behind the production egress (a
+  proxy in front of outgoing connections would need a change); a real e-mail service; a scheduled delivery job.
+
+## For the founder to confirm (parts B and C)
+
+1. Which events matter first for the systems you expect (now: three knowledge events only)?
+2. Owner only for webhooks, like API keys?
+3. The limits: 10 endpoints, 8 attempts over about two days, pause after 15 failures and a day without success.
+4. Events missed while an endpoint is off or paused are not sent later. Acceptable?
+5. Which e-mail service and sending domain, and whether people may opt out of some notices (now: no opt-out).
+6. The recipient table (who is told what) and the wording of each e-mail.
+7. How often the delivery job should run once scheduled (suggested: every minute).

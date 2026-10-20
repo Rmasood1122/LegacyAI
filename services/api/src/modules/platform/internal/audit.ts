@@ -43,6 +43,8 @@ export const ALLOWED_DETAIL_KEYS: ReadonlySet<string> = new Set([
   'invoice_id', 'amount_minor', 'currency', 'seats', 'auto_renew', 'payment_outcome',
   // Phase 4 (API keys): which key made the request - its id, never its secret
   'api_key_id',
+  // Phase 4 (webhooks): which endpoint - its id, never its address or secret
+  'webhook_id',
 ]);
 
 const FORBIDDEN_VALUE = /\b\d{16}\b/;
