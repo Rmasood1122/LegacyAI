@@ -178,7 +178,7 @@ statement and put back, as in the other Phase 4 migrations), then restores the o
   Phase 4 migrations but has never run against data); a real outside system using a key; behaviour behind the real proxy (the network list relies
   on `TRUST_PROXY` matching the real set-up).
 
-### For the founder to confirm
+### For the founder to confirm — decided 2026-10-20: the defaults stand (D30)
 
 1. Should Admins also manage keys, or only the Owner (now: Owner only)?
 2. May keys add documents (now: no; see above for what that would need)?
@@ -372,7 +372,12 @@ just being issued, and drop the e-mail). A request transaction open longer than 
 - **Not tested at all:** a real receiver on the internet; real DNS; behaviour behind the production egress (a
   proxy in front of outgoing connections would need a change); a real e-mail service; a scheduled delivery job.
 
-## For the founder to confirm (parts B and C)
+## Decided (parts B and C)
+
+On 2026-10-20 the founder accepted the recommended defaults below (decision D31). Only item 5 (the e-mail service
+and sending domain) is still open; opting out of notices stays "no".
+
+## For the founder to confirm (parts B and C) — as asked; see "Decided" above
 
 1. Which events matter first for the systems you expect (now: three knowledge events only)?
 2. Owner only for webhooks, like API keys?

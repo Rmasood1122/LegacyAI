@@ -377,6 +377,10 @@ numbers or links. **Nothing is sent by default** (webhooks and e-mail are off un
 
 ### Open — for the founder to confirm (D30, D31)
 
+**Decided 2026-10-20:** the founder accepted the recommended defaults for items 1-5 and 7 (the current behaviour
+stands; the delivery job is to run every minute once scheduled). **Item 6 stays open** for the choice of e-mail
+service and sending domain; opting out of notices stays "no".
+
 1. Owner only for keys and webhooks, or Admins too?
 2. Which outside systems and which events matter first?
 3. The limits: keys (366 days, 50 keys, 120 a minute, 30/600 questions an hour); webhooks (10 endpoints, 8 attempts
