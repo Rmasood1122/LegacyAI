@@ -3,7 +3,8 @@
 // The danger is that the API server itself makes the request. An address that names (or resolves to) something
 // inside the hosting network - the cloud metadata server, the database, the AI service, localhost - would let a
 // company's Owner make the server talk to those (server-side request forgery). So:
-//   1. when the endpoint is registered, the address must be `https://<host name>[:port]/<path>`: no IP literal, no
+//   1. when the endpoint is registered, the address must be `https://<host name>/<path>` on port 443 (any other port
+//      would let the server be used to probe ports of other people's machines): no IP literal, no
 //      user name or password, no fragment, a host name with a dot that is not a known internal suffix;
 //   2. at EVERY delivery the host name is looked up again and EVERY address it resolves to must be public; the
 //      connection is then made to the address that was checked (a pinned lookup), so the name cannot be re-pointed
@@ -14,7 +15,7 @@ import { BlockList, isIP } from 'node:net';
 
 export const MAX_URL_LENGTH = 2048;
 
-export type AddressProblem = 'not-https' | 'credentials' | 'fragment' | 'ip-literal' | 'bad-host' | 'internal-host' | 'too-long' | 'unreadable';
+export type AddressProblem = 'not-https' | 'credentials' | 'fragment' | 'port' | 'ip-literal' | 'bad-host' | 'internal-host' | 'too-long' | 'unreadable';
 
 const INTERNAL_SUFFIXES = ['.localhost', '.local', '.internal', '.intranet', '.lan', '.home', '.corp', '.private', '.home.arpa', '.localdomain'];
 
@@ -30,6 +31,7 @@ export function urlProblem(text: string): AddressProblem | null {
   if (url.protocol !== 'https:') return 'not-https';
   if (url.username !== '' || url.password !== '') return 'credentials';
   if (text.includes('#')) return 'fragment';
+  if (url.port !== '' && url.port !== '443') return 'port';
   const host = url.hostname.toLowerCase();
   if (host.startsWith('[') || isIP(host) !== 0 || /^[0-9.]+$/.test(host) || /^0x/i.test(host)) return 'ip-literal';
   if (host === 'localhost' || INTERNAL_SUFFIXES.some((s) => host.endsWith(s))) return 'internal-host';

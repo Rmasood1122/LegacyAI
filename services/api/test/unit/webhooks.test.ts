@@ -23,7 +23,9 @@ const REPO = path.resolve(here, '..', '..', '..', '..');
 describe('which addresses can be registered', () => {
   it.each([
     ['https://hooks.example.com/legacyai', null],
-    ['https://hooks.example.com:8443/a?b=c', null],
+    ['https://hooks.example.com:443/a?b=c', null],
+    ['https://hooks.example.com:8443/a', 'port'],             // other ports would let the server probe other people's machines
+    ['https://hooks.example.com:22/a', 'port'],
     ['http://hooks.example.com/x', 'not-https'],
     ['ftp://hooks.example.com/x', 'not-https'],
     ['https://user:pw@hooks.example.com/x', 'credentials'],
@@ -276,6 +278,32 @@ describe('HttpsTransport against a local https server', () => {
   it('a receiver that does not answer in time: timeout', async () => {
     answer = () => undefined;   // never answers
     expect(await local({ timeoutMs: 300 }).send({ url: url('/slow'), headers: {}, body: '{}' })).toEqual({ ok: false, error: 'timeout' });
+  });
+
+  it('a receiver that answers 200 and then trickles a body cannot hold the sender: it is done when the status line arrives', async () => {
+    let socketsOpen = 0;
+    answer = (res) => {
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.write('x');
+      socketsOpen += 1;
+      const tick = setInterval(() => res.write('x'), 50);
+      res.on('close', () => {
+        clearInterval(tick);
+        socketsOpen -= 1;
+      });
+    };
+    const started = Date.now();
+    expect(await local({ timeoutMs: 5_000 }).send({ url: url('/trickle'), headers: {}, body: '{}' })).toEqual({ ok: true, status: 200 });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(socketsOpen).toBe(0);   // the sender closed the connection
+  });
+
+  it('a name lookup that never answers counts against the same deadline', async () => {
+    const slow = new HttpsTransport({ resolve: () => new Promise(() => undefined), isAllowed: () => true, ca: cert, timeoutMs: 200 });
+    const started = Date.now();
+    expect(await slow.send({ url: url(), headers: {}, body: '{}' })).toEqual({ ok: false, error: 'timeout' });
+    expect(Date.now() - started).toBeLessThan(1_500);
   });
 
   it('a certificate the sender does not trust: tls, and nothing reaches the receiver', async () => {

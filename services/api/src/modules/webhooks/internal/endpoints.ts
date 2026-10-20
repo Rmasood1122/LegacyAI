@@ -143,7 +143,23 @@ export class WebhookStore {
         WHERE tenant_id = $1 AND id = $2 AND removed_at IS NULL RETURNING ${ENDPOINT_COLUMNS}`,
       [tenantId, id, change.name ?? null, change.topics === undefined ? null : [...new Set(change.topics)].sort(), change.max_sensitivity ?? null,
         change.enabled ?? null, now]);
-    return rows[0] ?? null;
+    const row = rows[0];
+    if (row === undefined) return null;
+    // Waiting messages the endpoint no longer wants, or may no longer know about, are not sent: the narrower
+    // choice applies at once, not only to events from now on (the same test as rules.ts endpointGets).
+    await tx.query(
+      `UPDATE webhook_deliveries SET status = 'cancelled' WHERE tenant_id = $1 AND endpoint_id = $2 AND status = 'pending' AND topic <> $5
+          AND (NOT (topic = ANY($3::text[]))
+               OR LEAST((body->'data'->>'sensitivity')::int, (body->'data'->>'previous_sensitivity')::int) > $4)`,
+      [tenantId, id, row.topics, row.max_sensitivity, TEST_TOPIC]);
+    return row;
+  }
+
+  async testWaiting(tx: Tx, tenantId: string, endpointId: string): Promise<boolean> {
+    const { rows } = await tx.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM webhook_deliveries WHERE tenant_id = $1 AND endpoint_id = $2 AND topic = $3 AND status IN ('pending', 'sending')`,
+      [tenantId, endpointId, TEST_TOPIC]);
+    return (rows[0]?.n ?? 0) > 0;
   }
 
   /** Removed for good: switched off, secret wiped, deliveries not yet sent cancelled. False = it was removed already. */

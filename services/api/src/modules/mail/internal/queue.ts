@@ -9,6 +9,12 @@
 //    per person. Addresses are read at send time and never stored here; a person without an address (or who has
 //    left) gets status 'no_address'.
 //
+// A notice is raised INSIDE the caller's transaction but queued on another connection, so it can be in the queue
+// before what it is about is committed. It is therefore only worked out once it is SETTLE_MS old: by then the
+// request that raised it has committed (or rolled back), and the recipients can be read. A request transaction that
+// stays open longer than that could still lose its e-mail (nobody is found yet); requests here last well under a
+// second.
+//
 // Known and accepted: a notice raised inside a request that is rolled back afterwards is still queued. It names a
 // card; if that card does not exist (it was never committed) nobody is found and nothing is sent; if it exists
 // (e.g. a lock that was undone with the rest of the request), the e-mail may describe something that did not
@@ -61,6 +67,9 @@ export class MailNotifier implements Notifier {
   }
 }
 
+/** How old a notice must be before its recipients are worked out (see the top of this file). */
+export const SETTLE_MS = 30_000;
+
 interface NoticeRow { id: string; type: string; card_id: string | null; recipient_card_id: string | null; audience: string | null }
 
 /** The people a notice goes to. Pure apart from the directory's answers. */
@@ -90,20 +99,23 @@ export interface MailDeliveryDeps {
   withTx: <T>(fn: (tx: Tx) => Promise<T>) => Promise<T>;
 }
 
-async function expand(tx: Tx, tenantId: string, directory: RecipientDirectory): Promise<{ notices: number; queued: number }> {
+async function expand(tx: Tx, tenantId: string, directory: RecipientDirectory, now: Date): Promise<{ notices: number; queued: number }> {
   const { rows } = await tx.query<NoticeRow>(
-    `SELECT id, type, card_id, recipient_card_id, audience FROM mail_notices WHERE tenant_id = $1 AND expanded_at IS NULL
-      ORDER BY created_at, id LIMIT $2 FOR UPDATE SKIP LOCKED`, [tenantId, MAIL_LIMITS.noticesPerRun]);
+    `SELECT id, type, card_id, recipient_card_id, audience FROM mail_notices
+      WHERE tenant_id = $1 AND expanded_at IS NULL AND created_at <= $3::timestamptz - make_interval(secs => $4::int / 1000)
+      ORDER BY created_at, id LIMIT $2 FOR UPDATE SKIP LOCKED`, [tenantId, MAIL_LIMITS.noticesPerRun, now, SETTLE_MS]);
   let queued = 0;
   for (const notice of rows) {
     for (const personId of await recipientsOf(tx, tenantId, notice, directory)) {
       const res = await tx.query(
-        `INSERT INTO mail_messages (tenant_id, notice_id, person_id) VALUES ($1, $2, $3) ON CONFLICT (tenant_id, notice_id, person_id) DO NOTHING`,
-        [tenantId, notice.id, personId]);
+        // due at the run's own time (not the database's): the claim below compares with the same clock
+        `INSERT INTO mail_messages (tenant_id, notice_id, person_id, next_attempt_at) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (tenant_id, notice_id, person_id) DO NOTHING`,
+        [tenantId, notice.id, personId, now]);
       queued += res.rowCount;
     }
   }
-  if (rows.length > 0) await tx.query('UPDATE mail_notices SET expanded_at = now() WHERE tenant_id = $1 AND id = ANY($2::uuid[])', [tenantId, rows.map((r) => r.id)]);
+  if (rows.length > 0) await tx.query('UPDATE mail_notices SET expanded_at = $3 WHERE tenant_id = $1 AND id = ANY($2::uuid[])', [tenantId, rows.map((r) => r.id), now]);
   return { notices: rows.length, queued };
 }
 
@@ -143,7 +155,7 @@ async function record(tx: Tx, tenantId: string, m: Claimed, outcome: MailOutcome
 /** One run for one company. A failed message never throws; a database error stops this company's run only. */
 export async function runMailCompany(deps: MailDeliveryDeps, tenantId: string, now: () => Date): Promise<MailRunResult> {
   const result: MailRunResult = { notices: 0, queued: 0, sent: 0, failed: 0, no_address: 0 };
-  const expanded = await deps.withTx((tx) => expand(tx, tenantId, deps.directory));
+  const expanded = await deps.withTx((tx) => expand(tx, tenantId, deps.directory, now()));
   result.notices = expanded.notices;
   result.queued = expanded.queued;
   const claimed = await deps.withTx((tx) => claim(tx, tenantId, now()));

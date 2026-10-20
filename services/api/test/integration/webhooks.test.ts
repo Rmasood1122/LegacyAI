@@ -187,6 +187,7 @@ describe('endpoints: made, listed, changed and removed by the Owner only', () =>
     ['https://localhost/a', 422],
     ['https://metadata.google.internal/a', 422],
     ['https://user:pw@hooks.example.com/a', 422],
+    ['https://hooks.example.com:22/a', 422],
     ['https://intranet/a', 422],
   ])('refuses %s (%s)', async (url, status) => {
     const res = await tenant.owner.post('/v1/webhooks', { name: 'x', url, topics: ['knowledge.item_released'], max_sensitivity: 0 });
@@ -354,6 +355,10 @@ describe('delivery', () => {
     const queued = await tenant.owner.post(`/v1/webhooks/${hook.id}/test`);
     expect(queued.status).toBe(202);
     expect(queued.body).toMatchObject({ topic: 'webhook.test', status: 'pending', attempts: 0 });
+    // one waiting test message per endpoint
+    const again = await tenant.owner.post(`/v1/webhooks/${hook.id}/test`);
+    expect(again.status).toBe(409);
+    expect(again.raw).toContain('webhook-test-waiting');
     const rotated = await tenant.owner.post(`/v1/webhooks/${hook.id}/rotate-secret`);
     expect(rotated.status).toBe(200);
     const fresh = rotated.body.signing_secret as string;
@@ -364,6 +369,25 @@ describe('delivery', () => {
     expect(JSON.parse(msg.body).data).toEqual({ endpoint_id: hook.id });
     expect(verifySignature(fresh, msg.headers, msg.body, new Date())).toBe(true);
     expect(verifySignature(hook.secret, msg.headers, msg.body, new Date())).toBe(false);
+    await tenant.owner.post(`/v1/webhooks/${hook.id}/remove`);
+  });
+
+  it('a narrower choice applies at once: waiting messages above the new level or for a dropped event are cancelled', async () => {
+    const hook = await makeEndpoint(tenant, { max_sensitivity: 2, topics: ['knowledge.item_released', 'knowledge.item_withdrawn'] });
+    transport.answer = () => ({ ok: false, error: 'http_status', status: 500 });
+    const low = await item(tenant, 0);
+    const high = await item(tenant, 2);
+    await verify(tenant, low);
+    await verify(tenant, high);
+    await run(tenant);   // both fail once and wait for their retry
+    transport.answer = () => ({ ok: true, status: 204 });
+    await tenant.owner.patch(`/v1/webhooks/${hook.id}`, { max_sensitivity: 1 });
+    const rows = await su.query(
+      `SELECT body->'data'->>'item_id' AS item, status FROM webhook_deliveries WHERE endpoint_id = $1 ORDER BY item`, [hook.id]);
+    expect(Object.fromEntries(rows.rows.map((r) => [r.item, r.status]))).toEqual({ [low]: 'pending', [high]: 'cancelled' });
+    await tenant.owner.patch(`/v1/webhooks/${hook.id}`, { topics: ['knowledge.item_withdrawn'] });
+    const after = await su.query(`SELECT status FROM webhook_deliveries WHERE endpoint_id = $1 AND body->'data'->>'item_id' = $2`, [hook.id, low]);
+    expect(after.rows[0].status).toBe('cancelled');
     await tenant.owner.post(`/v1/webhooks/${hook.id}/remove`);
   });
 

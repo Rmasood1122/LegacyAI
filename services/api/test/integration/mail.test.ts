@@ -3,7 +3,7 @@
 // The pure rules (texts, recipients, addresses, retries) are in test/unit/mail.test.ts.
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FakeMailSender } from '../../src/modules/mail/index.ts';
+import { FakeMailSender, SETTLE_MS } from '../../src/modules/mail/index.ts';
 import { createTenant, startApp, superuser, type TestApp, type TestTenant } from '../helpers/harness.ts';
 
 const sender = new FakeMailSender();
@@ -38,6 +38,9 @@ async function person(tn: TestTenant, email: string | null): Promise<{ personId:
 }
 
 const mailTo = (address: string): typeof sender.sent => sender.sent.filter((m) => m.to === address);
+/** A run as it happens a little later: a notice is worked out only once it has settled (SETTLE_MS). */
+const settled = (ms = 0): Date => new Date(Date.now() + SETTLE_MS + 1_000 + ms);
+const deliver = (tenantId: string, at: Date = settled()) => t.app.mail.runCompany(tenantId, () => at);
 
 describe('notices by e-mail', () => {
   let tenant: TestTenant;
@@ -48,14 +51,14 @@ describe('notices by e-mail', () => {
 
   it('a card issued to a person reaches that person, in the fixed wording, from the configured sender', async () => {
     await person(tenant, 'new.holder@example.test');
-    const result = await t.app.mail.runCompany(tenant.tenantId);
+    const result = await deliver(tenant.tenantId);
     expect(result.sent).toBeGreaterThanOrEqual(1);
     const [mail] = mailTo('new.holder@example.test');
     expect(mail).toMatchObject({ subject: 'A LegacyAI card was issued to you', from: 'LegacyAI <no-reply@localhost>' });
     expect(mail?.text).not.toMatch(/\d/);   // no card number, no code
     // a second run sends nothing more
     const before = sender.sent.length;
-    await t.app.mail.runCompany(tenant.tenantId);
+    await deliver(tenant.tenantId);
     expect(sender.sent.length).toBe(before);
   });
 
@@ -64,7 +67,7 @@ describe('notices by e-mail', () => {
     expect(key.status).toBe(201);
     await t.app.mail.notifier.notify({ type: 'renewal_reminder', tenantId: tenant.tenantId });
     await t.app.mail.notifier.notify({ type: 'retirement_nudge', tenantId: tenant.tenantId });
-    await t.app.mail.runCompany(tenant.tenantId);
+    await deliver(tenant.tenantId);
     const subjects = mailTo('owner.mail@example.test').map((m) => m.subject);
     expect(subjects).toEqual(expect.arrayContaining([
       'A LegacyAI API key was made', 'Your LegacyAI renewal date is coming closer', 'Someone\'s leaving date is coming closer',
@@ -74,7 +77,7 @@ describe('notices by e-mail', () => {
 
   it('nobody\'s address is copied into the queue; a person without an address is recorded as such', async () => {
     const none = await person(tenant, null);
-    await t.app.mail.runCompany(tenant.tenantId);
+    await deliver(tenant.tenantId);
     const rows = await su.query(
       `SELECT to_jsonb(m)::text AS m FROM mail_messages m WHERE tenant_id = $1 UNION ALL SELECT to_jsonb(n)::text FROM mail_notices n WHERE tenant_id = $1`,
       [tenant.tenantId]);
@@ -87,36 +90,48 @@ describe('notices by e-mail', () => {
   it('a service that is unavailable is tried again later; an address the service refuses is not', async () => {
     const own = await createTenant(t, 'mail-retry');
     await ownerAddress(own, 'owner.retry@example.test');
-    sender.failNext('unavailable');
+    await deliver(own.tenantId);                 // the notices of setting the company up go first
+    const sentBefore = mailTo('owner.retry@example.test').length;
+    const ofType = async (type: string) => (await su.query(
+      `SELECT m.status, m.attempts, m.next_attempt_at, m.last_error FROM mail_messages m JOIN mail_notices n ON n.tenant_id = m.tenant_id AND n.id = m.notice_id
+        WHERE m.tenant_id = $1 AND n.type = $2`, [own.tenantId, type])).rows;
+
     await t.app.mail.notifier.notify({ type: 'payment_failed', tenantId: own.tenantId });
-    const now = new Date();
-    await t.app.mail.runCompany(own.tenantId, () => now);
-    const [row] = (await su.query('SELECT status, attempts, next_attempt_at, last_error FROM mail_messages WHERE tenant_id = $1', [own.tenantId])).rows;
+    sender.failNext('unavailable');
+    const now = settled(60_000);
+    await deliver(own.tenantId, now);
+    const [row] = await ofType('payment_failed');
     expect(row).toMatchObject({ status: 'pending', attempts: 1, last_error: 'unavailable' });
     expect((row.next_attempt_at as Date).getTime() - now.getTime()).toBe(5 * 60_000);
-    expect(mailTo('owner.retry@example.test')).toEqual([]);
-    await t.app.mail.runCompany(own.tenantId, () => new Date(now.getTime() + 6 * 60_000));
-    expect(mailTo('owner.retry@example.test').map((m) => m.subject)).toEqual(['A LegacyAI payment did not go through']);
+    expect(mailTo('owner.retry@example.test').length).toBe(sentBefore);
+    await deliver(own.tenantId, new Date(now.getTime() + 6 * 60_000));
+    expect(mailTo('owner.retry@example.test').slice(sentBefore).map((m) => m.subject)).toEqual(['A LegacyAI payment did not go through']);
 
-    sender.failNext('rejected');
     await t.app.mail.notifier.notify({ type: 'subscription_renewed', tenantId: own.tenantId });
-    await t.app.mail.runCompany(own.tenantId, () => new Date(now.getTime() + 7 * 60_000));
-    await t.app.mail.runCompany(own.tenantId, () => new Date(now.getTime() + 2 * 86_400_000));
-    const rejected = await su.query(
-      `SELECT m.status, m.attempts FROM mail_messages m JOIN mail_notices n ON n.id = m.notice_id WHERE m.tenant_id = $1 AND n.type = 'subscription_renewed'`, [own.tenantId]);
-    expect(rejected.rows).toEqual([{ status: 'failed', attempts: 1 }]);
+    sender.failNext('rejected');
+    await deliver(own.tenantId, new Date(now.getTime() + 7 * 60_000));
+    await deliver(own.tenantId, new Date(now.getTime() + 2 * 86_400_000));
+    expect((await ofType('subscription_renewed')).map((r) => ({ status: r.status, attempts: r.attempts }))).toEqual([{ status: 'failed', attempts: 1 }]);
+  });
+
+  it('a notice is worked out only once it has settled (the request that raised it has committed by then)', async () => {
+    const own = await createTenant(t, 'mail-settle');
+    await ownerAddress(own, 'owner.settle@example.test');
+    await t.app.mail.notifier.notify({ type: 'renewal_reminder', tenantId: own.tenantId });
+    expect((await t.app.mail.runCompany(own.tenantId, () => new Date())).notices).toBe(0);
+    expect((await deliver(own.tenantId)).notices).toBeGreaterThan(0);
   });
 
   it('people who have left are not written to', async () => {
     const own = await createTenant(t, 'mail-left');
     await ownerAddress(own, 'owner.left@example.test');
     const leaver = await person(own, 'leaver@example.test');
-    await t.app.mail.runCompany(own.tenantId);
+    await deliver(own.tenantId);
     const before = mailTo('leaver@example.test').length;
     expect(before).toBeGreaterThanOrEqual(1);   // the card they were issued
     await su.query("UPDATE people SET status = 'departed' WHERE id = $1", [leaver.personId]);
     await t.app.mail.notifier.notify({ type: 'card_revoked', tenantId: own.tenantId, cardId: leaver.cardId });
-    await t.app.mail.runCompany(own.tenantId);
+    await deliver(own.tenantId);
     expect(mailTo('leaver@example.test').length).toBe(before);
   });
 
@@ -124,8 +139,8 @@ describe('notices by e-mail', () => {
     const own = await createTenant(t, 'mail-purge');
     await ownerAddress(own, 'owner.purge@example.test');
     await t.app.mail.notifier.notify({ type: 'renewal_reminder', tenantId: own.tenantId });
-    await t.app.mail.runCompany(own.tenantId);
-    const removed = await t.app.db.withTenantTx(own.tenantId, (tx) => t.app.mail.purge(tx, own.tenantId, new Date(Date.now() + 60_000)));
+    await deliver(own.tenantId);
+    const removed = await t.app.db.withTenantTx(own.tenantId, (tx) => t.app.mail.purge(tx, own.tenantId, new Date(Date.now() + 120_000)));
     expect(removed).toBeGreaterThanOrEqual(2);
     const left = await su.query('SELECT count(*)::int AS n FROM mail_notices WHERE tenant_id = $1', [own.tenantId]);
     expect(left.rows[0].n).toBe(0);

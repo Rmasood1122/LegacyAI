@@ -18,8 +18,6 @@ export const WEBHOOK_LIMITS = {
   maxPerCompany: 10,
   /** Seconds to connect, send and get the status line - all of it. */
   timeoutMs: 5_000,
-  /** At most this many bytes of the answer are read (and thrown away); the status code is all that counts. */
-  maxResponseBytes: 2_048,
   /** Deliveries one run sends per company, so one company cannot hold up the others. */
   perCompanyPerRun: 50,
   /** Attempts before a delivery is given up. */

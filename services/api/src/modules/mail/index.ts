@@ -15,7 +15,7 @@ import { FakeMailSender, type MailSender } from './internal/sender.ts';
 export { MAIL_LIMITS, nextMailAttemptAt } from './internal/rules.ts';
 export { FakeMailSender, isSendableAddress, type MailMessage, type MailOutcome, type MailSender } from './internal/sender.ts';
 export { isNoticeType, render, TEMPLATES, type Audience, type NoticeType, type Template } from './internal/templates.ts';
-export { recipientsOf, type MailRunResult, type RecipientDirectory } from './internal/queue.ts';
+export { recipientsOf, SETTLE_MS, type MailRunResult, type RecipientDirectory } from './internal/queue.ts';
 
 export interface MailModule {
   /** Whether notices are queued and sent at all (MAIL_SENDER, or a sender given by a test). */

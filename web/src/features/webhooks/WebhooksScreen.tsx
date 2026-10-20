@@ -63,7 +63,7 @@ function NewEndpoint({ options, onMade }: { options: WebhookOptions; onMade: (ma
       <TextField label="Name" value={form.name} maxLength={100} onChange={(e) => setForm({ ...form, name: e.target.value })}
         hint="What receives the messages, for example the name of the system." error={problems.name ?? null} />
       <TextField label="Address" value={form.url} maxLength={2048} onChange={(e) => setForm({ ...form, url: e.target.value })}
-        hint="An https address on the internet. Addresses inside a private network are refused." error={problems.url ?? null} />
+        hint="An https address on the internet, on the standard port. Addresses inside a private network are refused." error={problems.url ?? null} />
       <fieldset>
         <legend>Events to send</legend>
         {options.topics.map((t) => (

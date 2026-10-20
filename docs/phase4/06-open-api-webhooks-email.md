@@ -263,14 +263,16 @@ receiver accepts what we send and refuses a changed body, another secret and a m
 The API server itself makes the request, so a careless address could make it talk to things inside the hosting
 network (the cloud metadata server, the database, the AI service). Protections:
 
-- **At registration:** `https://` only; a host name, never an IP address in any notation; no user name, password or
-  fragment; no internal names (`localhost`, `.internal`, `.local`, `.corp`, names without a dot, ...).
+- **At registration:** `https://` only, on port 443 (another port would let the server probe ports of other
+  people's machines); a host name, never an IP address in any notation; no user name, password or fragment; no
+  internal names (`localhost`, `.internal`, `.local`, `.corp`, names without a dot, ...).
 - **At every delivery:** the name is looked up again and **every** address it resolves to must be ordinary public
   unicast (private, loopback, link-local, carrier-grade NAT, documentation, multicast, reserved, 6to4, NAT64,
   IPv4-mapped forms, ... are refused); the connection is made to the checked address (pinned lookup), so the name
   cannot be re-pointed between the check and the connection.
-- No redirects are followed; 5 seconds for the whole attempt; at most 2 KB of the answer is read and thrown away -
-  only the status code is kept and shown.
+- No redirects are followed; 5 seconds for the whole attempt, the name lookup included; the connection is closed as
+  soon as the status line arrives (the body is never read, so a receiver cannot keep the delivery job waiting) - only
+  the status code is kept and shown.
 - `WEBHOOK_DELIVERY=none` (the default) sends nothing at all.
 
 ### The example receiver ("one example connector")
@@ -292,7 +294,9 @@ check the signature over the raw body, refuse old messages, ignore repeated ids,
 | `sendWebhookTest` | `POST /v1/webhooks/{webhook_id}/test` | `webhook:manage` |
 | `listWebhookDeliveries` | `GET /v1/webhooks/{webhook_id}/deliveries` | `webhook:read` |
 
-Company Owner only, like API keys. None of them accepts an API key. At most 10 endpoints per company. The address of
+Company Owner only, like API keys. None of them accepts an API key. At most 10 endpoints per company, and one
+waiting test message per endpoint. A narrower choice (a lower level, fewer events) applies at once: messages
+already waiting that the endpoint no longer wants, or may no longer know about, are cancelled. The address of
 an endpoint never changes (a new address is a new endpoint with a new secret); the database refuses it too.
 
 ## Part C — e-mail of notices
@@ -330,8 +334,18 @@ A `MailSender` port with one stand-in: `fake` (sends nothing, keeps what it was 
 logged as before. A real service is one more `MailSender`; which service and which sending domain (SPF, DKIM,
 DMARC) is the founder's choice.
 
+### When a notice is worked out
+
+A notice is raised inside the request's transaction but queued on its own connection, so it can reach the queue
+before what it is about is committed. Its recipients are therefore worked out only once it is 30 seconds old (found
+by the correctness review: a delivery run at the wrong moment would otherwise find no holder for a card that was
+just being issued, and drop the e-mail). A request transaction open longer than that could still lose its e-mail.
+
 ### Known and accepted
 
+- Events are compared with the time an endpoint was made using the database's transaction start times. A change in
+  a transaction that started before the endpoint was made but committed after it is not sent to that endpoint (and
+  the reverse). Rare; accepted.
 - A notice raised inside a request that is rolled back afterwards is still queued (as it was always still logged).
   If it names a card that was never committed, nobody is found and nothing is sent; otherwise the e-mail may
   describe something that did not happen. Fixing this needs the notifier to write in the caller's transaction,

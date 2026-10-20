@@ -7381,7 +7381,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
         "422":
-          description: The address is not https, holds a user name, password or fragment, names an IP address instead of a host, or names an internal host.
+          description: The address is not https, uses a port other than 443, holds a user name, password or fragment, names an IP address instead of a host, or names an internal host.
           content:
             application/problem+json:
               schema:
@@ -7549,7 +7549,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: "Conflict. `webhook-not-active`: the endpoint is switched off, paused or removed."
+          description: "Conflict. `webhook-not-active`: the endpoint is switched off, paused or removed. `webhook-test-waiting`: a test message to it is already waiting."
           content:
             application/problem+json:
               schema:

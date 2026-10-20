@@ -5,8 +5,9 @@
 //     it checked: the lookup is pinned, so the name cannot be re-pointed between the check and the connection;
 //   - verifies the TLS certificate against the host name (node's default; never switched off);
 //   - follows no redirect (a 3xx is a failed attempt);
-//   - gives up after a few seconds in all, reads at most 2 KB of the answer and throws it away: only the status
-//     code counts, and nothing a receiver sends back is stored or shown.
+//   - gives up after a few seconds in all - the name lookup included - and closes the connection as soon as the
+//     status line has arrived: only the status code counts, the body is never read, and nothing a receiver sends
+//     back is stored or shown (a receiver that trickles a body cannot keep the delivery job waiting).
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { request } from 'node:https';
 import type { LookupAddress } from 'node:dns';
@@ -59,7 +60,15 @@ export class HttpsTransport implements WebhookTransport {
   async send(req: WebhookRequest): Promise<SendOutcome> {
     const url = new URL(req.url);
     if (url.protocol !== 'https:') return { ok: false, error: 'address_refused' };
-    const target = await checkedAddress(url.hostname, this.#o.resolve ?? systemResolver, this.#o.isAllowed ?? isPublicAddress);
+    // ONE deadline for everything: the lookup, the connection, the request, the status line
+    const deadline = Date.now() + (this.#o.timeoutMs ?? WEBHOOK_LIMITS.timeoutMs);
+    let lookupTimer: NodeJS.Timeout | undefined;
+    const target = await Promise.race([
+      checkedAddress(url.hostname, this.#o.resolve ?? systemResolver, this.#o.isAllowed ?? isPublicAddress),
+      new Promise<'timeout'>((resolve) => {
+        lookupTimer = setTimeout(() => resolve('timeout'), Math.max(0, deadline - Date.now()));
+      }),
+    ]).finally(() => clearTimeout(lookupTimer));
     if (typeof target === 'string') return { ok: false, error: target };
     return new Promise<SendOutcome>((resolve) => {
       let settled = false;
@@ -67,6 +76,7 @@ export class HttpsTransport implements WebhookTransport {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        r.destroy();   // nothing more is read or sent; the socket is closed now
         resolve(outcome);
       };
       const pinned = pinnedLookup(target);
@@ -76,19 +86,13 @@ export class HttpsTransport implements WebhookTransport {
         headers: { ...req.headers, 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(req.body)), 'user-agent': 'LegacyAI-Webhooks/1' },
       }, (res) => {
         const status = res.statusCode ?? 0;
-        let read = 0;
-        res.on('data', (chunk: Buffer) => {
-          read += chunk.length;
-          if (read > WEBHOOK_LIMITS.maxResponseBytes) res.destroy();
-        });
         res.on('error', () => undefined);
         finish(status >= 200 && status < 300 ? { ok: true, status } : { ok: false, error: 'http_status', status: status >= 100 && status <= 599 ? status : undefined });
-        res.resume();
       });
       const timer = setTimeout(() => {
         r.destroy(new Error('timeout'));
         finish({ ok: false, error: 'timeout' });
-      }, this.#o.timeoutMs ?? WEBHOOK_LIMITS.timeoutMs);
+      }, Math.max(0, deadline - Date.now()));
       r.on('error', (err) => finish({ ok: false, error: classify(err) }));
       r.end(req.body);
     });

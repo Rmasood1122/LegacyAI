@@ -18,6 +18,7 @@ const ADDRESS_TEXT: Readonly<Record<AddressProblem, string>> = {
   'not-https': 'The address must start with https://',
   credentials: 'The address must not contain a user name or password',
   fragment: 'The address must not contain a # part',
+  port: 'The address must use the standard https port (443)',
   'ip-literal': 'Use a host name, not an IP address',
   'bad-host': 'The host name cannot be read',
   'internal-host': 'The address must be reachable on the public internet, not an internal name',
@@ -126,6 +127,8 @@ export function webhookRoutes(deps: WebhookRouteDeps): RouteDef[] {
         const row = await store.get(tx, subject.tenant_id, params.webhook_id);
         if (row === null) throw problems.notFound();
         if (statusOf(row) !== 'active') throw problems.conflict('webhook-not-active', 'Switch the endpoint on first; a removed endpoint sends nothing');
+        // one waiting test message per endpoint: pressing the button again queues nothing more
+        if (await store.testWaiting(tx, subject.tenant_id, row.id)) throw problems.conflict('webhook-test-waiting', 'A test message to this endpoint is already waiting to be sent');
         const delivery = await store.queueTest(tx, subject.tenant_id, row, ctx.now);
         await audit(tx, subject, row.id, 'WEBHOOK_TEST_QUEUED', ctx);
         return { status: 202, body: toApiDelivery(delivery) };
