@@ -43,10 +43,12 @@ afterAll(async () => {
   await off.close();
 });
 
-async function seed(tenantId: string, sql: string, params: unknown[] = []): Promise<any[]> {
+async function seed(tenantId: string, sql: string, params: unknown[] = [], opts: { relabel?: boolean } = {}): Promise<any[]> {
   await su.query('BEGIN');
   try {
     await su.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+    // a label changes only the way relabel() changes it (the database's guard); this test plays that role
+    if (opts.relabel === true) await su.query("SELECT set_config('app.relabel', 'on', true)");
     const { rows } = await su.query(sql, params);
     await su.query('COMMIT');
     return rows;
@@ -91,7 +93,7 @@ describe('the outbox: every change of a released item writes its event, in the s
     const id = await item(tenant, 1);
     expect(await outbox(tenant.tenantId)).toEqual([]);                      // candidate and in review: nothing
     await verify(tenant, id);
-    await seed(tenant.tenantId, 'UPDATE knowledge_items SET sensitivity = 2 WHERE id = $1', [id]);
+    await seed(tenant.tenantId, 'UPDATE knowledge_items SET sensitivity = 2 WHERE id = $1', [id], { relabel: true });
     await seed(tenant.tenantId, 'UPDATE knowledge_items SET usage_count = usage_count + 1 WHERE id = $1', [id]);   // not a change anybody outside needs
     await seed(tenant.tenantId, "UPDATE knowledge_items SET status = 'stale' WHERE id = $1", [id]);
     const events = await outbox(tenant.tenantId);
