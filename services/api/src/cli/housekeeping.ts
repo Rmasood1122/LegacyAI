@@ -7,7 +7,10 @@
 //      the date when it is read. WITHOUT THIS COMMAND NO NUDGE IS EVER CREATED after the day a date was set.
 //   3. billing: renewal reminders and the automatic renewal attempt (docs/phase4/05-billing.md). WITHOUT THIS
 //      COMMAND NO REMINDER IS CREATED AND NOTHING RENEWS BY ITSELF.
-//   4. rows that otherwise only grow (ended sessions, used tokens, old rate-limit windows) are removed.
+//   4. outgoing webhooks and e-mail: one delivery run (the same as `npm run outbound:deliver`, docs/phase4/06).
+//      Both do nothing unless WEBHOOK_DELIVERY / MAIL_SENDER are set.
+//   5. rows that otherwise only grow (ended sessions, used tokens, old rate-limit windows, sent webhooks and e-mails,
+//      old outbox events) are removed.
 // Nothing schedules this command yet (docs/runbooks/housekeeping.md): someone has to run it.
 //
 //   npm run housekeeping        (npm run cards:sweep-expired is the old name of the same command)
@@ -75,6 +78,49 @@ export async function sweepBilling(app: App, now: Date): Promise<{ notices: numb
   return total;
 }
 
+/**
+ * Outgoing webhooks and e-mail: one delivery run for every company (each company and each channel by itself; a
+ * failure is printed, counted and gives a non-zero exit code - it does not stop the others).
+ */
+export async function deliverOutbound(app: App, now: () => Date = () => new Date()): Promise<Record<string, number | string[]>> {
+  const total = { webhooks_delivered: 0, webhooks_failed: 0, webhooks_paused: 0, events_published: 0, mails_sent: 0, mails_failed: 0, mails_no_address: 0, failed: 0 };
+  const failures: string[] = [];
+  if (!app.webhooks.deliveryEnabled && !app.mail.enabled) return { ...total, failures };
+  await app.mail.flush();
+  const tenants = await app.db.withTenantTx(PLATFORM_TENANT_ID, (tx) => listTenants(tx, 10_000, null), { platformScope: true });
+  for (const tenant of tenants) {
+    const channels: Array<[string, () => Promise<void>]> = [
+      ['webhooks', async () => {
+        const r = await app.webhooks.runCompany(tenant.id, now);
+        total.events_published += r.published;
+        total.webhooks_delivered += r.delivered;
+        total.webhooks_failed += r.failed;
+        total.webhooks_paused += r.paused;
+      }],
+      ['mail', async () => {
+        const r = await app.mail.runCompany(tenant.id, now);
+        total.mails_sent += r.sent;
+        total.mails_failed += r.failed;
+        total.mails_no_address += r.no_address;
+      }],
+    ];
+    for (const [name, run] of channels) {
+      try {
+        await run();
+      } catch (err) {
+        total.failed += 1;
+        const reason = err instanceof Error ? err.message.slice(0, 200) : 'unknown error';
+        if (failures.length < 20) failures.push(`${tenant.id}: ${name}: ${reason}`);
+        app.log.error({ tenant_id: tenant.id, job: name, reason }, 'outbound delivery: a run failed');
+      }
+    }
+  }
+  // the e-mail notices this run raised itself (a webhook endpoint paused) are queued before the process ends
+  await app.mail.flush();
+  if (total.failed > 0) process.exitCode = 1;
+  return { ...total, failures };
+}
+
 const DAY_MS = 86_400_000;
 
 /**
@@ -83,9 +129,9 @@ const DAY_MS = 86_400_000;
  * rate-limit windows, and login attempts older than 90 days. The audit log and the card usage
  * history are never touched.
  */
-export async function purgeOldRows(app: App, now: Date): Promise<{ sessions: number; enrollment_tokens: number; idempotency_keys: number; global: number }> {
+export async function purgeOldRows(app: App, now: Date): Promise<{ sessions: number; enrollment_tokens: number; idempotency_keys: number; outbound: number; global: number }> {
   const cutoff = new Date(now.getTime() - 30 * DAY_MS);
-  const removed = { sessions: 0, enrollment_tokens: 0, idempotency_keys: 0, global: 0 };
+  const removed = { sessions: 0, enrollment_tokens: 0, idempotency_keys: 0, outbound: 0, global: 0 };
   const tenants = await app.db.withTenantTx(PLATFORM_TENANT_ID, (tx) => listTenants(tx, 100_000, null), { platformScope: true });
   for (const tenant of tenants) {
     await app.db.withTenantTx(tenant.id, async (tx) => {
@@ -95,6 +141,9 @@ export async function purgeOldRows(app: App, now: Date): Promise<{ sessions: num
         'DELETE FROM enrollment_tokens WHERE tenant_id = $1 AND (used_at < $2 OR expires_at < $2)', [tenant.id, cutoff])).rowCount;
       removed.idempotency_keys += (await tx.query(
         'DELETE FROM idempotency_keys WHERE tenant_id = $1 AND expires_at < $2', [tenant.id, now])).rowCount;
+      // webhook events and deliveries, queued e-mail notices and messages: 30 days
+      removed.outbound += await app.webhooks.purge(tx, tenant.id, cutoff);
+      removed.outbound += await app.mail.purge(tx, tenant.id, cutoff);
     });
   }
   removed.global += (await app.db.global('DELETE FROM auth_transactions WHERE expires_at < $1', [new Date(now.getTime() - DAY_MS)])).rowCount;
@@ -112,6 +161,7 @@ export async function runHousekeeping(app: App, now: Date): Promise<Record<strin
     ['swept', () => sweepExpiredCards(app, now)],
     ['retirement_nudges', () => sweepRetirementNudges(app, now)],
     ['billing', () => sweepBilling(app, now)],
+    ['outbound', () => deliverOutbound(app)],
     ['purged', () => purgeOldRows(app, now)],
   ];
   for (const [name, job] of jobs) {

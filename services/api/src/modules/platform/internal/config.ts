@@ -63,6 +63,17 @@ export interface Config {
    * `eventKey` checks the signature on the provider's messages; without it every message is refused.
    */
   payment: { provider: 'none' | 'fake'; eventKey: Secret<Buffer> | null };
+  /**
+   * Outgoing webhooks (docs/phase4/06, part B). 'none' (default): endpoints can be registered but nothing is sent -
+   * events wait in the outbox. 'https': the delivery job sends signed messages to the registered public addresses.
+   */
+  webhooks: { delivery: 'none' | 'https' };
+  /**
+   * E-mail of notices (docs/phase4/06, part C). 'none' (default): no notice is queued and no e-mail leaves; notices
+   * are written to the log as before. 'fake': a stand-in that sends nothing, for tests - refused unless NODE_ENV=test.
+   * No real e-mail service is connected yet (the founder chooses one).
+   */
+  mail: { sender: 'none' | 'fake'; from: string };
 }
 
 export class ConfigError extends Error {
@@ -285,7 +296,11 @@ export function loadConfig(env: Env): Config {
     exportDir: raw('EXPORT_DIR') ?? './exports',
     webDistDir: raw('WEB_DIST_DIR') ?? null,
     payment: { provider: oneOf('PAYMENT_PROVIDER', ['none', 'fake'] as const, 'none'), eventKey: null },
+    webhooks: { delivery: oneOf('WEBHOOK_DELIVERY', ['none', 'https'] as const, 'none') },
+    mail: { sender: oneOf('MAIL_SENDER', ['none', 'fake'] as const, 'none'), from: raw('MAIL_FROM') ?? 'LegacyAI <no-reply@localhost>' },
   };
+  if (config.mail.sender === 'fake' && nodeEnv !== 'test') problems.push('MAIL_SENDER=fake sends nothing and is allowed only when NODE_ENV=test');
+  if (/[\r\n]/.test(config.mail.from) || config.mail.from.length > 200) problems.push('MAIL_FROM must be one line of at most 200 characters');
   const eventKeyText = raw('PAYMENT_EVENT_KEY');
   if (eventKeyText !== undefined) {
     const key = decodeKey('PAYMENT_EVENT_KEY', eventKeyText, 32);

@@ -3,6 +3,7 @@
 // Enforced by dependency-cruiser (see .dependency-cruiser.cjs).
 
 export { ARGON2_FLOOR, ConfigError, loadConfig, Secret, type Config, type Keyring } from './internal/config.ts';
+export { SealingCipher } from './internal/sealing.ts';
 export { createLogger, scrub, scrubString, type Logger } from './internal/logger.ts';
 export {
   Database, EXPECTED_SCHEMA_VERSION, PLATFORM_TENANT_ID, UnsafeDatabaseRoleError, type QueryResult, type Tx,

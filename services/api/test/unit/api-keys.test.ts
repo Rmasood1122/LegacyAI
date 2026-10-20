@@ -92,12 +92,13 @@ describe('the copy of an answer kept for a retried request', () => {
     expect(JSON.stringify(stored)).not.toContain(SECRET);
   });
 
-  it('every operation that returns a one-time secret declares it (secret code, enrollment token, API key)', () => {
+  it('every operation that returns a one-time secret declares it (secret code, enrollment token, API key, webhook signing secret)', () => {
     const declared = Object.fromEntries([...contract.operations.values()].filter((op) => op.oneTimeSecrets.length > 0).map((op) => [op.operationId, [...op.oneTimeSecrets]]));
     const card = ['sc', 'enrollment_token', 'enrollment_token_expires_at'];
     expect(declared).toEqual({
       issueCard: card, replaceCard: card, renewCard: card, unlockCard: card, issueEnrollmentToken: card.slice(1), createTenant: card,
       renewCompanyCard: card, recoverOwnerCard: card, createApiKey: ['api_key'],
+      createWebhookEndpoint: ['signing_secret'], rotateWebhookSecret: ['signing_secret'],
     });
   });
 

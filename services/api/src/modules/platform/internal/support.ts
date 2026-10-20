@@ -175,7 +175,9 @@ export interface NotificationEvent {
     // an API key was made; a key was stopped by the system (suspended, or revoked because its maker's card changed)
     | 'api_key_created' | 'api_key_stopped'
     // many wrong secrets were tried against one key (the key keeps working; the Owners should know)
-    | 'api_key_wrong_secrets';
+    | 'api_key_wrong_secrets'
+    // a webhook endpoint kept failing and was paused (nothing more is sent to it until an Owner switches it on again)
+    | 'webhook_paused';
   tenantId: string;
   /** When the notice goes to the platform operator: the company it is about. */
   aboutTenantId?: string;

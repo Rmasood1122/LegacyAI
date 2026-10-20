@@ -36,6 +36,8 @@ tags:
   - name: billing
   - name: api-keys
     description: API keys for machines. These operations never accept a key themselves.
+  - name: webhooks
+    description: Outgoing webhooks - signed messages to a company's https endpoints when its knowledge changes. Company Owner only; these operations never accept a key.
 paths:
   /v1/health:
     get:
@@ -7300,6 +7302,303 @@ paths:
           $ref: "#/components/responses/Unprocessable"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+  /v1/webhooks:
+    get:
+      operationId: listWebhookEndpoints
+      summary: The company's webhook endpoints, newest first - never their secrets. Removed endpoints are not listed.
+      tags:
+        - webhooks
+      x-permission: webhook:read
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                  - next_cursor
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WebhookEndpoint"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    post:
+      operationId: createWebhookEndpoint
+      summary: Register an https endpoint. The answer holds the signing secret - the ONLY time it is shown. Events are sent from now on; earlier ones are not.
+      tags:
+        - webhooks
+      x-permission: webhook:manage
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      x-one-time-secrets:
+        - signing_secret
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewWebhookEndpointRequest"
+      responses:
+        "201":
+          description: Created. `signing_secret` is shown this once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpointWithSecret"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: "Conflict. `too-many-endpoints`: the company already has 10 endpoints."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The address is not https, uses a port other than 443, holds a user name, password or fragment, names an IP address instead of a host, or names an internal host.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/webhooks/options:
+    get:
+      operationId: getWebhookOptions
+      summary: The events an endpoint can receive, the limits, and whether this server sends anything at all.
+      tags:
+        - webhooks
+      x-permission: webhook:read
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookOptions"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/webhooks/{webhook_id}:
+    patch:
+      operationId: updateWebhookEndpoint
+      summary: Change an endpoint's name, events or level, or switch it off and on. Switching it on again ends a pause. The address cannot change - register a new endpoint instead.
+      tags:
+        - webhooks
+      x-permission: webhook:manage
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEndpointChange"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpoint"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "Conflict. `webhook-removed`: the endpoint was removed."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/webhooks/{webhook_id}/remove:
+    post:
+      operationId: removeWebhookEndpoint
+      summary: Remove an endpoint for good. Its secret is wiped and messages not yet sent are cancelled. Removing a removed endpoint changes nothing.
+      tags:
+        - webhooks
+      x-permission: webhook:manage
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpoint"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/webhooks/{webhook_id}/rotate-secret:
+    post:
+      operationId: rotateWebhookSecret
+      summary: Replace the signing secret. The new one is shown once and signs every message from now on (retries included); the old one stops at once.
+      tags:
+        - webhooks
+      x-permission: webhook:manage
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      x-one-time-secrets:
+        - signing_secret
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Success. `signing_secret` is shown this once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpointWithSecret"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "Conflict. `webhook-removed`: the endpoint was removed."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/webhooks/{webhook_id}/test:
+    post:
+      operationId: sendWebhookTest
+      summary: Queue a test message (type `webhook.test`) to the endpoint. It is sent by the next delivery run, like any message.
+      tags:
+        - webhooks
+      x-permission: webhook:manage
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookDelivery"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "Conflict. `webhook-not-active`: the endpoint is switched off, paused or removed. `webhook-test-waiting`: a test message to it is already waiting."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/webhooks/{webhook_id}/deliveries:
+    get:
+      operationId: listWebhookDeliveries
+      summary: The messages to one endpoint, newest first - what happened to each, never what the receiver answered.
+      tags:
+        - webhooks
+      x-permission: webhook:read
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                  - next_cursor
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WebhookDelivery"
+                  next_cursor:
+                    type:
+                      - "string"
+                      - "null"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 components:
   securitySchemes:
     sessionCookie:
@@ -7602,6 +7901,13 @@ components:
           - allow
           - deny
           - event
+    WebhookId:
+      name: webhook_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   responses:
     PayloadTooLarge:
       description: "The file is too large."
@@ -12400,3 +12706,280 @@ components:
         discard_remaining_days:
           description: Needed to renew while the running term still has days left (the new term starts today).
           type: boolean
+    WebhookTopic:
+      description: "An event an endpoint can receive. Every message holds identifiers and labels only, never a title or text: `data` = { item_id, status, department_id, sensitivity, previous_sensitivity }."
+      type: string
+      enum:
+        - knowledge.item_released
+        - knowledge.item_changed
+        - knowledge.item_withdrawn
+    WebhookEndpointFields:
+      type: object
+      required:
+        - id
+        - name
+        - url
+        - topics
+        - max_sensitivity
+        - status
+        - paused_reason
+        - consecutive_failures
+        - secret_hint
+        - last_success_at
+        - last_failure_at
+        - created_by_card_id
+        - created_at
+        - updated_at
+        - removed_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        url:
+          type: string
+        topics:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebhookTopic"
+        max_sensitivity:
+          description: Events about knowledge labelled above this level are not sent (an item relabelled out of reach is still reported, with its new level).
+          allOf:
+            - $ref: "#/components/schemas/SensitivityLevel"
+        status:
+          description: "`paused`: deliveries kept failing for more than a day; nothing is sent until an Owner switches the endpoint on again. `disabled`: switched off by an Owner. Events that happen while an endpoint is paused or disabled are not sent later."
+          type: string
+          enum:
+            - active
+            - disabled
+            - paused
+            - removed
+        paused_reason:
+          type:
+            - "string"
+            - "null"
+          enum:
+            - failing
+            - null
+        consecutive_failures:
+          description: Failed attempts in a row since the last success.
+          type: integer
+          minimum: 0
+        secret_hint:
+          description: The last four characters of the signing secret, to tell secrets apart. Null once removed.
+          type:
+            - "string"
+            - "null"
+        last_success_at:
+          type:
+            - "string"
+            - "null"
+          format: date-time
+        last_failure_at:
+          type:
+            - "string"
+            - "null"
+          format: date-time
+        created_by_card_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        removed_at:
+          type:
+            - "string"
+            - "null"
+          format: date-time
+    WebhookEndpoint:
+      description: A webhook endpoint as it is listed - never its secret.
+      allOf:
+        - $ref: "#/components/schemas/WebhookEndpointFields"
+      unevaluatedProperties: false
+    WebhookEndpointWithSecret:
+      description: An endpoint WITH its signing secret, which is shown only here.
+      allOf:
+        - $ref: "#/components/schemas/WebhookEndpointFields"
+        - type: object
+          required:
+            - secret_already_shown
+          properties:
+            signing_secret:
+              description: "The secret that signs every message (Standard Webhooks format: `whsec_` + base64). Shown ONCE - store it now. Absent on an idempotent replay."
+              type: string
+              pattern: "^whsec_[A-Za-z0-9+/]+={0,2}$"
+            secret_already_shown:
+              type: boolean
+              description: "True on an idempotent replay: the secret is not repeated."
+      unevaluatedProperties: false
+    NewWebhookEndpointRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - url
+        - topics
+        - max_sensitivity
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: "^[^\\u0000-\\u001f\\u007f]+$"
+        url:
+          description: An https address on the public internet, with a host name (no IP address). Every address the name resolves to must be public, checked again at every delivery.
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https://"
+        topics:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/WebhookTopic"
+        max_sensitivity:
+          $ref: "#/components/schemas/SensitivityLevel"
+    WebhookEndpointChange:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: "^[^\\u0000-\\u001f\\u007f]+$"
+        topics:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/WebhookTopic"
+        max_sensitivity:
+          $ref: "#/components/schemas/SensitivityLevel"
+        enabled:
+          description: false switches the endpoint off; true switches it on and ends a pause.
+          type: boolean
+    WebhookDelivery:
+      description: One message to one endpoint and what happened to it. Nothing the receiver answered is kept, except the status code.
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - event_id
+        - topic
+        - status
+        - attempts
+        - next_attempt_at
+        - last_attempt_at
+        - last_status_code
+        - last_error
+        - delivered_at
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        event_id:
+          description: Sent as `webhook-id`; the same on every retry.
+          type: string
+          format: uuid
+        topic:
+          description: An event topic, or `webhook.test`.
+          type: string
+        status:
+          type: string
+          enum:
+            - pending
+            - sending
+            - delivered
+            - failed
+            - cancelled
+        attempts:
+          type: integer
+          minimum: 0
+        next_attempt_at:
+          description: When it is tried next. Null once it is delivered, failed or cancelled.
+          type:
+            - "string"
+            - "null"
+          format: date-time
+        last_attempt_at:
+          type:
+            - "string"
+            - "null"
+          format: date-time
+        last_status_code:
+          type:
+            - "integer"
+            - "null"
+        last_error:
+          description: "`address_refused`: the host resolved to an address that is not public; `http_status`: the receiver answered with a status other than 2xx (redirects are not followed); `secret_unreadable`: the server could not read the signing secret (rotate it)."
+          type:
+            - "string"
+            - "null"
+          enum:
+            - address_refused
+            - dns
+            - connect
+            - tls
+            - timeout
+            - http_status
+            - secret_unreadable
+            - null
+        delivered_at:
+          type:
+            - "string"
+            - "null"
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+    WebhookOptions:
+      type: object
+      additionalProperties: false
+      required:
+        - topics
+        - delivery_enabled
+        - limits
+      properties:
+        topics:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - topic
+              - description
+            properties:
+              topic:
+                $ref: "#/components/schemas/WebhookTopic"
+              description:
+                type: string
+        delivery_enabled:
+          description: False when this server sends nothing (WEBHOOK_DELIVERY=none, the default). Endpoints can still be registered; events are not sent.
+          type: boolean
+        limits:
+          type: object
+          additionalProperties: false
+          required:
+            - max_endpoints
+            - max_attempts
+            - timeout_seconds
+            - pause_after_failures
+          properties:
+            max_endpoints:
+              type: integer
+            max_attempts:
+              type: integer
+            timeout_seconds:
+              type: integer
+            pause_after_failures:
+              type: integer

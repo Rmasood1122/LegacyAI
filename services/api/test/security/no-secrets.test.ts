@@ -123,9 +123,17 @@ afterAll(async () => {
   await t.close();
 });
 
+/**
+ * A secret that is only digits (the 6-digit authenticator code) counts as found only when it stands on its own: inside
+ * a longer number - a random 16-digit card number in card_directory, a timestamp - it is a coincidence, not a leak
+ * (seen once in CI: one card number of the many the test files issue happened to contain the code).
+ */
+const appears = (haystack: string, value: string): boolean =>
+  /^\d+$/.test(value) ? new RegExp(`(?<!\\d)${value}(?!\\d)`).test(haystack) : haystack.includes(value);
+
 function findLeaks(haystack: string): string[] {
   const hits: string[] = [];
-  for (const [value, what] of secrets) if (haystack.includes(value)) hits.push(what);
+  for (const [value, what] of secrets) if (appears(haystack, value)) hits.push(what);
   return hits;
 }
 

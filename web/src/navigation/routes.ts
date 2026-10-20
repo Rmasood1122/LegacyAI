@@ -97,6 +97,7 @@ export const ROUTES = {
   billing: { path: '/billing', label: 'Billing and renewal', requiredOperation: 'getSubscription', menu: 'manage' },
   // Keys for machines. Only an Owner holds the right to list them.
   apiKeys: { path: '/api-keys', label: 'API keys', requiredOperation: 'listApiKeys', menu: 'manage' },
+  webhooks: { path: '/webhooks', label: 'Webhooks', requiredOperation: 'listWebhookEndpoints', menu: 'manage' },
   audit: { path: '/audit', label: 'Audit log', requiredOperation: 'listAuditEvents', menu: 'manage' },
   operator: { path: '/operator', label: 'Operator console', requiredOperation: 'listTenants', menu: 'manage' },
 } as const satisfies Record<string, RouteDef>;

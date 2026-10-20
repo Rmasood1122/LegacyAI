@@ -32,7 +32,7 @@ module.exports = {
       comment: 'platform must not depend on identity-access or billing (it defines ports instead).',
       severity: 'error',
       from: { path: '^src/modules/platform/' },
-      to: { path: '^src/modules/(identity-access|billing|knowledge-gateway)/' },
+      to: { path: '^src/modules/(identity-access|billing|knowledge-gateway|webhooks|mail)/' },
     },
     {
       name: 'identity-does-not-depend-on-knowledge',
@@ -46,6 +46,13 @@ module.exports = {
       severity: 'error',
       from: { path: '^src/modules/billing/' },
       to: { path: '^src/modules/identity-access/' },
+    },
+    {
+      name: 'outbound-modules-stand-alone',
+      comment: 'webhooks and mail know no other feature module: identity reaches mail only through the RecipientDirectory port that app.ts wires.',
+      severity: 'error',
+      from: { path: '^src/modules/(webhooks|mail)/' },
+      to: { path: '^src/modules/(identity-access|billing|knowledge-gateway|webhooks|mail)/', pathNot: '^src/modules/$1/' },
     },
     {
       name: 'shared-depends-on-nothing',

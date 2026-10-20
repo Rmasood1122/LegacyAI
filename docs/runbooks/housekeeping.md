@@ -7,7 +7,7 @@ scheduled, run it once a day by hand, or accept what "What happens if it is not 
 
 ## What it does
 
-One command, four jobs, for every company:
+One command, five jobs, for every company:
 
 1. **Cards that have expired are written down as expired** (state, usage history, audit row) and renewal notices
    go out. Whether a card works never depends on this: the API treats a card as expired the moment its date passes.
@@ -25,6 +25,11 @@ One command, four jobs, for every company:
    With no payment provider connected, automatic renewal does nothing. See docs/phase4/05-billing.md.
    It also FINISHES payments that are on record but whose next steps did not happen (the service stopped in
    between): `billing.finished` counts them. Each is put into effect if possible, otherwise reported once.
+
+5. **Outgoing webhooks and e-mail (Phase 4, docs/phase4/06):** one delivery run, the same as
+   `npm run outbound:deliver` (see `docs/runbooks/outbound-delivery.md`). It does nothing unless
+   `WEBHOOK_DELIVERY=https` or an e-mail sender is configured. Old webhook events and deliveries and old queued
+   e-mails (30 days) are removed with the other old rows in job 3.
 
 A job that fails is reported in the output and does not stop the others; the command then ends with a failure
 code.
