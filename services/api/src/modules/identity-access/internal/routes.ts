@@ -274,6 +274,9 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
       kind: 'session',
       policy: {
         resource: async ({ tx, subject, body }) => {
+          // one at a time with other changes of the company's roles - and with the directory's (SCIM) reading of how
+          // high a person ranks, so that it cannot remove a person while an Owner card is being issued to them
+          await lockTenantRoles(tx, subject.tenant_id);
           // "Revoke a peer's card, then issue a new one to the same person" must not be a way into
           // that person's identity. So the person counts with the highest rank any of their cards
           // ever held, and the actor must rank strictly above it.

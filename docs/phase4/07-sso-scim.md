@@ -199,7 +199,11 @@ its maker's card state decides on every request.
 | remove a person (DELETE): they are recorded as left, their history stays, and the directory gets 404 for them from then on | erase anyone's history |
 
 Why Owners are out of reach: a mistake or an attack in the directory must never lock the company out of itself. An
-Admin who leaves IS de-provisioned by the directory.
+Admin who leaves IS de-provisioned by the directory. The directory can also change an Admin's e-mail address, so the
+notices about that Admin's card would go to the new address. The notices carry no secret.
+
+Reading a person's rank and changing the person happen under the company's role lock, the same lock that issuing a
+card and changing roles take. A directory removal cannot catch an Owner card being issued at the same moment.
 
 Groups are not supported. Roles are given by an administrator, never by the directory.
 
@@ -224,8 +228,13 @@ Base address for the directory: `https://<api>/v1/scim/v2`. Authentication: `Aut
 - Errors are this API's problem details (RFC 9457), not SCIM error messages. The status codes are the SCIM ones (400,
   401, 403, 404, 409).
 - Answers are `application/json`. Requests may be `application/json` or `application/scim+json`.
-- Only the filters `userName eq "..."` and `externalId eq "..."`. No sorting, no bulk, no ETags, no groups. A PATCH of
-  an attribute that is not stored here is refused (400), so the directory learns that it was not done.
+- Only the filters `userName eq "..."` and `externalId eq "..."`. No sorting, no bulk, no ETags, no groups.
+  `attributes` and `excludedAttributes` are accepted and ignored.
+- Attributes that are not stored here (title, phone numbers, the enterprise extension, ...) are ignored by POST, PUT
+  and PATCH alike. A directory's usual update carries them and must not fail because of them. Groups, roles,
+  entitlements, certificates and passwords are refused (400), so the directory learns that it was not done.
+- A PUT without `active` means active (replace semantics). A PUT can bring back a person who had left; their cards
+  stay revoked.
 - `active` also accepts the strings "True" and "False", because one large directory sends those.
 - While the company is in its read-only grace period, the directory is refused too: provisioning writes.
 
@@ -243,6 +252,14 @@ keys stay as rows, but without the permission they can do nothing (`DENY_UNKNOWN
 
 ### What was tested, and what was not
 
+- **Review before the first push** (a read-only review). It found:
+  - JSON sent as `application/scim+json` was treated as a file upload;
+  - a test expectation that could not hold;
+  - the race with card issuing;
+  - PATCH refusing the attributes that real directories send;
+  - names and control characters the database would refuse with a 500.
+
+  All are fixed.
 - **Run locally (no database):**
   - unit tests of what a directory sends: user names, display-name fallbacks, the primary e-mail address, "True" and
     "False", control characters;

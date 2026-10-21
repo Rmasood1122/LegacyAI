@@ -7,7 +7,7 @@
 import { problems } from '../../../shared/errors.ts';
 import { actingCardId, type RequestContext, type ResourceRef, type Subject } from '../../../shared/policy-types.ts';
 import { writeAudit, type RouteDef, type Tx } from '../../platform/index.ts';
-import type { CardService } from './cards.ts';
+import { lockTenantRoles, type CardService } from './cards.ts';
 import { offboardPerson, personRank } from './departure.ts';
 import {
   applyPatch, parseScimFilter, SCIM_LIST_SCHEMA, SCIM_PERSON_COLUMNS, scimStateOf, ScimInputError, serviceProviderConfig, stateOfRow, toScimUser,
@@ -30,18 +30,22 @@ const inputError = (err: unknown): never => {
 
 const collection = async ({ subject }: { subject: Subject }): Promise<ResourceRef> => ({ type: 'person', tenant_id: subject.tenant_id, collection: true });
 
-const MANAGED = `SELECT ${SCIM_PERSON_COLUMNS} FROM people WHERE id = $1 AND scim_managed`;
+// tenant_id as well as row-level security: defence in depth
+const MANAGED = `SELECT ${SCIM_PERSON_COLUMNS} FROM people WHERE tenant_id = $2 AND id = $1 AND scim_managed`;
 const MANAGED_FOR_UPDATE = `${MANAGED} FOR UPDATE`;
 
-async function managedPerson(tx: Tx, personId: string, forUpdate = false): Promise<ScimPersonRow | null> {
-  const { rows } = await tx.query<ScimPersonRow>(forUpdate ? MANAGED_FOR_UPDATE : MANAGED, [personId]);
+async function managedPerson(tx: Tx, tenantId: string, personId: string, forUpdate = false): Promise<ScimPersonRow | null> {
+  const { rows } = await tx.query<ScimPersonRow>(forUpdate ? MANAGED_FOR_UPDATE : MANAGED, [personId, tenantId]);
   return rows[0] ?? null;
 }
 
 /** One person, as the policy needs it: only people the directory manages, and how high their live card ranks. */
 async function onePerson({ tx, subject, params }: { tx: Tx; subject: Subject; params: { person_id: string } }): Promise<ResourceRef | null> {
-  const row = await managedPerson(tx, params.person_id);
+  const row = await managedPerson(tx, subject.tenant_id, params.person_id);
   if (row === null) return null;
+  // the roles of the company cannot change between this rank and the work it guards (as for updatePerson): otherwise
+  // an Owner card issued at the same moment could be revoked by a directory that read the person as no Owner
+  await lockTenantRoles(tx, subject.tenant_id);
   return { type: 'person', id: row.id, tenant_id: subject.tenant_id, owner_person_id: row.id, target_rank: await personRank(tx, subject.tenant_id, row.id) };
 }
 
@@ -63,8 +67,8 @@ export function scimRoutes(deps: { cards: CardService }): RouteDef[] {
       ({ rows } = await tx.query<ScimPersonRow>(
         `UPDATE people SET scim_user_name = $2, display_name = $3, email = $4, external_id = $5,
                 status = CASE WHEN $6::boolean THEN 'active' ELSE 'departed' END, updated_at = $7
-          WHERE id = $1 AND scim_managed RETURNING ${SCIM_PERSON_COLUMNS}`,
-        [before.id, next.userName, next.displayName, next.email, next.externalId, next.active, ctx.now]));
+          WHERE tenant_id = $8 AND id = $1 AND scim_managed RETURNING ${SCIM_PERSON_COLUMNS}`,
+        [before.id, next.userName, next.displayName, next.email, next.externalId, next.active, ctx.now, subject.tenant_id]));
     } catch (err) {
       if ((err as { code?: string }).code === '23505') throw problems.conflict('scim-uniqueness', 'Another person already has this userName, externalId or e-mail address');
       throw err;
@@ -149,8 +153,8 @@ export function scimRoutes(deps: { cards: CardService }): RouteDef[] {
       operationId: 'scimGetUser',
       kind: 'session-or-key',
       policy: { resource: onePerson },
-      handler: async ({ tx, params }) => {
-        const row = await managedPerson(tx, params.person_id);
+      handler: async ({ tx, subject, params }) => {
+        const row = await managedPerson(tx, subject.tenant_id, params.person_id);
         if (row === null) throw problems.notFound();
         return { body: toScimUser(row, location(row.id)) };
       },
@@ -160,7 +164,7 @@ export function scimRoutes(deps: { cards: CardService }): RouteDef[] {
       kind: 'session-or-key',
       policy: { resource: onePerson },
       handler: async ({ tx, subject, params, body, ctx }) => {
-        const before = await managedPerson(tx, params.person_id, true);
+        const before = await managedPerson(tx, subject.tenant_id, params.person_id, true);
         if (before === null) throw problems.notFound();
         let next: ScimState;
         try {
@@ -177,7 +181,7 @@ export function scimRoutes(deps: { cards: CardService }): RouteDef[] {
       kind: 'session-or-key',
       policy: { resource: onePerson },
       handler: async ({ tx, subject, params, body, ctx }) => {
-        const before = await managedPerson(tx, params.person_id, true);
+        const before = await managedPerson(tx, subject.tenant_id, params.person_id, true);
         if (before === null) throw problems.notFound();
         let next: ScimState;
         try {
@@ -197,11 +201,11 @@ export function scimRoutes(deps: { cards: CardService }): RouteDef[] {
       kind: 'session-or-key',
       policy: { resource: onePerson },
       handler: async ({ tx, subject, params, ctx }) => {
-        const before = await managedPerson(tx, params.person_id, true);
+        const before = await managedPerson(tx, subject.tenant_id, params.person_id, true);
         if (before === null) throw problems.notFound();
         await tx.query(
-          `UPDATE people SET status = 'departed', scim_managed = false, scim_user_name = NULL, external_id = NULL, updated_at = $2 WHERE id = $1`,
-          [before.id, ctx.now]);
+          `UPDATE people SET status = 'departed', scim_managed = false, scim_user_name = NULL, external_id = NULL, updated_at = $2 WHERE tenant_id = $3 AND id = $1`,
+          [before.id, ctx.now, subject.tenant_id]);
         if (before.status === 'active') await offboardPerson(tx, cards, { tenantId: subject.tenant_id, personId: before.id, actorCardId: actingCardId(subject) }, ctx);
         await audit(tx, subject, ctx, before.id, 'SCIM_USER_REMOVED', ['active']);
         return { status: 204 };

@@ -55,8 +55,8 @@ export class ScimInputError extends Error {}
 
 const text = (v: unknown, max: number): string | null => {
   if (typeof v !== 'string') return null;
-  // control characters are replaced, never stored
-  const t = v.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+  // control characters (C0, DEL, C1) and line/paragraph separators are replaced, never stored
+  const t = v.replace(/[\p{Cc}\u2028\u2029]/gu, ' ').trim();
   return t.length === 0 ? null : t.slice(0, max);
 };
 
@@ -82,7 +82,7 @@ function displayNameOf(body: Record<string, unknown>, userName: string): string 
   const name = (body.name !== null && typeof body.name === 'object' ? body.name : {}) as Record<string, unknown>;
   const given = text(name.givenName, 100);
   const family = text(name.familyName, 100);
-  return text(body.displayName, 200) ?? text(name.formatted, 200) ?? (given || family ? [given, family].filter(Boolean).join(' ') : null) ?? userName.slice(0, 200);
+  return text(body.displayName, 200) ?? text(name.formatted, 200) ?? (given || family ? [given, family].filter(Boolean).join(' ').slice(0, 200) : null) ?? userName.slice(0, 200);
 }
 
 /** A whole User, as POST and PUT send it. Throws ScimInputError for what cannot be stored. */
@@ -107,8 +107,9 @@ export interface PatchOperation { op: string; path?: string; value?: unknown }
 /**
  * PATCH (RFC 7644 3.5.2) on the attributes above. Supported: add / replace / remove of active, displayName, userName,
  * externalId, name.formatted / givenName / familyName, emails (and emails[...].value, the way directories address the
- * work address); a replace without a path carrying an object of those attributes. Anything else throws, so that the
- * directory hears that it was not done instead of believing it was.
+ * work address); a replace without a path carrying an object of those attributes. Attributes that are not stored here
+ * are ignored, as POST and PUT ignore them; ones that would give or prove access (groups, roles, entitlements,
+ * certificates, a password) throw, so that the directory hears that it was not done instead of believing it was.
  */
 export function applyPatch(current: ScimState, operations: readonly PatchOperation[]): ScimState {
   let next = { ...current };
@@ -144,9 +145,12 @@ export function applyPatch(current: ScimState, operations: readonly PatchOperati
       if (remove) next.email = null;
       else if (lower === 'emails' || /^emails\[.*\]$/.test(lower)) next.email = emailOf(Array.isArray(value) ? value : [value]);
       else next.email = emailOf([{ value, primary: true }]);
-    } else {
+    } else if (/^(groups|roles|entitlements|x509certificates|password)\b/.test(lower)) {
+      // what would give or prove access is never taken from the directory: it hears that this was not done
       throw new ScimInputError(`this attribute cannot be changed here: ${p.slice(0, 80)}`);
     }
+    // anything else (title, phone numbers, addresses, the enterprise extension, ...) is not stored here and is ignored,
+    // as POST and PUT ignore it: a directory's usual update must not fail because it also carries those
   };
   for (const operation of operations) {
     const op = typeof operation.op === 'string' ? operation.op.toLowerCase() : '';

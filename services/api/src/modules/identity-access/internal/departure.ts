@@ -11,7 +11,7 @@ export async function offboardPerson(
   tx: Tx, cards: CardService, p: { tenantId: string; personId: string; actorCardId: string | null }, ctx: RequestContext,
 ): Promise<void> {
   const live = await tx.query<CardRow>(
-    `SELECT ${CARD_COLUMNS} FROM cards WHERE person_id = $1 AND state NOT IN ('revoked', 'replaced') FOR UPDATE`, [p.personId]);
+    `SELECT ${CARD_COLUMNS} FROM cards WHERE tenant_id = $2 AND person_id = $1 AND state NOT IN ('revoked', 'replaced') FOR UPDATE`, [p.personId, p.tenantId]);
   for (const card of live.rows) await cards.revoke(tx, card, 'offboarded', p.actorCardId, ctx);
   await clearLeavingDate(tx, p.tenantId, p.personId);
 }

@@ -312,11 +312,12 @@ describe('what a request with a key can do', () => {
       .filter((action) => !action.startsWith('api_key:')));
     expect(asked.size).toBeGreaterThan(0);
     for (const action of asked) expect(['gap:read', 'knowledge:ask', 'knowledge:read', 'source:read', 'topic:read', 'person:scim']).toContain(action);
-    // ... and every question about person:scim was refused: this key is not the directory's
+    // ... and every question about person:scim was refused: this key is not the directory's (a person that does not
+    // exist is "not found" before the policy is asked, for any caller)
     const scim = (await su.query(`SELECT decision, reason_code, details FROM audit_log WHERE tenant_id = $1 AND action = 'person:scim'`, [tenant.tenantId])).rows
       .filter((r) => detailsOf(r).api_key_id === made.id);
-    expect(scim.length).toBeGreaterThan(0);
-    for (const r of scim) expect([r.decision, r.reason_code]).toEqual(['deny', 'DENY_API_KEY_SCOPE']);
+    expect(scim.some((r) => r.reason_code === 'DENY_API_KEY_SCOPE')).toBe(true);
+    for (const r of scim) expect([['deny', 'DENY_API_KEY_SCOPE'], ['deny', 'DENY_RESOURCE_NOT_FOUND']]).toContainEqual([r.decision, r.reason_code]);
   });
 });
 

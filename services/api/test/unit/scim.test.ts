@@ -59,9 +59,23 @@ describe('PATCH', () => {
     expect(applyPatch(jane, [{ op: 'replace', path: 'displayName', value: 'J. Doe' }]).displayName).toBe('J. Doe');
   });
 
+  it('attributes it does not store are ignored, as a directory\'s usual update carries them (title, phone, the enterprise extension)', () => {
+    expect(applyPatch(jane, [
+      { op: 'replace', path: 'title', value: 'x' }, { op: 'Add', path: 'phoneNumbers[type eq "work"].value', value: '+00 000' },
+      { op: 'replace', path: 'urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:department', value: 'Ops' },
+      { op: 'Replace', path: 'active', value: 'False' },
+    ])).toEqual({ ...jane, active: false });
+  });
+
+  it('a display name built from long given and family names fits the 200 characters a person\'s name may have', () => {
+    expect(scimStateOf({ userName: 'u', name: { givenName: 'G'.repeat(100), familyName: 'F'.repeat(100) } }).displayName).toHaveLength(200);
+    expect(scimStateOf({ userName: 'a\u0085b\u2028c' }).userName).toBe('a b c');
+  });
+
   it.each([
-    ['an attribute it does not store (so the directory hears it was not done)', [{ op: 'replace', path: 'title', value: 'x' }]],
     ['groups (roles are given by an administrator, never by the directory)', [{ op: 'add', path: 'groups', value: [{ value: 'admins' }] }]],
+    ['roles', [{ op: 'add', path: 'roles', value: [{ value: 'admin' }] }]],
+    ['a password', [{ op: 'replace', path: 'password', value: 'x' }]],
     ['an unknown op', [{ op: 'move', path: 'active', value: true }]],
     ['removing userName', [{ op: 'remove', path: 'userName' }]],
     ['removing active', [{ op: 'remove', path: 'active' }]],

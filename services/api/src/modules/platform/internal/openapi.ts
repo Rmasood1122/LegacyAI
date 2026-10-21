@@ -8,6 +8,9 @@ import { parse } from 'yaml';
 
 type Json = Record<string, unknown>;
 
+/** Request content types that carry JSON; every other listed type is a raw file. */
+const JSON_TYPES: ReadonlySet<string> = new Set(['application/json', 'application/scim+json']);
+
 export interface Operation {
   operationId: string;
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -118,7 +121,8 @@ export function loadContract(filePath: string): Contract {
 
       const bodyContent = ((op.requestBody as Json | undefined)?.content ?? {}) as Json;
       const bodySchema = bodyContent['application/json'] as Json | undefined;
-      const binaryTypes = Object.keys(bodyContent).filter((k) => k !== 'application/json');
+      // JSON under another name (SCIM's application/scim+json) is JSON, checked against the same schema - not a file
+      const binaryTypes = Object.keys(bodyContent).filter((k) => !JSON_TYPES.has(k));
       const responses = new Map<number, ValidateFunction | null>();
       for (const [status, res] of Object.entries((op.responses ?? {}) as Record<string, Json>)) {
         const content = (res.content ?? {}) as Record<string, Json>;
