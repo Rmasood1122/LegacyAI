@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useParams } from 'react-router';
 import type { Card as CardRecord, CardWithSecrets, EnrollmentTokenResponse, RoleAssignmentInput } from '../../api/generated.ts';
 import { signInAddress } from '../../navigation/cardLink.ts';
+import { browserNfc, nfcMessageFor, type NfcWriter } from '../../navigation/nfc.ts';
 import { ScreenLink } from '../../navigation/ScreenLink.tsx';
 import { useSession } from '../../session/session.tsx';
 import {
@@ -24,7 +25,7 @@ const fromCard = (title: string, r: CardWithSecrets): Shown =>
 const fromToken = (title: string, r: EnrollmentTokenResponse): Shown =>
   ({ title, enrollmentToken: r.enrollment_token, tokenExpiresAt: r.enrollment_token_expires_at, alreadyShown: r.secret_already_shown });
 
-export function CardScreen() {
+export function CardScreen({ nfc = browserNfc }: { nfc?: NfcWriter } = {}) {
   const { cardId = '' } = useParams();
   const { can } = useSession();
   const card = useCard(cardId);
@@ -46,7 +47,7 @@ export function CardScreen() {
               ['Renewed', `${data.renewal_count} ${data.renewal_count === 1 ? 'time' : 'times'}`],
             ]} />
           </Card>
-          {data.kind === 'person' && <CardQr card={data} />}
+          {data.kind === 'person' && <CardQr card={data} nfc={nfc} />}
           <Actions card={data} />
           {can('listCardRoles') && <Roles card={data} />}
           {can('getCardRestrictions') && <Restrictions cardId={data.id} />}
@@ -221,7 +222,7 @@ function printCardOnly(): void {
 }
 
 /** The card as a QR code: it opens the sign-in screen with the card number filled in - never the 3-digit code. */
-function CardQr({ card }: { card: CardRecord }) {
+function CardQr({ card, nfc }: { card: CardRecord; nfc: NfcWriter }) {
   const { can } = useSession();
   const company = useCompany({ enabled: can('getCurrentTenant') });
   const address = signInAddress(window.location.origin, card.card_number);
@@ -235,8 +236,8 @@ function CardQr({ card }: { card: CardRecord }) {
           <p>Scanning it opens the sign-in screen with this card number filled in. It holds the card number only.</p>
           <p className="muted">
             The 3-digit code and the passkey or authenticator app are still needed to sign in, so the QR code alone lets nobody in.
-            NFC cards are not supported.
           </p>
+          <NfcTag card={card} nfc={nfc} />
           <p><Button onClick={printCardOnly}>Print this card</Button></p>
           <p className="muted">Only the card is printed: its number, how long it is valid, and the QR code.</p>
         </div>
@@ -251,5 +252,27 @@ function CardQr({ card }: { card: CardRecord }) {
         <p>Scan to open the sign-in screen. The 3-digit code is not on this card.</p>
       </section>
     </Card>
+  );
+}
+
+/** Writes the same address as the QR code to an NFC tag (prepared: not tested with real tags). */
+function NfcTag({ card, nfc }: { card: CardRecord; nfc: NfcWriter }) {
+  const [state, setState] = useState<'idle' | 'waiting' | 'done' | 'failed'>('idle');
+  const message = nfcMessageFor(window.location.origin, card.card_number);
+  if (message === null) return null;
+  if (!nfc.supported()) {
+    return <p className="muted">To put this card on an NFC tag, open this screen in Chrome on an Android phone.</p>;
+  }
+  const write = (): void => {
+    setState('waiting');
+    nfc.write(message).then(() => setState('done'), () => setState('failed'));
+  };
+  return (
+    <div>
+      <p><Button onClick={write} busy={state === 'waiting'}>Write to an NFC tag</Button></p>
+      {state === 'waiting' && <p role="status">Hold a blank NFC tag to the back of the phone.</p>}
+      {state === 'done' && <Banner tone="success" title="The tag is written">It holds the card number only, like the QR code.</Banner>}
+      {state === 'failed' && <Banner tone="danger" title="The tag was not written">Try again, or use another tag.</Banner>}
+    </div>
   );
 }
