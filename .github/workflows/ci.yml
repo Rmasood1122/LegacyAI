@@ -118,7 +118,12 @@ jobs:
       - name: Internal contract file matches the code (contracts/ai-internal.openapi.json)
         run: EVIDENCE='^ai-contract:' bash ../../scripts/ci-run.sh "internal contract" python -m app.contract --check
       - name: Dependency vulnerability audit (Python)
-        run: EVIDENCE='ulnerabilit' bash ../../scripts/ci-run.sh "pip-audit" python -m pip_audit -r requirements.txt
+        # The eight pillow advisories below are accepted BY ID, nothing wider (decision D32, docs/DEPENDENCIES.md 9.1):
+        # pillow comes in only through fastembed, which refuses pillow 13 (the only fixed version) in every release, and
+        # the service never imports or runs pillow (text embeddings only). Any other advisory - pillow included - fails.
+        run: >-
+          EVIDENCE='ulnerabilit' bash ../../scripts/ci-run.sh "pip-audit" python -m pip_audit -r requirements.txt
+          --ignore-vuln CVE-2026-112895 --ignore-vuln CVE-2026-112400 --ignore-vuln CVE-2026-112397 --ignore-vuln CVE-2026-112896 --ignore-vuln CVE-2026-112897 --ignore-vuln CVE-2026-112395 --ignore-vuln CVE-2026-112404 --ignore-vuln CVE-2026-112899
 
   both-services:
     name: Contract - API and AI service together (every Phase 2 operation, fake AI only)

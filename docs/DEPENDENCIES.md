@@ -155,7 +155,7 @@ Maturity rule (D2): a new major version must be at least 60 days old. 60 days be
 
 | Purpose | Package and version | Released | Licence | Evidence | Notes |
 |---|---|---|---|---|---|
-| PDF text extraction | pypdf 6.19.0 | 2026-09-16 (6.x since 2025-08-11) | BSD-3-Clause | https://pypi.org/pypi/pypdf/json · limits: https://raw.githubusercontent.com/py-pdf/pypdf/main/pypdf/_configuration.py · advisories: https://api.osv.dev (PyPI/pypdf) | ~50 denial-of-service advisories in 12 months, all fixed by 6.19.0. Runs in a child process with a timeout. |
+| PDF text extraction | pypdf 6.20.1 (was 6.19.0 until 2026-10-21: four advisories, fixed in 6.20.0/6.20.1 - same major version, so D2 does not apply) | 2026-10-12 (6.x since 2025-08-11) | BSD-3-Clause | https://pypi.org/pypi/pypdf/json · limits: https://raw.githubusercontent.com/py-pdf/pypdf/main/pypdf/_configuration.py · advisories: https://api.osv.dev (PyPI/pypdf) | ~50 denial-of-service advisories in 12 months, all fixed by 6.19.0. Runs in a child process with a timeout. |
 | File type sniffing | puremagic 2.2.0 | 2026-04-08 (2.x since 2026-02-20) | MIT | https://pypi.org/pypi/puremagic/json | no system library; needs Python ≥ 3.12 |
 | PII detection | presidio-analyzer 2.2.364 | 2026-07-22 | MIT | https://pypi.org/pypi/presidio-analyzer/json · entities: https://raw.githubusercontent.com/microsoft/presidio/main/docs/supported_entities.md | no street-address recognizer; memory footprint **UNVERIFIED** |
 | PII replacement | presidio-anonymizer 2.2.364 — **NOT installed** | 2026-07-22 | MIT | https://pypi.org/pypi/presidio-anonymizer/json | deviation from the design: replacement with numbered placeholders is a few lines of our own code over the analyzer's findings, so this package (and its cryptography pin) is not needed |
@@ -180,6 +180,15 @@ Maturity rule (D2): a new major version must be at least 60 days old. 60 days be
 | Audit | pip-audit 2.10.1 | 2026-06-10 | Apache-2.0 | https://pypi.org/pypi/pip-audit/json | already used |
 
 Rejected: pdfminer.six / pdfplumber (code-execution advisory CVE-2025-64512, no documented guards); PyMuPDF (AGPL); python-magic (needs system libmagic, no release since 2022); scrubadub (unmaintained since 2023); tiktoken (downloads files at run time, vendor-specific); procrastinate / pgqueuer (assume an always-running worker); LangChain / LlamaIndex (not needed); voyageai SDK (pulls langchain-text-splitters).
+
+**pillow (indirect, through fastembed) — 8 advisories accepted by ID on 2026-10-21 (decision D32).** pillow 12.3.0
+has eight advisories (CVE-2026-112895, CVE-2026-112400, CVE-2026-112397, CVE-2026-112896, CVE-2026-112897, CVE-2026-112395, CVE-2026-112404, CVE-2026-112899), fixed only in pillow 13.0.0
+(released 2026-10-16: a new major version, 5 days old - D2 says 60). fastembed, which brings pillow in, requires
+`pillow<13` in every release (0.8.1 installed, 0.9.0 of 2026-10-07 the same; read https://pypi.org/pypi/fastembed/json
+on 2026-10-21). The service uses `fastembed.TextEmbedding` only and never imports pillow (`grep -rn PIL services/ai/app`
+finds nothing), so the image decoders the advisories are about do not run. The CI audit ignores exactly these eight IDs;
+any other advisory fails it. **Re-check:** when fastembed allows pillow 13 and pillow 13 is 60 days old (2026-12-15),
+move to it and remove the ignores.
 
 ### 9.2 TypeScript
 

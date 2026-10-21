@@ -227,3 +227,10 @@ CONSEQUENCES:
 - Known and accepted: a notice from a request that is later rolled back is still queued (as it was always still logged); nothing schedules the delivery job; no real receiver, DNS or production egress was tested.
 - **Confirmed by the founder on 2026-10-20 ("use recommendations"):** the recommended defaults stand - the three knowledge events; Owner only; the limits (10 endpoints, 8 attempts over about two days, pause after 15 failures and a day); no backlog for paused endpoints; no opt-out of notices; the recipient table and the wording as written; the delivery job runs every minute once it is scheduled (scheduling it is infrastructure the founder applies; not done here).
 - **Still open:** which e-mail service and sending domain (no recommendation was made; e-mail cannot be switched on until this is chosen).
+
+**D32 — Eight pillow advisories accepted by ID until a fixed pillow can be installed (2026-10-21, founder's choice).**
+- pillow 12.3.0 (installed only because fastembed needs it) has eight advisories fixed only in pillow 13.0.0, a new major version released 2026-10-16. fastembed refuses pillow 13 in every release, and D2 asks for 60 days.
+- The AI service runs fastembed's text embedding only; nothing imports pillow, so the affected image decoders never run.
+- Chosen (founder, from three options): ignore exactly these eight IDs in the CI audit, with the reason next to them; any other advisory still fails. Rejected: forcing pillow 13 against fastembed's declared limit and D2; leaving CI red.
+- pypdf moved 6.19.0 -> 6.20.1 for its four advisories (same major version; D2 does not apply).
+- Re-check when fastembed allows pillow 13 and pillow 13 is 60 days old (2026-12-15). Details: docs/DEPENDENCIES.md 9.1.
