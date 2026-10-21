@@ -156,6 +156,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/CompanyKeyUnavailable"
         "429":
           $ref: "#/components/responses/TooManyRequests"
   /v1/auth/enrollment/complete:
@@ -7390,6 +7392,8 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "503":
+          $ref: "#/components/responses/CompanyKeyUnavailable"
         "429":
           $ref: "#/components/responses/TooManyRequests"
   /v1/webhooks/options:
@@ -7522,6 +7526,8 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "503":
+          $ref: "#/components/responses/CompanyKeyUnavailable"
         "429":
           $ref: "#/components/responses/TooManyRequests"
   /v1/webhooks/{webhook_id}/test:
@@ -7783,6 +7789,8 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "422":
           $ref: "#/components/responses/Unprocessable"
+        "503":
+          $ref: "#/components/responses/CompanyKeyUnavailable"
         "429":
           $ref: "#/components/responses/TooManyRequests"
   /v1/sso/connection/remove:
@@ -7858,6 +7866,20 @@ paths:
       security:
         - apiKey: []
       parameters:
+        - name: attributes
+          in: query
+          required: false
+          description: "Accepted and ignored: every answer carries the few attributes stored here."
+          schema:
+            type: string
+            maxLength: 1000
+        - name: excludedAttributes
+          in: query
+          required: false
+          description: "Accepted and ignored."
+          schema:
+            type: string
+            maxLength: 1000
         - name: filter
           in: query
           required: false
@@ -8085,6 +8107,77 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/tenants/{tenant_id}/encryption-key:
+    get:
+      operationId: getCompanyEncryptionKey
+      summary: "Platform operator only: whether a company uses its own encryption key (bring-your-own-key), which reference and which version. Never the key, never the wrapped data key."
+      tags:
+        - tenants
+      x-permission: tenant:encryption_key
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyEncryptionKey"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    put:
+      operationId: setCompanyEncryptionKey
+      summary: "Platform operator only: the company brings its own key (a reference at the configured key service), changes to another, or goes back to none (null)."
+      description: >-
+        A new data key is made for the company, wrapped with the company's key and unwrapped again at once; a key that
+        does not work is refused (422) before anything is sealed with it. From then on the secrets the API keeps for the
+        company (authenticator-app seeds, webhook signing secrets, SSO client secrets) are sealed with that data key.
+        Secrets sealed earlier keep opening with the key they were sealed with. When the company switches its key off
+        at its key service, those secrets cannot be opened (sign-ins with an authenticator app, webhook signatures and
+        SSO sign-ins of that company stop) and nothing new is sealed (503 `company-key-unavailable`). Documents and
+        knowledge are not covered: see docs/phase4/08-bring-your-own-key.md.
+      tags:
+        - tenants
+      x-permission: tenant:encryption_key
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyEncryptionKeyRequest"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyEncryptionKey"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "429":
           $ref: "#/components/responses/TooManyRequests"
 components:
@@ -8405,6 +8498,12 @@ components:
             $ref: "#/components/schemas/Problem"
     BadGateway:
       description: "The knowledge service did not answer. Nothing was changed by this request."
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    CompanyKeyUnavailable:
+      description: "The company's own encryption key cannot be used right now (switched off at its key service, or the service cannot be reached): nothing new is sealed (`company-key-unavailable`)."
       content:
         application/problem+json:
           schema:
@@ -12100,6 +12199,57 @@ components:
           type: object
         filter:
           type: object
+    CompanyEncryptionKey:
+      type: object
+      additionalProperties: false
+      required:
+        - tenant_id
+        - key_service
+        - key_ref
+        - version
+        - since
+        - earlier_versions
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+        key_service:
+          description: "The key service this installation is configured with: none, or local (a stand-in for tests and development)."
+          type: string
+          enum:
+            - none
+            - local
+        key_ref:
+          description: "Where the company's key is, at the key service. Null = the company uses the platform's key."
+          type:
+            - "string"
+            - "null"
+        version:
+          description: "The live version of the company's data key (each change of key makes a new one)."
+          type:
+            - "integer"
+            - "null"
+        since:
+          type:
+            - "string"
+            - "null"
+          format: date-time
+        earlier_versions:
+          description: "Retired versions, kept because secrets sealed with them still open with them."
+          type: integer
+    CompanyEncryptionKeyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - key_ref
+      properties:
+        key_ref:
+          type:
+            - "string"
+            - "null"
+          minLength: 1
+          maxLength: 512
+          pattern: "^[^\\s]+$"
     ApiKeyPermission:
       description: "The only permissions an API key may carry: read and ask (a key changes nothing) - or, for a directory key, person:scim alone (provisioning people from the company's directory, D34)."
       type: string

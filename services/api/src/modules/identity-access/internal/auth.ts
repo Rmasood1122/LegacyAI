@@ -14,7 +14,7 @@ import { problems } from '../../../shared/errors.ts';
 import type { RequestContext } from '../../../shared/policy-types.ts';
 import {
   getSettings, getTenant, PLATFORM_TENANT_ID, writeAudit,
-  type Database, type HandlerResult, type Notifier, type RateLimiter, type Tx,
+  type Database, type HandlerResult, type Notifier, type RateLimiter, type TenantSealing, type Tx,
 } from '../../platform/index.ts';
 import type { AnomalyGuard } from './anomaly.ts';
 import type { Authorizer } from './authz.ts';
@@ -22,7 +22,7 @@ import { maskCardNumber, normalizeCardNumber } from './card-number.ts';
 import { CARD_COLUMNS, type CardRow, type CardService } from './cards.ts';
 import {
   newTotpSecret, passkeyLoginOptions, passkeyRegistrationOptions, verifyPasskeyAssertion, verifyPasskeyRegistration, verifySsoFactor,
-  verifyTotpCode, verifyTotpEnrollment, type FactorType, type SeedCipher, type StoredCredential, type StrongFactorProof, type WebAuthnSettings,
+  verifyTotpCode, verifyTotpEnrollment, type FactorType, type StoredCredential, type StrongFactorProof, type WebAuthnSettings,
 } from './factors.ts';
 import { effectiveState } from './lifecycle.ts';
 import type { ScProof, SecretCodeHasher } from './secret-code.ts';
@@ -63,7 +63,8 @@ interface AuthStateRow {
 export interface AuthDeps {
   db: Database;
   hasher: SecretCodeHasher;
-  cipher: SeedCipher;
+  /** Seals authenticator-app seeds: with the platform's key, or the company's own (D35). */
+  sealing: TenantSealing;
   cards: CardService;
   authorizer: Authorizer;
   rateLimiter: RateLimiter;
@@ -229,7 +230,9 @@ export class AuthService {
         // during the pause, while the real cardholder - who knows the SC - can still sign in.
         const examine = !throttled || sc !== null;
         const res = await verifyTotpCode({
-          cipher: this.#d.cipher, aad: totpAad(tenantId), cardId: examine ? (card?.id ?? null) : null, credentials, code: body.factor.code,
+          // an unknown card has no company whose key could be asked (and nothing to open)
+          cipher: card === null ? this.#d.sealing.platform : await this.#d.sealing.forTenant(tx, tenantId),
+          aad: totpAad(tenantId), cardId: examine ? (card?.id ?? null) : null, credentials, code: body.factor.code,
           now: ctx.now, lastStep: before?.last_totp_step == null ? null : Number(before.last_totp_step),
         });
         if (res) ({ proof: strong, step: totpStep } = res);
@@ -451,7 +454,7 @@ export class AuthService {
         out.webauthn_options = reg.options;
       } else {
         const totp = newTotpSecret(this.#d.webauthn.rpName, maskCardNumber(card.card_number));
-        const enc = this.#d.cipher.encrypt(totp.secret, totpAad(tenantId));
+        const enc = (await this.#d.sealing.forTenant(tx, tenantId)).encrypt(totp.secret, totpAad(tenantId));
         payload.totp_secret_enc = enc.ciphertext.toString('base64');
         payload.totp_key_id = enc.keyId;
         out.totp = { secret: totp.secret, otpauth_uri: totp.uri };
@@ -509,7 +512,7 @@ export class AuthService {
       } else {
         if (typeof body.totp_code !== 'string' || !txn.payload.totp_secret_enc || !txn.payload.totp_key_id) return false;
         totpSecretEnc = Buffer.from(txn.payload.totp_secret_enc, 'base64');
-        const secret = this.#d.cipher.decrypt(totpSecretEnc, txn.payload.totp_key_id, totpAad(txn.tenant_id));
+        const secret = (await this.#d.sealing.forTenant(tx, txn.tenant_id)).decrypt(totpSecretEnc, txn.payload.totp_key_id, totpAad(txn.tenant_id));
         if (secret === null) return false;
         totpStep = await verifyTotpEnrollment(secret, body.totp_code, ctx.now);
         if (totpStep === null) return false;

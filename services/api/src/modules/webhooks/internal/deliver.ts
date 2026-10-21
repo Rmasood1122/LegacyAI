@@ -122,8 +122,10 @@ export async function runCompany(deps: DeliveryDeps, tenantId: string, now: () =
   result.published = fanned.published;
   result.queued = fanned.queued;
   const claimed = await deps.withTx((tx) => claim(tx, tenantId, now(), WEBHOOK_LIMITS.perCompanyPerRun));
+  // once per run: with the company's own key (D35) switched off, every delivery fails as "secret_unreadable"
+  const sealer = claimed.length === 0 ? null : await deps.withTx((tx) => deps.store.sealerFor(tx, tenantId));
   for (const d of claimed) {
-    const secret = deps.store.revealSecret(tenantId, d.endpoint_id, d.secret_enc, d.secret_key_id);
+    const secret = sealer === null ? null : deps.store.revealSecret(sealer, tenantId, d.endpoint_id, d.secret_enc, d.secret_key_id);
     const body = JSON.stringify(d.body);
     const outcome = secret === null
       ? { ok: false as const, error: 'secret_unreadable' as const }

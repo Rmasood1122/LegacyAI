@@ -7,7 +7,7 @@
 // any title, text or name - events hold identifiers and labels only.
 //
 // Nothing here imports another feature module: the platform gives it the database, the notifier and the keyring.
-import { SealingCipher, type Config, type Database, type Notifier, type RouteDef, type Tx } from '../platform/index.ts';
+import type { Config, Database, Notifier, RouteDef, TenantSealing, Tx } from '../platform/index.ts';
 import { runCompany, type RunResult } from './internal/deliver.ts';
 import { WebhookStore } from './internal/endpoints.ts';
 import { webhookRoutes } from './internal/routes.ts';
@@ -38,10 +38,12 @@ export interface WebhooksModule {
 
 export function createWebhooks(deps: {
   config: Config; db: Database; notifier: Notifier;
+  /** Seals endpoint signing secrets: with the platform's key, or the company's own (D35). */
+  sealing: TenantSealing;
   /** For tests: a stand-in sender. Default: HttpsTransport when WEBHOOK_DELIVERY=https, otherwise nothing is sent. */
   transport?: WebhookTransport;
 }): WebhooksModule {
-  const store = new WebhookStore(new SealingCipher(deps.config.credentialEnc));
+  const store = new WebhookStore(deps.sealing);
   const transport = deps.transport ?? (deps.config.webhooks.delivery === 'https' ? new HttpsTransport() : null);
   const deliveryEnabled = transport !== null;
   return {

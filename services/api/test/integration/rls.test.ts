@@ -235,7 +235,7 @@ describe('cross-tenant access attempts (as the app role, in SQL)', () => {
 const OUR_FUNCTIONS = [
   'ai_usage_ledger_guard', 'api_keys_guard', 'app_current_tenant', 'audit_field', 'audit_log_chain', 'audit_log_reject_change',
   'audit_write', 'cards_enforce_lifecycle', 'cards_register_directory', 'chunks_count', 'chunks_guard',
-  'citations_guard', 'consent_is_valid', 'consents_guard', 'consents_hide_on_withdrawal', 'erase_version', 'expert_questions_guard',
+  'citations_guard', 'company_data_keys_guard', 'consent_is_valid', 'consents_guard', 'consents_hide_on_withdrawal', 'erase_version', 'expert_questions_guard',
   'interviews_guard', 'invoices_guard', 'knowledge_items_end_conflicts', 'knowledge_items_guard', 'knowledge_items_outbox', 'knowledge_items_touch_scenarios', 'knowledge_versions_immutable',
   'purge_login_attempts', 'quiz_attempts_guard', 'quiz_items_guard', 'relabel', 'resolve_card', 'resolve_sso_company', 'review_tasks_guard',
   'scenario_attempts_guard', 'scenario_is_hidden', 'scenario_parts_guard', 'scenarios_guard', 'sources_guard',
@@ -310,6 +310,7 @@ describe('least privilege on global and design-only tables', () => {
     ['read analytics events (design-only table)', 'SELECT * FROM analytics_events'],   // webhook_endpoints is a real table since Phase 4 (docs/phase4/06)
     ['read card tokens (design-only table)', 'SELECT * FROM card_tokens'],   // sso_connections is a real table since Phase 4 (docs/phase4/07)
     ['delete an SSO connection', 'DELETE FROM sso_connections'],
+    ['delete a version of a company data key (bring-your-own-key)', 'DELETE FROM company_data_keys'],
     ['create a table', 'CREATE TABLE intruder (id int)'],
     ['disable row-level security', 'ALTER TABLE cards DISABLE ROW LEVEL SECURITY'],
     ['drop a policy', 'DROP POLICY tenant_isolation ON cards'],

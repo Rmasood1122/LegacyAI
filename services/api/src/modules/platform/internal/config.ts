@@ -76,10 +76,16 @@ export interface Config {
   mail: { sender: 'none' | 'fake'; from: string };
   /**
    * SSO (docs/phase4/07). Where a company's identity provider sends the browser back after a sign-in: a page of the
-   * web application. Each company registers this exact address at its provider. Default: the first allowed origin
-   * + '/sso/return'.
+   * web application. Each company registers its own address under it (`<this>/<company id>`) at its provider.
+   * Default: the first allowed origin + '/sso/return'.
    */
   sso: { redirectUri: string };
+  /**
+   * Bring-your-own-key (feature 21, D35): the service that holds companies' own encryption keys. 'none' = no company
+   * can bring a key. 'local' = keys from LOCAL_KEY_SERVICE_KEYS, a stand-in for tests and development only (never in
+   * production). A real key service (a cloud KMS) is one more adapter.
+   */
+  keyService: { kind: 'none' | 'local'; localKeys: ReadonlyMap<string, Secret<Buffer>> };
 }
 
 export class ConfigError extends Error {
@@ -305,7 +311,29 @@ export function loadConfig(env: Env): Config {
     webhooks: { delivery: oneOf('WEBHOOK_DELIVERY', ['none', 'https'] as const, 'none') },
     mail: { sender: oneOf('MAIL_SENDER', ['none', 'fake'] as const, 'none'), from: raw('MAIL_FROM') ?? 'LegacyAI <no-reply@localhost>' },
     sso: { redirectUri: raw('SSO_REDIRECT_URI') ?? `${allowedOrigins[0] ?? 'http://localhost:3000'}/sso/return` },
+    keyService: { kind: oneOf('KEY_SERVICE', ['none', 'local'] as const, 'none'), localKeys: new Map() },
   };
+  if (config.keyService.kind === 'local') {
+    if (nodeEnv === 'production') problems.push('KEY_SERVICE=local keeps keys in the configuration and is not allowed when NODE_ENV=production');
+    const text = raw('LOCAL_KEY_SERVICE_KEYS');
+    let parsed: unknown = null;
+    try {
+      parsed = text === undefined ? null : JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed) || Object.keys(parsed).length === 0) {
+      problems.push('LOCAL_KEY_SERVICE_KEYS must be a JSON object of key name -> base64 32-byte key (KEY_SERVICE=local)');
+    } else {
+      const keys = new Map<string, Secret<Buffer>>();
+      for (const [name, b64] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!/^[a-z0-9-]{1,40}$/.test(name)) problems.push('LOCAL_KEY_SERVICE_KEYS: key names are 1-40 of a-z, 0-9 and -');
+        const key = decodeKey(`LOCAL_KEY_SERVICE_KEYS.${name}`, b64, 32, 32);
+        if (key) keys.set(name, new Secret(key));
+      }
+      config.keyService.localKeys = keys;
+    }
+  }
   {
     let ok = false;
     try {

@@ -1144,6 +1144,19 @@ export interface ScimServiceProviderConfig {
   [key: string]: unknown;
 }
 
+export interface CompanyEncryptionKey {
+  tenant_id: string;
+  key_service: "none" | "local";
+  key_ref: string | null;
+  version: number | null;
+  since: string | null;
+  earlier_versions: number;
+}
+
+export interface CompanyEncryptionKeyRequest {
+  key_ref: string | null;
+}
+
 export type ApiKeyPermission = "knowledge:read" | "knowledge:ask" | "topic:read" | "gap:read" | "source:read" | "person:scim";
 
 export type SensitivityLevel = number;
@@ -1776,6 +1789,8 @@ export const operations = {
   scimReplaceUser: { method: "PUT", path: "/v1/scim/v2/Users/{person_id}", status: 200, idempotent: false, public: false, permission: "person:scim", contentTypes: ["application/json","application/scim+json"] },
   scimPatchUser: { method: "PATCH", path: "/v1/scim/v2/Users/{person_id}", status: 200, idempotent: false, public: false, permission: "person:scim", contentTypes: ["application/json","application/scim+json"] },
   scimDeleteUser: { method: "DELETE", path: "/v1/scim/v2/Users/{person_id}", status: 204, idempotent: false, public: false, permission: "person:scim", contentTypes: [] },
+  getCompanyEncryptionKey: { method: "GET", path: "/v1/tenants/{tenant_id}/encryption-key", status: 200, idempotent: false, public: false, permission: "tenant:encryption_key", contentTypes: [] },
+  setCompanyEncryptionKey: { method: "PUT", path: "/v1/tenants/{tenant_id}/encryption-key", status: 200, idempotent: true, public: false, permission: "tenant:encryption_key", contentTypes: ["application/json"] },
 } as const;
 
 export type OperationId = keyof typeof operations;
@@ -3151,7 +3166,7 @@ export interface OperationTypes {
   };
   scimListUsers: {
     path: undefined;
-    query: { filter?: string; startIndex?: number; count?: number };
+    query: { attributes?: string; excludedAttributes?: string; filter?: string; startIndex?: number; count?: number };
     body: undefined;
     response: ScimListResponse;
   };
@@ -3184,5 +3199,17 @@ export interface OperationTypes {
     query: undefined;
     body: undefined;
     response: undefined;
+  };
+  getCompanyEncryptionKey: {
+    path: { tenant_id: string };
+    query: undefined;
+    body: undefined;
+    response: CompanyEncryptionKey;
+  };
+  setCompanyEncryptionKey: {
+    path: { tenant_id: string };
+    query: undefined;
+    body: CompanyEncryptionKeyRequest;
+    response: CompanyEncryptionKey;
   };
 }

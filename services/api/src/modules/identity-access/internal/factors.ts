@@ -6,7 +6,7 @@ import {
 } from '@simplewebauthn/server';
 import { generateKeyPairSync, randomBytes, verify as cryptoVerify, type KeyObject } from 'node:crypto';
 import { generateSecret, generateURI, verify as totpVerify } from 'otplib';
-import type { SealingCipher } from '../../platform/index.ts';
+import type { Sealer } from '../../platform/index.ts';
 
 const MINT = Symbol('StrongFactorProof');
 
@@ -73,8 +73,8 @@ export interface WebAuthnSettings {
 // ------------------------------------------------------------- TOTP seed at rest
 
 /** AES-256-GCM with the credential keyring. The class lives in the platform module (webhook secrets use it too). */
-export { SealingCipher as SeedCipher } from '../../platform/index.ts';
-type SeedCipher = SealingCipher;
+/** What opens a stored authenticator seed: the company's sealer (platform key, or the company's own, D35). */
+type SeedCipher = Sealer;
 
 // ------------------------------------------------------------------------ passkeys
 

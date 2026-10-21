@@ -1,6 +1,6 @@
 // Webhook endpoints and their deliveries in the database. Every function takes the transaction of its caller;
 // no function here calls the network (deliver.ts does, outside any transaction).
-import { SealingCipher, type Tx } from '../../platform/index.ts';
+import type { Sealer, TenantSealing, Tx } from '../../platform/index.ts';
 import { newSigningSecret } from './signing.ts';
 import { TEST_TOPIC, WEBHOOK_LIMITS, type Topic } from './rules.ts';
 
@@ -93,9 +93,14 @@ export interface EndpointChange {
 export const secretAad = (tenantId: string, endpointId: string): string => `webhook-secret:${tenantId}:${endpointId}`;
 
 export class WebhookStore {
-  readonly #cipher: SealingCipher;
-  constructor(cipher: SealingCipher) {
-    this.#cipher = cipher;
+  readonly #sealing: TenantSealing;
+  constructor(sealing: TenantSealing) {
+    this.#sealing = sealing;
+  }
+
+  /** The company's sealer (the platform's key, or the company's own: D35), for one delivery run. */
+  sealerFor(tx: Tx, tenantId: string): Promise<Sealer> {
+    return this.#sealing.forTenant(tx, tenantId);
   }
 
   async list(tx: Tx, tenantId: string, before: string | null, limit: number): Promise<EndpointRow[]> {
@@ -119,7 +124,7 @@ export class WebhookStore {
     const { rows: ids } = await tx.query<{ id: string }>('SELECT uuidv7()::text AS id');
     const id = (ids[0] as { id: string }).id;
     const secret = newSigningSecret();
-    const sealed = this.#cipher.encrypt(secret, secretAad(tenantId, id));
+    const sealed = (await this.#sealing.forTenant(tx, tenantId)).encrypt(secret, secretAad(tenantId, id));
     const { rows } = await tx.query<EndpointRow>(
       // created_at is the DATABASE's time, like the time of the outbox events it is compared with (rules.ts endpointGets)
       `INSERT INTO webhook_endpoints (id, tenant_id, name, url, topics, max_sensitivity, secret_enc, secret_key_id, secret_hint, created_by_card_id, updated_at)
@@ -177,7 +182,7 @@ export class WebhookStore {
   /** A new secret at once; the old one stops being used for the next attempt. Null = no such live endpoint. */
   async rotate(tx: Tx, tenantId: string, id: string, now: Date): Promise<{ row: EndpointRow; secret: string } | null> {
     const secret = newSigningSecret();
-    const sealed = this.#cipher.encrypt(secret, secretAad(tenantId, id));
+    const sealed = (await this.#sealing.forTenant(tx, tenantId)).encrypt(secret, secretAad(tenantId, id));
     const { rows } = await tx.query<EndpointRow>(
       `UPDATE webhook_endpoints SET secret_enc = $3, secret_key_id = $4, secret_hint = $5, updated_at = $6
         WHERE tenant_id = $1 AND id = $2 AND removed_at IS NULL RETURNING ${ENDPOINT_COLUMNS}`,
@@ -206,8 +211,8 @@ export class WebhookStore {
   }
 
   /** The signing secret of a live endpoint, or null when it cannot be read (removed, or the key is gone). */
-  revealSecret(tenantId: string, endpointId: string, sealed: Buffer | null, keyId: string | null): string | null {
+  revealSecret(sealer: Sealer, tenantId: string, endpointId: string, sealed: Buffer | null, keyId: string | null): string | null {
     if (sealed === null || keyId === null) return null;
-    return this.#cipher.decrypt(sealed, keyId, secretAad(tenantId, endpointId));
+    return sealer.decrypt(sealed, keyId, secretAad(tenantId, endpointId));
   }
 }

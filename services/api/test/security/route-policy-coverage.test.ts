@@ -107,15 +107,15 @@ describe('the list of routes that skip the session check is short and pinned', (
     const known = new Set((await su.query('SELECT permission_key FROM permissions')).rows.map((r) => r.permission_key as string));
     await su.end();
     const session = t.app.http.registeredRoutes().filter((r) => r.kind === 'session' || r.kind === 'gateway');
-    expect(session).toHaveLength(180);   // + the eight webhook operations, + the three SSO connection operations, + the seven SCIM operations
+    expect(session).toHaveLength(182);   // + the eight webhook operations, + the three SSO connection operations, + the seven SCIM operations, + the two company-key operations
     for (const r of session) expect(known.has(r.permission!), `${r.operationId} uses unknown permission ${r.permission}`).toBe(true);
   });
 
-  it('routes registered in the server == operations in openapi.yaml (189, no more, no fewer)', () => {
+  it('routes registered in the server == operations in openapi.yaml (191, no more, no fewer)', () => {
     const registered = t.app.http.registeredRoutes().map((r) => `${r.method} ${r.path}`).sort();
     const contract = [...t.app.http.contract.operations.values()].map((o) => `${o.method} ${o.path}`).sort();
     expect(registered).toEqual(contract);
-    expect(registered).toHaveLength(189);
+    expect(registered).toHaveLength(191);
     // and Fastify itself knows no route beyond those (HEAD/OPTIONS helpers aside)
     const printed = t.app.http.app.printRoutes({ commonPrefix: false });
     expect(printed).not.toMatch(/rogue/);
@@ -299,7 +299,7 @@ describe('a read of a whole collection must say how it is narrowed to what the c
 });
 
 describe('real app: a card with almost no permissions cannot get a 2xx from anything it is not granted', () => {
-  it('walks all 180 protected operations as a Successor', async () => {
+  it('walks all 182 protected operations as a Successor', async () => {
     const su = await superuser();
     const granted = new Set((await su.query(`SELECT permission_key FROM role_permissions WHERE role_key = 'successor'`)).rows.map((r) => r.permission_key as string));
     await su.end();
@@ -341,6 +341,7 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
       // Phase 4, SSO
       putSsoConnection: { name: 'x', issuer: 'https://idp.example.com', client_id: 'x', client_secret: 'x' },
       // Phase 4, SCIM
+      setCompanyEncryptionKey: { key_ref: null },
       scimCreateUser: { userName: 'x' }, scimReplaceUser: { userName: 'x' }, scimPatchUser: { Operations: [{ op: 'replace', path: 'active', value: false }] },
       recordManualPayment: { invoice_id: randomUUID(), amount: { amount_minor: 1500, currency: 'USD' }, reference: 'TRANSFER-000001' },
       createScenario: scenarioBody, updateScenario: scenarioBody, proposeScenarioRubric: { item_ids: [randomUUID()] }, overrideScenarioAnswer: { score: 1 },
@@ -379,7 +380,8 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
     // Phase 4 (webhooks): nothing of it - the eight webhook operations are the Owner's.
     // Phase 4 (SSO): nothing of it - the company's connection is the Owner's.
     // Phase 4 (SCIM): nothing of it - only a directory key can use person:scim.
-    expect(denied).toBe(28 + 57 + 2 + 6 + 2 + 9 + 8 + 4 + 8 + 3 + 7);
+    // Phase 4 (bring-your-own-key): nothing of it - a company's key is the platform operator's to set.
+    expect(denied).toBe(28 + 57 + 2 + 6 + 2 + 9 + 8 + 4 + 8 + 3 + 7 + 2);
   });
 });
 

@@ -4,6 +4,8 @@
 
 export { ARGON2_FLOOR, ConfigError, loadConfig, Secret, type Config, type Keyring } from './internal/config.ts';
 export { SealingCipher } from './internal/sealing.ts';
+export { KeyUnavailable, keyServiceFrom, LocalKeyService, NoKeyService, type KeyService } from './internal/key-service.ts';
+export { TenantSealing, type CompanyKeyRow, type Sealer, type SetKeyOutcome } from './internal/tenant-sealing.ts';
 export {
   checkedAddress, isPublicAddress, MAX_URL_LENGTH, pinnedLookup, urlProblem, type AddressProblem, type ResolvedAddress, type Resolver,
 } from './internal/address.ts';

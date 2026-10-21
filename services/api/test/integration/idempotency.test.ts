@@ -145,7 +145,9 @@ describe('idempotency keys', () => {
       // Phase 4, webhooks: a retried request must not register a second endpoint or queue a second test message
       'createWebhookEndpoint', 'updateWebhookEndpoint', 'removeWebhookEndpoint', 'rotateWebhookSecret', 'sendWebhookTest',
       // Phase 4, SSO: the connection's writes
-      'putSsoConnection', 'removeSsoConnection'];
+      'putSsoConnection', 'removeSsoConnection',
+      // Phase 4, bring-your-own-key: a retried request must not make a second data-key version
+      'setCompanyEncryptionKey'];
     for (const id of required) expect(t.app.http.contract.operations.get(id)?.idempotent, id).toBe(true);
     const actual = [...t.app.http.contract.operations.values()].filter((o) => o.idempotent).map((o) => o.operationId).sort();
     expect(actual).toEqual([...required].sort());

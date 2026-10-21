@@ -25,7 +25,7 @@
 //     started, so that the person's identity lands in the attacker's step): start sets an HttpOnly cookie in the
 //     browser that started; finish requires the same cookie.
 import { hmacSha256, isUuid, randomToken, sha256 } from '../../../shared/crypto.ts';
-import { getSettings, urlProblem, type Database, type SealingCipher, type Tx } from '../../platform/index.ts';
+import { getSettings, urlProblem, type Database, type TenantSealing, type Tx } from '../../platform/index.ts';
 import type { SsoIdentity } from './factors.ts';
 import { authorizationUrl, exchangeCode, newFlowSecrets, OidcError, type OidcCache } from './oidc.ts';
 
@@ -96,13 +96,13 @@ interface FlowPayload {
 }
 
 export class SsoService {
-  readonly #cipher: SealingCipher;
+  readonly #sealing: TenantSealing;
   readonly #cache: OidcCache;
   readonly #redirectBase: string;
   readonly #hmacKey: Buffer;
 
-  constructor(p: { cipher: SealingCipher; cache: OidcCache; redirectUri: string; hmacKey: Buffer }) {
-    this.#cipher = p.cipher;
+  constructor(p: { sealing: TenantSealing; cache: OidcCache; redirectUri: string; hmacKey: Buffer }) {
+    this.#sealing = p.sealing;
     this.#cache = p.cache;
     this.#redirectBase = p.redirectUri.replace(/\/+$/, '');
     this.#hmacKey = p.hmacKey;
@@ -128,7 +128,7 @@ export class SsoService {
       if (input.client_secret === undefined) return 'secret-required';
       const { rows: ids } = await tx.query<{ id: string }>('SELECT uuidv7()::text AS id');
       const id = (ids[0] as { id: string }).id;
-      const sealed = this.#cipher.encrypt(input.client_secret, secretAad(tenantId, id));
+      const sealed = (await this.#sealing.forTenant(tx, tenantId)).encrypt(input.client_secret, secretAad(tenantId, id));
       const { rows } = await tx.query<ConnectionRow>(
         `INSERT INTO sso_connections (id, tenant_id, name, issuer, client_id, client_secret_enc, secret_key_id, enabled, created_by_card_id, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10) RETURNING ${CONNECTION_COLUMNS}`,
@@ -136,7 +136,7 @@ export class SsoService {
       return rows[0] as ConnectionRow;
     }
     if (current.issuer !== input.issuer) return 'issuer-changed';
-    const sealed = input.client_secret === undefined ? null : this.#cipher.encrypt(input.client_secret, secretAad(tenantId, current.id));
+    const sealed = input.client_secret === undefined ? null : (await this.#sealing.forTenant(tx, tenantId)).encrypt(input.client_secret, secretAad(tenantId, current.id));
     const { rows } = await tx.query<ConnectionRow>(
       `UPDATE sso_connections SET name = $3, client_id = $4, enabled = coalesce($5, enabled),
               client_secret_enc = coalesce($6, client_secret_enc), secret_key_id = coalesce($7, secret_key_id), updated_at = $8
@@ -239,13 +239,16 @@ export class SsoService {
       const { rows } = await tx.query<{ issuer: string; client_id: string; client_secret_enc: Buffer | null; secret_key_id: string | null }>(
         `SELECT issuer, client_id, client_secret_enc, secret_key_id FROM sso_connections
           WHERE tenant_id = $1 AND id = $2 AND removed_at IS NULL AND enabled`, [tenantId, flow.payload.connection_id]);
-      return rows[0] ?? null;
+      const row = rows[0];
+      if (row === undefined || row.client_secret_enc === null || row.secret_key_id === null) return null;
+      // opened with the company's own key when it brought one (D35): switched off there, no SSO sign-in here
+      const clientSecret = (await this.#sealing.forTenant(tx, tenantId)).decrypt(row.client_secret_enc, row.secret_key_id, secretAad(tenantId, flow.payload.connection_id));
+      return clientSecret === null ? null : { issuer: row.issuer, client_id: row.client_id, clientSecret };
     });
-    if (connection === null || connection.client_secret_enc === null || connection.secret_key_id === null) return null;
+    if (connection === null) return null;
     // RFC 9207: a provider that names itself on the way back must be the flow's provider
     if (p.iss !== undefined && p.iss !== connection.issuer) return null;
-    const clientSecret = this.#cipher.decrypt(connection.client_secret_enc, connection.secret_key_id, secretAad(tenantId, flow.payload.connection_id));
-    if (clientSecret === null) return null;
+    const { clientSecret } = connection;
     let subject: string;
     try {
       ({ subject } = await exchangeCode(this.#cache, {

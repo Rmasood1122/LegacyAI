@@ -261,3 +261,14 @@ CONSEQUENCES:
 - Deviations from SCIM, written down in the details: problem-details errors; JSON answers; two filters only; no groups or bulk.
 - No new library.
 - **For the founder to confirm:** Owners out of reach; no roles from the directory; removed people keep their history; the first customer's directory.
+
+**D35 — Bring-your-own-key: envelope encryption of the secrets the API keeps; documents and knowledge not yet (2026-10-21).**
+- Details: `docs/phase4/08-bring-your-own-key.md`. Feature 21, the key part; regional hosting stays in Batch C.
+- A company's own key (at a key service the company controls) wraps a data key of the company's. The API stores only the wrapped key (`company_data_keys`) and never sees the company's key.
+- Covered: authenticator-app seeds, webhook signing secrets, SSO client secrets. One sealer decides per company; the key id stored with a secret says which key opens it, so earlier secrets keep opening.
+- **Not covered: documents and knowledge.** Search needs the database to read them. A separate design decision is needed before anyone promises "your data under your key".
+- Fail closed: with the key off nothing of it opens, and nothing new is sealed with the platform's key (503 `company-key-unavailable`). Unwrapped keys are cached for at most 5 minutes.
+- Set and cleared by the platform operator only (platform permission `tenant:encryption_key`). A key that does not work is refused before use.
+- Key services: `none` (default) and `local` (a stand-in, refused in production). A real KMS is one adapter, and a founder decision (it needs a cloud account).
+- No new library.
+- **For the founder to confirm:** secrets first; operator sets the key; the 5-minute delay; which key service.

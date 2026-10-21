@@ -7,8 +7,8 @@ import { createKnowledgeGateway } from './modules/knowledge-gateway/index.ts';
 import { createMail, type MailModule, type MailSender } from './modules/mail/index.ts';
 import { createWebhooks, type WebhookTransport, type WebhooksModule } from './modules/webhooks/index.ts';
 import {
-  createHttpServer, createLogger, Database, ExportRegistry, LogNotifier, platformRoutes, PostgresIdempotencyStore,
-  PostgresRateLimiter, StaticSite, type Config, type HttpServer, type Logger, type Notifier, type RateLimiter,
+  createHttpServer, createLogger, Database, ExportRegistry, keyServiceFrom, LogNotifier, platformRoutes, PostgresIdempotencyStore,
+  PostgresRateLimiter, SealingCipher, StaticSite, TenantSealing, type Config, type HttpServer, type KeyService, type Logger, type Notifier, type RateLimiter,
 } from './modules/platform/index.ts';
 import { systemClock, type Clock } from './shared/clock.ts';
 
@@ -32,6 +32,10 @@ export interface AppOverrides {
   webhookTransport?: WebhookTransport;
   /** A stand-in e-mail sender for tests. Default: what MAIL_SENDER names ('none' queues and sends nothing). */
   mailSender?: MailSender;
+  /** Bring-your-own-key: a key service for tests (a LocalKeyService the test can switch keys off in). Default: KEY_SERVICE. */
+  keyService?: KeyService;
+  /** How long unwrapped company data keys are kept in memory (default 300 seconds; tests use 0). */
+  keyCacheSeconds?: number;
 }
 
 export interface App {
@@ -78,9 +82,13 @@ export async function createApp(config: Config, overrides: AppOverrides = {}): P
   // Billing answers the policy decision point's plan-limit question; the identity module gives billing the company's
   // term (the company card's dates). Each knows the other only through a port.
   const billing = createBilling({ config, db, notifier, rateLimiter, provider: overrides.paymentProvider, providerTimeoutMs: overrides.providerTimeoutMs });
+  // Every secret the API keeps for a company is sealed by ONE sealer: the platform's key, or the company's own (D35).
+  const sealing = new TenantSealing({
+    platform: new SealingCipher(config.credentialEnc), keys: overrides.keyService ?? keyServiceFrom(config.keyService), cacheSeconds: overrides.keyCacheSeconds,
+  });
   const identity = createIdentityAccess({
     config, db, rateLimiter, notifier, billing: overrides.billing ?? billing.port, exports, limits: overrides.authLimits, anomalyDefaults: overrides.anomalyDefaults, log,
-    oidcHttp: overrides.oidcHttp,
+    oidcHttp: overrides.oidcHttp, sealing,
   });
 
   const http = await createHttpServer({
@@ -97,7 +105,7 @@ export async function createApp(config: Config, overrides: AppOverrides = {}): P
   http.defineRoutes(knowledge.routes);
   // who receives a notice by e-mail is the identity module's answer; the mail module only asks
   mail.useDirectory(identity.recipients);
-  const webhooks = createWebhooks({ config, db, notifier, transport: overrides.webhookTransport });
+  const webhooks = createWebhooks({ config, db, notifier, transport: overrides.webhookTransport, sealing });
   http.defineRoutes(webhooks.routes);
 
   // Every operation in openapi.yaml must have a route, and vice versa.
