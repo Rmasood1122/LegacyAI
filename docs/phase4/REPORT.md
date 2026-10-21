@@ -395,9 +395,79 @@ service and sending domain; opting out of notices stays "no".
 
 $0. Total real-AI spend of the project stays $0.642.
 
+## Step 7 — feature 16: SSO and SCIM
+
+Details: `07-sso-scim.md`, decisions D33 and D34.
+
+### In plain language
+
+- **SSO:** a person can use their company's own sign-in (OpenID Connect: Microsoft, Google, Okta, ...) as the strong
+  factor. The card number and the 3-digit code are still required.
+- **SCIM:** the company's directory can add people, change their names and addresses, and record that they left,
+  which revokes their cards. It uses a "directory key" that can do nothing else, and it can never reach an Owner.
+
+### What was measured
+
+- **Locally, no database:**
+  - API: 729 unit tests, type check, lint, contract lint;
+  - web: 211 screen tests.
+- **CI (database and browser tests):** not yet run on this work at the time of writing. The commits wait for PR #2.
+
+### What reviews found before the first push
+
+Four read-only reviews. They found:
+- an SSO "mix-up" attack (a hostile company's provider receiving another company's sign-in code). Fixed with each
+  company's own return address and the provider's `iss`;
+- finishing a sign-in in another browser. Fixed with a cookie;
+- an SSO company lookup that could never find a company under row security;
+- endpoints on other ports;
+- SCIM bodies treated as file uploads;
+- directory updates refused for attributes that real directories send;
+- a race between directory removal and Owner card issuing;
+- the readiness check not raised to the newest migration.
+
+All are fixed, with tests.
+
+### What it cannot do
+
+- No real identity provider or directory was used. SAML is not built.
+- No groups or roles from the directory.
+
+## Step 8 — feature 21: bring-your-own-key
+
+Details: `08-bring-your-own-key.md`, decision D35.
+
+### In plain language
+
+A company can bring its own encryption key. The secrets LegacyAI keeps for it (authenticator seeds, webhook and SSO
+secrets) are then sealed with a key only the company's key service can open. If the company switches its key off,
+those stop working, here and for everyone.
+
+**The company's documents and knowledge are NOT covered.** That needs a separate decision.
+
+### What was measured
+
+- 12 unit tests locally.
+- The database tests run in CI only (not yet run at the time of writing).
+- Tested only with a local stand-in key service; no real key service was used.
+
+## Step 9 — Batch C, prepared (not complete)
+
+Details: `09-batch-c-prepared.md`.
+
+- NFC tags for cards: prepared, not tested with real tags.
+- Voice and scanned documents: the reader interface and its checks are prepared. No speech or OCR model is used, and
+  nothing is reachable through the API.
+- Passive capture, offline mode and regional hosting: written designs only, with the reasons.
+
 ## Not built yet (from the plan)
 
-Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is not
-built). Batch B: billing is built against a stand-in (step 5); 28 (API keys, webhooks, an example receiver) and the
-e-mail of notices are built, e-mail against a stand-in (step 6); 16 (SSO and SCIM) and 21 (bring-your-own-key) are
-not built. Batch C: nothing.
+Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in
+step 9). Batch B is built against stand-ins:
+- billing (step 5);
+- 28 and the e-mail of notices (step 6);
+- 16, SSO and SCIM (step 7);
+- 21, the company's own key (step 8, secrets only).
+
+Batch C is prepared only (step 9). Each needs money, hardware, a model, legal advice or infrastructure, as stated
+there.
