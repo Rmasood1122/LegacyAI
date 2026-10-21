@@ -6,7 +6,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  API_KEY_LIMITS, API_KEY_PERMISSIONS, apiKeySubject, buildResourceFilterSpec, cidrsAllow, COUNTED_REASONS, decide, formatApiKey, grantsForKey,
+  API_KEY_LIMITS, API_KEY_PERMISSIONS, apiKeySubject, buildResourceFilterSpec, cidrsAllow, COUNTED_REASONS, decide, DIRECTORY_KEY_PERMISSION, formatApiKey, grantsForKey,
   heldForKeys, heldGrants, keyRequestProblem, keyRevocationReason, keyStatus, keyUsable, makerCanAct, parseApiKey, validCidrs,
   type Grant, type Matrix, type NewKeyRequest, type PermissionDef, type PolicyContext,
 } from '../../src/modules/identity-access/index.ts';
@@ -111,8 +111,18 @@ describe('what a key may be asked to carry', () => {
   const held = new Map<string, number>([['knowledge:read', 3], ['knowledge:ask', 3], ['topic:read', 1], ['card:issue', 3], ['api_key:manage', 3], ['capture:upload', 3]]);
   const ask = (over: Partial<NewKeyRequest> = {}): NewKeyRequest => ({ name: 'k', scope: ['knowledge:read'], max_sensitivity: 1, expires_in_days: 30, ...over });
 
-  it('the short list is exactly five permissions - read and ask; a key adds or changes nothing', () => {
-    expect([...API_KEY_PERMISSIONS].sort()).toEqual(['gap:read', 'knowledge:ask', 'knowledge:read', 'source:read', 'topic:read']);
+  it('the short list is exactly five permissions - read and ask - plus the directory key\'s one (D34)', () => {
+    expect([...API_KEY_PERMISSIONS].sort()).toEqual(['gap:read', 'knowledge:ask', 'knowledge:read', 'person:scim', 'source:read', 'topic:read']);
+    expect(DIRECTORY_KEY_PERMISSION).toBe('person:scim');
+  });
+
+  it('a directory key carries person:scim alone: asked together with anything else, it is refused', () => {
+    const owner = new Map([['knowledge:read', 3], ['person:scim', 3]]);
+    expect(keyRequestProblem(ask({ scope: ['person:scim'], max_sensitivity: 0 }), heldForKeys(owner))).toBeNull();
+    expect(keyRequestProblem(ask({ scope: ['person:scim', 'knowledge:read'], max_sensitivity: 0 }), heldForKeys(owner))).toBe('directory-key-alone');
+    // ... and a stored key that names more than that is treated as malformed on every request
+    expect(grantsForKey([{ max_sensitivity: 3 }], { scope: ['person:scim', 'knowledge:read'], max_sensitivity: 0 }, 'knowledge:read')).toBe('malformed');
+    expect(grantsForKey([{ max_sensitivity: 3 }], { scope: ['person:scim'], max_sensitivity: 0 }, 'knowledge:read')).toBe('outside-scope');
   });
 
   it('of what a card holds, only what is on the short list can go into a key', () => {
@@ -163,6 +173,7 @@ const perms: PermissionDef[] = [
   { permission_key: 'capture:upload', is_write: true, platform_only: false },
   { permission_key: 'card:issue', is_write: true, platform_only: false },
   { permission_key: 'api_key:manage', is_write: true, platform_only: false },
+  { permission_key: 'person:scim', is_write: true, platform_only: false },
   { permission_key: 'export:create', is_write: true, platform_only: false },
   { permission_key: 'billing:read', is_write: false, platform_only: false },
   { permission_key: 'tenant:create', is_write: true, platform_only: true },
@@ -234,6 +245,36 @@ describe('a key is its own kind of subject', () => {
     expect(keys([role('expert')], false, { ...settings, enabled_roles: ['company_owner'] })).toEqual([]);
     expect(keys(OWNER, false)).not.toContain('tenant:create');
     expect(keys(OWNER, true)).toContain('tenant:create');
+  });
+});
+
+describe('the directory key (SCIM, D34)', () => {
+  const person = (target_rank?: number): ResourceRef => ({ type: 'person', id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', tenant_id: T1, ...(target_rank === undefined ? {} : { target_rank }) });
+  const directory = key(['person:scim'], 0);
+
+  it('a directory key provisions people; the very same Owner signed in is refused (only a key can use person:scim)', () => {
+    expect(decide(directory, 'person:scim', { type: 'person', tenant_id: T1, collection: true }, ctx()).effect).toBe('allow');
+    expect(decide(directory, 'person:scim', person(30), ctx()).effect).toBe('allow');
+    expect(decide(card(OWNER), 'person:scim', person(30), ctx('none'))).toMatchObject({ effect: 'deny', reason_code: 'DENY_KEY_ONLY' });
+    expect(decide(card(OWNER), 'person:scim', { type: 'person', tenant_id: T1, collection: true }, ctx('none')).reason_code).toBe('DENY_KEY_ONLY');
+  });
+
+  it('nobody whose card holds the Owner role is within its reach; a person described without a rank is refused', () => {
+    expect(decide(directory, 'person:scim', person(100), ctx())).toMatchObject({ effect: 'deny', reason_code: 'DENY_DIRECTORY_OWNER' });
+    expect(decide(directory, 'person:scim', person(80), ctx()).effect).toBe('allow');   // an Admin who leaves is de-provisioned
+    expect(decide(directory, 'person:scim', person(), ctx())).toMatchObject({ effect: 'deny', reason_code: 'DENY_RANK' });
+    expect(decide(directory, 'person:scim', person(Number.NaN), ctx()).reason_code).toBe('DENY_RANK');
+  });
+
+  it('it does nothing else, and a reading key cannot provision', () => {
+    expect(decide(directory, 'knowledge:read', item(0), ctx()).reason_code).toBe('DENY_API_KEY_SCOPE');
+    expect(decide(key(['knowledge:read'], 3), 'person:scim', person(30), ctx()).reason_code).toBe('DENY_API_KEY_SCOPE');
+  });
+
+  it('it stops with its maker: a maker who is no longer an Owner (or whose card cannot act) gives it nothing', () => {
+    expect(decide(directory, 'person:scim', person(30), ctx(card([role('expert')]))).effect).toBe('deny');
+    expect(decide(directory, 'person:scim', person(30), ctx(card(OWNER, { locked: true }))).effect).toBe('deny');
+    expect(decide(directory, 'person:scim', person(30), ctx(null)).reason_code).toBe('DENY_UNAUTHENTICATED');
   });
 });
 
@@ -463,14 +504,26 @@ describe('the contract says which operations take a key', () => {
   const withKey = [...contract.operations.values()].filter((op) => op.apiKey);
 
   it('exactly these ten - all of them reads, or asking - each with a permission from the short list, none of them public', () => {
-    expect(withKey.map((op) => op.operationId).sort()).toEqual([
+    const knowledge = withKey.filter((op) => op.permission !== DIRECTORY_KEY_PERMISSION);
+    expect(knowledge.map((op) => op.operationId).sort()).toEqual([
       'askKnowledge', 'getGapReport', 'getGraphNeighbourhood', 'getKnowledgeItem', 'getRoleTopics', 'getSource',
       'listJobRoles', 'listKnowledgeItems', 'listSources', 'listTopics',
     ]);
-    for (const op of withKey) {
+    for (const op of knowledge) {
       expect(API_KEY_PERMISSIONS.has(op.permission as string), op.operationId).toBe(true);
       expect(op.isPublic, op.operationId).toBe(false);
       expect(op.method === 'GET' || op.operationId === 'askKnowledge', op.operationId).toBe(true);
+    }
+  });
+
+  it('the only writes a key can make are the directory\'s seven SCIM operations, all under /v1/scim/v2 and all person:scim (D34)', () => {
+    const directory = withKey.filter((op) => op.permission === DIRECTORY_KEY_PERMISSION);
+    expect(directory.map((op) => op.operationId).sort()).toEqual([
+      'scimCreateUser', 'scimDeleteUser', 'scimGetUser', 'scimListUsers', 'scimPatchUser', 'scimReplaceUser', 'scimServiceProviderConfig',
+    ]);
+    for (const op of directory) expect(op.path.startsWith('/v1/scim/v2/'), op.operationId).toBe(true);
+    for (const op of withKey) {
+      if (op.method !== 'GET' && op.operationId !== 'askKnowledge') expect(op.permission, op.operationId).toBe(DIRECTORY_KEY_PERMISSION);
     }
   });
 

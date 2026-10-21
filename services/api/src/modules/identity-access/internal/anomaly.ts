@@ -78,6 +78,7 @@ export const COUNTED_REASONS: ReadonlySet<string> = new Set([
   'DENY_UNVERIFIED',                // unverified knowledge asked for by a card that may read verified only
   'DENY_FILTER_NOT_SUPPORTED',      // a whole list asked for by a card that may see only part (D23)
   'DENY_API_KEY_SCOPE',             // an API key asked for something that was not written into it (counted against the KEY)
+  'DENY_KEY_ONLY',                  // a signed-in card asked for what only a directory key may do (D34)
 ]);
 /** Refusals that are never counted, each with the reason. Together with COUNTED_REASONS this covers every reason there is. */
 export const UNCOUNTED_REASONS: ReadonlySet<string> = new Set([
@@ -91,6 +92,7 @@ export const UNCOUNTED_REASONS: ReadonlySet<string> = new Set([
   'DENY_UNAUTHENTICATED',                                                           // no session: there is no card to count against
   'DENY_SELF_REVIEW',   // verifying or releasing one's own work: the screens offer the button to every reviewer and expect this refusal
   'DENY_FETCH_SITE',    // a page of another address made the browser ask: refused before the policy, not the card holder's doing
+  'DENY_DIRECTORY_OWNER', // a directory syncing everybody meets the Owners in ordinary use (D34): counting it would stop the directory key
 ]);
 
 /** Does this refusal count toward the "denials" rule? Pure. */

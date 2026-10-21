@@ -38,6 +38,8 @@ tags:
     description: API keys for machines. These operations never accept a key themselves.
   - name: sso
     description: "The company's identity provider (OpenID Connect) as a strong factor. Company Owner only; these operations never accept a key."
+  - name: scim
+    description: "SCIM 2.0 for the company's directory: provisioning people. Only with a directory key (an API key carrying person:scim alone); a signed-in card is refused. Errors are problem details (RFC 9457), not SCIM error messages; requests may be application/json or application/scim+json, answers are application/json."
   - name: webhooks
     description: Outgoing webhooks - signed messages to a company's https endpoints when its knowledge changes. Company Owner only; these operations never accept a key.
 paths:
@@ -7822,6 +7824,269 @@ paths:
           $ref: "#/components/responses/NotFound"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+  /v1/scim/v2/ServiceProviderConfig:
+    get:
+      operationId: scimServiceProviderConfig
+      summary: "SCIM: what this server supports (RFC 7643 section 5). Directory key only."
+      tags:
+        - scim
+      x-permission: person:scim
+      x-api-key: true
+      security:
+        - apiKey: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimServiceProviderConfig"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/scim/v2/Users:
+    get:
+      operationId: scimListUsers
+      summary: "SCIM: the people the directory manages (never an Owner), optionally found by userName or externalId (filter userName eq \"...\"). Directory key only."
+      tags:
+        - scim
+      x-permission: person:scim
+      x-api-key: true
+      security:
+        - apiKey: []
+      parameters:
+        - name: filter
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 600
+        - name: startIndex
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000000
+        - name: count
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 200
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    post:
+      operationId: scimCreateUser
+      summary: "SCIM: the directory creates a person (no card: an administrator issues one). Directory key only."
+      tags:
+        - scim
+      x-permission: person:scim
+      x-api-key: true
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScimUserInput"
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimUserInput"
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: "Conflict. `scim-uniqueness`: another person already has this userName, externalId or e-mail address."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/scim/v2/Users/{person_id}:
+    get:
+      operationId: scimGetUser
+      summary: "SCIM: one person the directory manages. Directory key only."
+      tags:
+        - scim
+      x-permission: person:scim
+      x-api-key: true
+      security:
+        - apiKey: []
+      parameters:
+        - name: person_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    put:
+      operationId: scimReplaceUser
+      summary: "SCIM: the directory replaces what it manages of a person. active false = the person has left: their cards are revoked. Directory key only."
+      tags:
+        - scim
+      x-permission: person:scim
+      x-api-key: true
+      security:
+        - apiKey: []
+      parameters:
+        - name: person_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScimUserInput"
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimUserInput"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "Conflict. `scim-uniqueness`: another person already has this userName, externalId or e-mail address."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    patch:
+      operationId: scimPatchUser
+      summary: "SCIM: the directory changes some attributes (PatchOp: active, displayName, name, userName, externalId, emails). active false = the person has left: their cards are revoked. Directory key only."
+      tags:
+        - scim
+      x-permission: person:scim
+      x-api-key: true
+      security:
+        - apiKey: []
+      parameters:
+        - name: person_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScimPatchRequest"
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimPatchRequest"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "Conflict. `scim-uniqueness`: another person already has this userName, externalId or e-mail address."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    delete:
+      operationId: scimDeleteUser
+      summary: "SCIM: the person has left and leaves the directory: their cards are revoked, their history stays, and the directory gets 404 for them from now on. Directory key only."
+      tags:
+        - scim
+      x-permission: person:scim
+      x-api-key: true
+      security:
+        - apiKey: []
+      parameters:
+        - name: person_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Done
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 components:
   securitySchemes:
     sessionCookie:
@@ -11663,8 +11928,180 @@ components:
           minimum: 1
           maximum: 120
           description: How recently, in minutes, another session of the card must have been used from a different address for the rule to fire.
+    ScimUser:
+      description: "A person as the directory sees it (SCIM core User, the attributes stored here)."
+      type: object
+      additionalProperties: false
+      required:
+        - schemas
+        - id
+        - userName
+        - displayName
+        - emails
+        - active
+        - meta
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+        id:
+          type: string
+          format: uuid
+        externalId:
+          type: string
+        userName:
+          type: string
+        displayName:
+          type: string
+        emails:
+          type: array
+          maxItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - value
+              - primary
+            properties:
+              value:
+                type: string
+              primary:
+                type: boolean
+        active:
+          type: boolean
+        meta:
+          type: object
+          additionalProperties: false
+          required:
+            - resourceType
+            - created
+            - lastModified
+            - location
+          properties:
+            resourceType:
+              type: string
+              enum:
+                - User
+            created:
+              type: string
+              format: date-time
+            lastModified:
+              type: string
+              format: date-time
+            location:
+              type: string
+    ScimUserInput:
+      description: "A SCIM User as a directory sends it. userName is required; displayName, name, emails, active and externalId are stored; every other attribute is accepted and ignored."
+      type: object
+      additionalProperties: true
+      maxProperties: 60
+      required:
+        - userName
+      properties:
+        schemas:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            maxLength: 200
+        userName:
+          type: string
+          minLength: 1
+          maxLength: 256
+        externalId:
+          type:
+            - "string"
+            - "null"
+          maxLength: 256
+        displayName:
+          type: string
+          maxLength: 1000
+        name:
+          type: object
+        emails:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+        active:
+          description: "true or false; the strings \"True\" and \"False\" are accepted too (one large directory sends those)."
+          type:
+            - "boolean"
+            - "string"
+    ScimPatchRequest:
+      type: object
+      additionalProperties: true
+      required:
+        - Operations
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+            maxLength: 200
+        Operations:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - op
+            properties:
+              op:
+                type: string
+                maxLength: 20
+              path:
+                type: string
+                maxLength: 200
+              value: {}
+    ScimListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - schemas
+        - totalResults
+        - startIndex
+        - itemsPerPage
+        - Resources
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+        totalResults:
+          type: integer
+        startIndex:
+          type: integer
+        itemsPerPage:
+          type: integer
+        Resources:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScimUser"
+    ScimServiceProviderConfig:
+      type: object
+      additionalProperties: true
+      required:
+        - schemas
+        - patch
+        - bulk
+        - filter
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+        patch:
+          type: object
+        bulk:
+          type: object
+        filter:
+          type: object
     ApiKeyPermission:
-      description: "The only permissions an API key may carry: read and ask. A key changes nothing."
+      description: "The only permissions an API key may carry: read and ask (a key changes nothing) - or, for a directory key, person:scim alone (provisioning people from the company's directory, D34)."
       type: string
       enum:
         - "knowledge:read"
@@ -11672,6 +12109,7 @@ components:
         - "topic:read"
         - "gap:read"
         - "source:read"
+        - "person:scim"
     SensitivityLevel:
       description: "How closely held something is: 0 = public, 1 = internal (the default for new documents), 2 = confidential, 3 = restricted."
       type: integer

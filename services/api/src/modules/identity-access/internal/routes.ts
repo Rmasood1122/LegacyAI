@@ -21,7 +21,7 @@ import {
 } from './cards.ts';
 import { normalizeCardNumber } from './card-number.ts';
 import type { ResourceDescriptor } from './policy.ts';
-import { clearLeavingDate } from './leaving.ts';
+import { offboardPerson } from './departure.ts';
 import { loadRoles, revokeSession, rotateSession } from './sessions.ts';
 
 export interface IdentityRouteDeps {
@@ -676,13 +676,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
         }
         const person = rows[0];
         if (!person) throw problems.notFound();
-        if (body.status === 'departed') {
-          const live = await tx.query<CardRow>(
-            `SELECT ${CARD_COLUMNS} FROM cards WHERE person_id = $1 AND state NOT IN ('revoked', 'replaced') FOR UPDATE`, [person.id]);
-          for (const card of live.rows) await cards.revoke(tx, card, 'offboarded', subject.card_id, ctx);
-          // the planned leaving date has served its purpose and is personal data: it goes when the person has left
-          await clearLeavingDate(tx, subject.tenant_id, person.id);
-        }
+        if (body.status === 'departed') await offboardPerson(tx, cards, { tenantId: subject.tenant_id, personId: person.id, actorCardId: subject.card_id }, ctx);
         await writeAudit(tx, {
           tenantId: subject.tenant_id, actorCardId: subject.card_id, actorKind: 'card', action: 'person:update',
           resourceType: 'person', resourceId: person.id, decision: 'event', reasonCode: 'PERSON_UPDATED',

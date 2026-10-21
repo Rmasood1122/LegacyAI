@@ -250,3 +250,14 @@ CONSEQUENCES:
 - Removing the connection revokes the SSO factors, ends their sessions and (D30) the API keys of those cards.
 - The rollback refuses to run when SSO credentials exist (the append-only card history refers to them).
 - **For the founder to confirm:** which providers first; Owner only; that people type the company's short name; that removal ends those people's API keys.
+
+**D34 — SCIM: a directory key that carries one permission alone; Owners are outside its reach (2026-10-21).**
+- Details: `docs/phase4/07-sso-scim.md`, part B. Feature 16, part B.
+- This changes D30, which said a key can only read and ask. The one exception is the **directory key**: an API key carrying `person:scim` and nothing else. The API, the database (`api_keys_directory_key_alone`) and the policy on every request all refuse any mix.
+- `person:scim` is **key-only**. The Owner's role holds it so that an Owner can make the key. A signed-in card is refused (`DENY_KEY_ONLY`), and the session does not report it.
+- The directory adds people (with no card), changes their names and addresses, and records that they left: their cards are revoked, through the same function an administrator's offboarding uses. It never issues cards, gives roles or touches knowledge.
+- It reaches only the people it added. It **never reaches anyone whose card holds the Owner role** (`DENY_DIRECTORY_OWNER`), so a directory mistake or attack cannot lock the company out.
+- DELETE records that the person left and takes them out of the directory's reach (404 from then on, RFC 7644 3.6). Nothing is erased.
+- Deviations from SCIM, written down in the details: problem-details errors; JSON answers; two filters only; no groups or bulk.
+- No new library.
+- **For the founder to confirm:** Owners out of reach; no roles from the directory; removed people keep their history; the first customer's directory.

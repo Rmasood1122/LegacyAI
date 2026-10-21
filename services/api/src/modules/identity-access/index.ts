@@ -17,6 +17,7 @@ import { identityRoutes } from './internal/routes.ts';
 import { leavingRoutes, type PersonHoldingsLoader } from './internal/routes-leaving.ts';
 import { safetyRoutes } from './internal/routes-safety.ts';
 import { OidcCache, type OidcHttp } from './internal/oidc.ts';
+import { scimRoutes } from './internal/routes-scim.ts';
 import { ssoRoutes } from './internal/routes-sso.ts';
 import { SsoService } from './internal/sso.ts';
 import { SecretCodeHasher } from './internal/secret-code.ts';
@@ -49,11 +50,12 @@ export {
   authorizationUrl, codeChallenge, discover, exchangeCode, newFlowSecrets, OidcCache, OidcError, verifyIdToken, type Discovery, type OidcHttp,
 } from './internal/oidc.ts';
 export { issuerProblem, ssoIdentityOf, SSO_CONTINUE_TTL_SECONDS, SSO_FLOW_TTL_SECONDS } from './internal/sso.ts';
+export { applyPatch, parseScimFilter, ScimInputError, scimStateOf, toScimUser, type ScimState } from './internal/scim.ts';
 export {
   accessPhase, canTransition, CARD_STATES, computeDates, effectiveState, LEGAL_TRANSITIONS, TERMINAL_STATES,
 } from './internal/lifecycle.ts';
 export {
-  API_KEY_PERMISSIONS, buildResourceFilter, buildResourceFilterSpec, cidrsAllow, decide, usageKey, validCidrs,
+  API_KEY_PERMISSIONS, buildResourceFilter, buildResourceFilterSpec, cidrsAllow, decide, DIRECTORY_KEY_PERMISSION, KEY_ONLY_PERMISSIONS, usageKey, validCidrs,
   type FilterGrant, type FilterSpec, type Grant, type Matrix, type PermissionDef, type PolicyContext, type ResourceDescriptor,
   type ResourceFilter, type Restriction,
 } from './internal/policy.ts';
@@ -134,6 +136,7 @@ export function createIdentityAccess(deps: IdentityAccessDeps): IdentityAccess {
       ...leavingRoutes({ authorizer, notifier: deps.notifier, holdings: () => holdings }),
       ...apiKeyRoutes({ authorizer, apiKeys }),
       ...ssoRoutes({ auth, sso, cards }),
+      ...scimRoutes({ cards }),
     ],
     authPort: {
       tenantOf: (credential) => (credential.kind === 'session' ? tenantOfToken(credential.token) : parseApiKey(credential.token)?.tenantId ?? null),

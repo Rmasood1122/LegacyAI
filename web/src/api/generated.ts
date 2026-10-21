@@ -1088,7 +1088,63 @@ export interface UpdateAnomalySettingsRequest {
   second_address_window_minutes?: number;
 }
 
-export type ApiKeyPermission = "knowledge:read" | "knowledge:ask" | "topic:read" | "gap:read" | "source:read";
+export interface ScimUser {
+  schemas: string[];
+  id: string;
+  externalId?: string;
+  userName: string;
+  displayName: string;
+  emails: {
+    value: string;
+    primary: boolean;
+  }[];
+  active: boolean;
+  meta: {
+    resourceType: "User";
+    created: string;
+    lastModified: string;
+    location: string;
+  };
+}
+
+export interface ScimUserInput {
+  schemas?: string[];
+  userName: string;
+  externalId?: string | null;
+  displayName?: string;
+  name?: Record<string, unknown>;
+  emails?: Record<string, unknown>[];
+  active?: boolean | string;
+  [key: string]: unknown;
+}
+
+export interface ScimPatchRequest {
+  schemas?: string[];
+  Operations: {
+    op: string;
+    path?: string;
+    value?: Record<string, unknown>;
+  }[];
+  [key: string]: unknown;
+}
+
+export interface ScimListResponse {
+  schemas: string[];
+  totalResults: number;
+  startIndex: number;
+  itemsPerPage: number;
+  Resources: ScimUser[];
+}
+
+export interface ScimServiceProviderConfig {
+  schemas: string[];
+  patch: Record<string, unknown>;
+  bulk: Record<string, unknown>;
+  filter: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export type ApiKeyPermission = "knowledge:read" | "knowledge:ask" | "topic:read" | "gap:read" | "source:read" | "person:scim";
 
 export type SensitivityLevel = number;
 
@@ -1713,6 +1769,13 @@ export const operations = {
   getSsoConnection: { method: "GET", path: "/v1/sso/connection", status: 200, idempotent: false, public: false, permission: "sso:read", contentTypes: [] },
   putSsoConnection: { method: "PUT", path: "/v1/sso/connection", status: 200, idempotent: true, public: false, permission: "sso:manage", contentTypes: ["application/json"] },
   removeSsoConnection: { method: "POST", path: "/v1/sso/connection/remove", status: 200, idempotent: true, public: false, permission: "sso:manage", contentTypes: [] },
+  scimServiceProviderConfig: { method: "GET", path: "/v1/scim/v2/ServiceProviderConfig", status: 200, idempotent: false, public: false, permission: "person:scim", contentTypes: [] },
+  scimListUsers: { method: "GET", path: "/v1/scim/v2/Users", status: 200, idempotent: false, public: false, permission: "person:scim", contentTypes: [] },
+  scimCreateUser: { method: "POST", path: "/v1/scim/v2/Users", status: 201, idempotent: false, public: false, permission: "person:scim", contentTypes: ["application/json","application/scim+json"] },
+  scimGetUser: { method: "GET", path: "/v1/scim/v2/Users/{person_id}", status: 200, idempotent: false, public: false, permission: "person:scim", contentTypes: [] },
+  scimReplaceUser: { method: "PUT", path: "/v1/scim/v2/Users/{person_id}", status: 200, idempotent: false, public: false, permission: "person:scim", contentTypes: ["application/json","application/scim+json"] },
+  scimPatchUser: { method: "PATCH", path: "/v1/scim/v2/Users/{person_id}", status: 200, idempotent: false, public: false, permission: "person:scim", contentTypes: ["application/json","application/scim+json"] },
+  scimDeleteUser: { method: "DELETE", path: "/v1/scim/v2/Users/{person_id}", status: 204, idempotent: false, public: false, permission: "person:scim", contentTypes: [] },
 } as const;
 
 export type OperationId = keyof typeof operations;
@@ -3079,5 +3142,47 @@ export interface OperationTypes {
       removed: boolean;
       factors_revoked: number;
     };
+  };
+  scimServiceProviderConfig: {
+    path: undefined;
+    query: undefined;
+    body: undefined;
+    response: ScimServiceProviderConfig;
+  };
+  scimListUsers: {
+    path: undefined;
+    query: { filter?: string; startIndex?: number; count?: number };
+    body: undefined;
+    response: ScimListResponse;
+  };
+  scimCreateUser: {
+    path: undefined;
+    query: undefined;
+    body: ScimUserInput;
+    response: ScimUser;
+  };
+  scimGetUser: {
+    path: { person_id: string };
+    query: undefined;
+    body: undefined;
+    response: ScimUser;
+  };
+  scimReplaceUser: {
+    path: { person_id: string };
+    query: undefined;
+    body: ScimUserInput;
+    response: ScimUser;
+  };
+  scimPatchUser: {
+    path: { person_id: string };
+    query: undefined;
+    body: ScimPatchRequest;
+    response: ScimUser;
+  };
+  scimDeleteUser: {
+    path: { person_id: string };
+    query: undefined;
+    body: undefined;
+    response: undefined;
   };
 }

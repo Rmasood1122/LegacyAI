@@ -5,7 +5,7 @@ import type { BillingPort } from '../../billing/index.ts';
 import { getSettings, getTenant, writeAudit, type Tx } from '../../platform/index.ts';
 import { accessPhase } from './lifecycle.ts';
 import {
-  buildResourceFilter, buildResourceFilterSpec, decide, heldGrants, usageKey,
+  buildResourceFilter, buildResourceFilterSpec, decide, heldGrants, KEY_ONLY_PERMISSIONS, usageKey,
   type FilterSpec, type Grant, type Matrix, type PermissionDef, type PolicyContext, type ResourceDescriptor, type ResourceFilter,
   type Restriction,
 } from './policy.ts';
@@ -217,7 +217,9 @@ export class Authorizer {
   /** What the session endpoint reports: permission keys held, and whether the card is read-only / export-only. */
   async describe(tx: Tx, subject: CardSubject, ctx: RequestContext): Promise<{ permissions: string[]; read_only: boolean; export_only: boolean }> {
     const pc = await this.policyContext(tx, subject, 'self:read', ctx);
-    const permissions = new Set(heldGrants(subject.roles, subject.is_platform_tenant, pc).map((g) => g.permission_key));
+    // what the CARD can do: a permission only a key can use is not reported (the card holds it only to make such a key)
+    const permissions = new Set(heldGrants(subject.roles, subject.is_platform_tenant, pc).map((g) => g.permission_key)
+      .filter((p) => !KEY_ONLY_PERMISSIONS.has(p)));
     const phases = [accessPhase(subject, ctx.now), pc.companyCard ? accessPhase(pc.companyCard, ctx.now) : 'normal'];
     return {
       permissions: [...permissions].sort(),

@@ -323,6 +323,8 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
   // Raw files (uploads) arrive as bytes. Only operations whose contract lists the type accept them;
   // any other operation refuses a non-JSON body in validateRequest.
   app.addContentTypeParser(['application/pdf', 'text/plain', 'text/markdown'], { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
+  // A company directory (SCIM, RFC 7644) sends JSON as application/scim+json: read exactly like application/json.
+  app.addContentTypeParser('application/scim+json', { parseAs: 'string' }, app.getDefaultJsonParser('error', 'error'));
 
   const staticReplies = new WeakSet<FastifyReply>();
   app.addHook('onSend', async (req, reply) => {

@@ -5,9 +5,9 @@ Status on 2026-10-21:
 | Part | What | State |
 |---|---|---|
 | A | SSO: sign-in through the company's identity provider (OpenID Connect) as the strong factor | Built against a stand-in provider. Database and browser tests run only in GitHub Actions. |
-| B | SCIM: automatic provisioning of people from the company's directory | Not started yet (next). |
+| B | SCIM: automatic provisioning of people from the company's directory | Built against stand-in requests (no real directory). Database tests run only in GitHub Actions. |
 
-No real identity provider was used. No new library: `jose` (already a dependency since Phase 1) checks the provider's
+No real identity provider or directory was used. No new library: `jose` (already a dependency since Phase 1) checks the provider's
 tokens; requests go through `node:https` with the same address guard as webhooks.
 
 ## Part A — SSO
@@ -168,3 +168,109 @@ history (append-only) refers to them and the rollback will not rewrite history.
 3. That a person names their company's short name when signing in with SSO (the price of not revealing which card
    numbers exist).
 4. That removing the connection also ends the API keys made by the people who used it (the D30 rule).
+
+## Part B — SCIM (people from the company's directory)
+
+### What it is for
+
+A company keeps its people in a directory (Microsoft Entra ID, Okta, Google, ...). With SCIM 2.0 the directory tells
+LegacyAI by itself when someone joins, changes name or address, or **leaves**. Leaving matters most: the person's cards
+are revoked at once, as if an administrator had recorded it.
+
+### The directory key
+
+The directory calls the API with a **directory key**. This is an API key (feature 28, D30) made on the API keys screen
+with the choice "Company directory (SCIM)". It carries exactly one permission, `person:scim`, and nothing else. The API
+and the database both refuse a key that mixes it with anything else. So a directory key reads no knowledge, and a
+reading key changes no people.
+
+`person:scim` is held by the Owner's role only so that an Owner can MAKE such a key. The Owner signed in cannot use it:
+the policy refuses it to every signed-in card (`DENY_KEY_ONLY`), and the session does not list it. Everything else
+about keys holds: the key never outlives a change of its maker's sign-in or rights, it expires, it can be revoked, and
+its maker's card state decides on every request.
+
+### What the directory can and cannot do
+
+| Can | Cannot |
+|---|---|
+| add a person (with no card, so with no way in) | issue a card, give a role, or touch knowledge |
+| change the person's name, e-mail address, directory user name, directory id | see or change anyone it did not add (an administrator's people are "not found" to it) |
+| record that a person left (`active: false`): their cards are revoked, their sessions and API keys end | reach anyone whose card holds the **Owner** role: not to read, change or remove (`DENY_DIRECTORY_OWNER`) |
+| remove a person (DELETE): they are recorded as left, their history stays, and the directory gets 404 for them from then on | erase anyone's history |
+
+Why Owners are out of reach: a mistake or an attack in the directory must never lock the company out of itself. An
+Admin who leaves IS de-provisioned by the directory.
+
+Groups are not supported. Roles are given by an administrator, never by the directory.
+
+### Operations (189 in total)
+
+Base address for the directory: `https://<api>/v1/scim/v2`. Authentication: `Authorization: Bearer <directory key>`.
+
+| Operation | Path | |
+|---|---|---|
+| `scimServiceProviderConfig` | `GET /v1/scim/v2/ServiceProviderConfig` | what is supported |
+| `scimListUsers` | `GET /v1/scim/v2/Users?filter=userName eq "..."&startIndex=&count=` | find (userName or externalId), page |
+| `scimCreateUser` | `POST /v1/scim/v2/Users` | add |
+| `scimGetUser` | `GET /v1/scim/v2/Users/{id}` | read one |
+| `scimReplaceUser` | `PUT /v1/scim/v2/Users/{id}` | replace |
+| `scimPatchUser` | `PATCH /v1/scim/v2/Users/{id}` | change attributes (`active`, names, `userName`, `externalId`, `emails`) |
+| `scimDeleteUser` | `DELETE /v1/scim/v2/Users/{id}` | left, and out of the directory's reach |
+
+`userName` is unique in the company, without regard to case. So are `externalId` and the e-mail address.
+
+### Where it differs from the standard (written down so nobody is surprised)
+
+- Errors are this API's problem details (RFC 9457), not SCIM error messages. The status codes are the SCIM ones (400,
+  401, 403, 404, 409).
+- Answers are `application/json`. Requests may be `application/json` or `application/scim+json`.
+- Only the filters `userName eq "..."` and `externalId eq "..."`. No sorting, no bulk, no ETags, no groups. A PATCH of
+  an attribute that is not stored here is refused (400), so the directory learns that it was not done.
+- `active` also accepts the strings "True" and "False", because one large directory sends those.
+- While the company is in its read-only grace period, the directory is refused too: provisioning writes.
+
+### Database
+
+Migration `20261007000200_scim.sql`:
+- the permission `person:scim` for the Owner;
+- the constraint `api_keys_directory_key_alone`;
+- `people.scim_user_name`, unique per company without regard to case.
+
+`external_id` and `scim_managed` were laid down for this in Phase 1.
+
+**Rollback:** the people the directory added stay and become ordinary people that an administrator manages. Directory
+keys stay as rows, but without the permission they can do nothing (`DENY_UNKNOWN_ACTION`).
+
+### What was tested, and what was not
+
+- **Run locally (no database):**
+  - unit tests of what a directory sends: user names, display-name fallbacks, the primary e-mail address, "True" and
+    "False", control characters;
+  - the PATCH forms directories use, and what PATCH refuses;
+  - the filter;
+  - what is shown;
+  - the policy: a key only; Owners out of reach; a person without a rank refused; the key stops with its maker;
+  - the key rule;
+  - two screen tests.
+- **Run only by GitHub:** the database tests. They cover:
+  - the directory key carries person:scim alone (API and database);
+  - the Owner signed in is refused;
+  - a reading key cannot provision, and a directory key reads no knowledge;
+  - the whole lifecycle through `application/scim+json`;
+  - uniqueness without regard to case;
+  - an administrator's people are not found;
+  - `active: false` revokes the card;
+  - DELETE then 404;
+  - an Owner out of reach;
+  - the audit trail names the key and holds no names or addresses;
+  - a revoked key stops;
+  - another company sees nothing.
+- **Not tested:** a real directory (Entra ID, Okta, Google). Each has its own habits, and the first customer's
+  directory has to be tried against a test company before it is switched on.
+
+### For the founder to confirm
+
+1. That Owners are outside the directory's reach: an Owner who leaves is recorded by hand.
+2. That the directory never gives roles or issues cards: an administrator still does.
+3. That a person the directory removes keeps their history as a departed person.
+4. Which directory the first customer uses, so it can be tried first.

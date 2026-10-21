@@ -86,10 +86,23 @@ const COMPANY_TERM_ACTIONS: ReadonlySet<string> = new Set(['billing:read', 'bill
  * documents' labels, and asking a question. Read and ask, nothing else: nothing that adds or changes anything (a
  * machine must not make a person's attestation about a document), nothing that manages people, cards, roles, keys,
  * settings, consent, billing or the audit log, nothing that verifies or approves, and no platform permission.
+ * ONE exception (D34): the directory key, which carries person:scim and nothing else (DIRECTORY_KEY_PERMISSION).
  */
 export const API_KEY_PERMISSIONS: ReadonlySet<string> = new Set([
-  'knowledge:read', 'knowledge:ask', 'topic:read', 'gap:read', 'source:read',
+  'knowledge:read', 'knowledge:ask', 'topic:read', 'gap:read', 'source:read', 'person:scim',
 ]);
+/**
+ * The directory key (D34): provisioning people from the company's directory (SCIM). A key that names it names
+ * nothing else - checked when the key is made, by the database, and here on every request.
+ */
+export const DIRECTORY_KEY_PERMISSION = 'person:scim';
+/**
+ * Permissions that only a KEY can use. A role holds them so that its card can MAKE such a key; a signed-in card never
+ * acts with them (DENY_KEY_ONLY), and the session does not report them.
+ */
+export const KEY_ONLY_PERMISSIONS: ReadonlySet<string> = new Set([DIRECTORY_KEY_PERMISSION]);
+/** The Company Owner's rank. Nobody whose card holds it is within a directory key's reach (D34). */
+const OWNER_RANK = 100;
 /** Nobody may do these to their own card. */
 const SELF_FORBIDDEN: ReadonlySet<string> = new Set([
   'card:suspend', 'card:revoke', 'card:replace', 'card:unlock', 'card:reset_credentials',
@@ -188,6 +201,8 @@ export function grantsForKey<G extends { max_sensitivity: number }>(
   if (key === null || typeof key !== 'object' || !Array.isArray(key.scope) || !key.scope.every((p) => typeof p === 'string')) return 'malformed';
   const level = key.max_sensitivity;
   if (typeof level !== 'number' || !Number.isInteger(level) || level < 0 || level > 3) return 'malformed';
+  // a directory key carries its one permission alone (D34); anything else in its data is not a key we made
+  if (key.scope.includes(DIRECTORY_KEY_PERMISSION) && key.scope.length !== 1) return 'malformed';
   if (!API_KEY_PERMISSIONS.has(action) || !key.scope.includes(action)) return 'outside-scope';
   return makerGrants.map((g) => ({ ...g, max_sensitivity: Math.min(g.max_sensitivity, level) }));
 }
@@ -210,6 +225,7 @@ function evaluateSubject(asking: Subject, action: string, ctx: PolicyContext): D
   if (subject === null) return deny('DENY_UNAUTHENTICATED');
   const permission = typeof action === 'string' ? ctx.matrix.permissions.get(action) : undefined;
   if (!permission) return deny('DENY_UNKNOWN_ACTION');
+  if (KEY_ONLY_PERMISSIONS.has(action) && asking.kind !== 'api_key') return deny('DENY_KEY_ONLY');
 
   if (ctx.tenant.status !== 'active') return deny('DENY_TENANT_INACTIVE');
 
@@ -451,6 +467,12 @@ function decideUnsafe(subject: Subject, action: string, resource: ResourceRef, c
     }
   }
   if (resource.removes_last_owner !== undefined && resource.removes_last_owner !== false) return deny('DENY_LAST_OWNER');
+  // The directory (D34) never reaches an Owner: not to read, change or remove. The route must say how high the
+  // person's live card ranks; a person described without it is refused, never waved through.
+  if (action === DIRECTORY_KEY_PERMISSION && resource.collection !== true) {
+    if (typeof resource.target_rank !== 'number' || !Number.isFinite(resource.target_rank)) return deny('DENY_RANK');
+    if (resource.target_rank >= OWNER_RANK) return deny('DENY_DIRECTORY_OWNER');
+  }
   // Knowledge guards. They apply only to resources that carry the attribute; a knowledge resource
   // loaded without it is described incompletely and is refused rather than waved through.
   if (resource.verification_status !== undefined) {

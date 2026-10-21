@@ -1,5 +1,6 @@
 // API keys for machines (feature 28): make a key (it is shown once), see the keys, revoke one.
-// A key can read and ask, nothing else. It never holds more than the card that made it, and it ends for good when
+// A key can read and ask, nothing else - except a directory key (SCIM, D34), which can add people and record that they
+// left, and nothing else. It never holds more than the card that made it, and it ends for good when
 // that card's sign-in or rights change. The screen offers only what the API says this card could put into a key,
 // and the API checks everything again.
 import { useState } from 'react';
@@ -10,7 +11,7 @@ import {
   TextField,
 } from '../../ui/index.tsx';
 import {
-  emptyForm, highestLevel, KEYS_SHOWN, parseKeyForm, PERMISSION_TEXT, REVOKED_TEXT, STATUS_TEXT, useApiKeyOptions, useApiKeys, useCreateApiKey,
+  DIRECTORY_PERMISSION, emptyForm, highestLevel, KEYS_SHOWN, parseKeyForm, PERMISSION_TEXT, REVOKED_TEXT, STATUS_TEXT, useApiKeyOptions, useApiKeys, useCreateApiKey,
   useRefreshKeys, useRevokeApiKey, type KeyForm,
 } from './hooks.ts';
 
@@ -52,7 +53,8 @@ function NewKey({ options, onMade }: { options: ApiKeyOptions; onMade: (made: Ap
   const problems = !parsed.ok && tried ? parsed.problems : {};
   const top = highestLevel(form.scope, grantable);
   const toggle = (permission: ApiKeyPermission, on: boolean): void => {
-    const scope = new Set(form.scope);
+    // a directory key is a key of its own: choosing it clears the rest, choosing anything else clears it
+    const scope = new Set(on && permission === DIRECTORY_PERMISSION ? [] : [...form.scope].filter((p) => !on || p !== DIRECTORY_PERMISSION));
     if (on) scope.add(permission); else scope.delete(permission);
     // a level that the new choice no longer allows falls back to the highest that it does
     setForm({ ...form, scope, level: String(Math.min(Number(form.level), highestLevel(scope, grantable))) });

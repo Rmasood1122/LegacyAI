@@ -24,12 +24,12 @@ beforeAll(async () => {
 afterAll(async () => t.close());
 
 /** Paths of the Phase 2 (knowledge) operations. */
-const PHASE2_PATH = /^\/v1\/(sources|knowledge|interviews|gaps|topics|job-roles|expert-questions|readiness|consents|review|redaction|quality|ai|me\/(consents|contributions)|people\/\{person_id\}\/consent-withdrawals|tenants\/\{tenant_id\}\/ai-budget|platform\/(ai|storage)|topic-templates|analytics|scenarios|scenario-offers|scenario-attempts|scenario-answers|scenario-rubric-proposals|billing|tenants\/\{tenant_id\}\/billing|auth\/sso)(\/|$)/;   // billing: walked by test/integration/billing.test.ts; auth/sso (start, finish): needs an identity provider, walked by test/integration/sso.test.ts
+const PHASE2_PATH = /^\/v1\/(sources|knowledge|interviews|gaps|topics|job-roles|expert-questions|readiness|consents|review|redaction|quality|ai|me\/(consents|contributions)|people\/\{person_id\}\/consent-withdrawals|tenants\/\{tenant_id\}\/ai-budget|platform\/(ai|storage)|topic-templates|analytics|scenarios|scenario-offers|scenario-attempts|scenario-answers|scenario-rubric-proposals|billing|tenants\/\{tenant_id\}\/billing|auth\/sso|scim)(\/|$)/;   // billing: walked by test/integration/billing.test.ts; auth/sso (start, finish): needs an identity provider, walked by test/integration/sso.test.ts; scim: needs a directory key, walked by test/integration/scim.test.ts
 
 describe('the contract file', () => {
-  it('is OpenAPI 3.1 with 182 operations (46 from Phase 1, 78 from Phase 2, 58 from Phase 4), all under /v1, each with a unique operationId', () => {
+  it('is OpenAPI 3.1 with 189 operations (46 from Phase 1, 78 from Phase 2, 65 from Phase 4), all under /v1, each with a unique operationId', () => {
     const c = loadContract(CONTRACT_PATH);
-    expect(c.operations.size).toBe(182);
+    expect(c.operations.size).toBe(189);
     for (const op of c.operations.values()) {
       expect(op.path.startsWith('/v1/')).toBe(true);
       expect(op.responses.size).toBeGreaterThanOrEqual(2);
@@ -46,7 +46,7 @@ describe('the contract file', () => {
     expect(count('$ref: "#/components/parameters/Limit"')).toBe(12);   // + listWebhookEndpoints, listWebhookDeliveries   // + listApiKeys   // + getTenantBilling;   // + listInvoices;   // + listAnomalyEvents
     expect(count('$ref: "#/components/parameters/Cursor"')).toBe(26);   // + listWebhookEndpoints, listWebhookDeliveries   // + listApiKeys   // + getTenantBilling;   // + listInvoices;   // + listScenarios, listScenarioAttempts;   // 13 + listReadinessAttempts, listExpertQuestions, listMyConsents (listJobRoles has its own, longer name cursor)
     expect(count('$ref: "#/components/parameters/IdempotencyKey"')).toBe(99);   // + putSsoConnection, removeSsoConnection   // + the five webhook writes   // + createApiKey, revokeApiKey   // + setTenantSeatLimit;   // + updateSubscription, startRenewal, recordManualPayment;   // + the nine scenario writes;   // + anomaly settings, leaving date (set, clear), apply a template
-    expect(count('$ref: "#/components/responses/TooManyRequests"')).toBe(182);   // + the five SSO operations   // + the eight webhook operations   // + getApiKeyOptions
+    expect(count('$ref: "#/components/responses/TooManyRequests"')).toBe(189);   // + the seven SCIM operations   // + the five SSO operations   // + the eight webhook operations   // + getApiKeyOptions
     // the one operation where the key is optional (a retried question is answered once): askKnowledge
     expect(count('$ref: "#/components/parameters/IdempotencyKeyOptional"')).toBe(1);
     expect(yaml).toContain('openapi: 3.1.0');
