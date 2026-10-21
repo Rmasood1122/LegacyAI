@@ -2,7 +2,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createBilling, type BillingModule, type BillingPort, type PaymentProvider } from './modules/billing/index.ts';
-import { createIdentityAccess, type AnomalySettings, type AuthLimits, type IdentityAccess } from './modules/identity-access/index.ts';
+import { createIdentityAccess, type AnomalySettings, type AuthLimits, type IdentityAccess, type OidcHttp } from './modules/identity-access/index.ts';
 import { createKnowledgeGateway } from './modules/knowledge-gateway/index.ts';
 import { createMail, type MailModule, type MailSender } from './modules/mail/index.ts';
 import { createWebhooks, type WebhookTransport, type WebhooksModule } from './modules/webhooks/index.ts';
@@ -26,6 +26,8 @@ export interface AppOverrides {
   authLimits?: AuthLimits;
   anomalyDefaults?: AnomalySettings;
   generalLimit?: { limit: number; windowSeconds: number };
+  /** A stand-in for company identity providers in tests (SSO). Default: the guarded https client. */
+  oidcHttp?: OidcHttp;
   /** A stand-in webhook sender for tests. Default: what WEBHOOK_DELIVERY names ('none' sends nothing). */
   webhookTransport?: WebhookTransport;
   /** A stand-in e-mail sender for tests. Default: what MAIL_SENDER names ('none' queues and sends nothing). */
@@ -78,6 +80,7 @@ export async function createApp(config: Config, overrides: AppOverrides = {}): P
   const billing = createBilling({ config, db, notifier, rateLimiter, provider: overrides.paymentProvider, providerTimeoutMs: overrides.providerTimeoutMs });
   const identity = createIdentityAccess({
     config, db, rateLimiter, notifier, billing: overrides.billing ?? billing.port, exports, limits: overrides.authLimits, anomalyDefaults: overrides.anomalyDefaults, log,
+    oidcHttp: overrides.oidcHttp,
   });
 
   const http = await createHttpServer({

@@ -1,9 +1,10 @@
-// Where a webhook may be sent: an `https` address on the public internet, and nothing else.
+// Where the server may connect to on a company's behalf - a webhook endpoint, a company's identity provider: an
+// `https` address on the public internet, and nothing else.
 //
 // The danger is that the API server itself makes the request. An address that names (or resolves to) something
 // inside the hosting network - the cloud metadata server, the database, the AI service, localhost - would let a
 // company's Owner make the server talk to those (server-side request forgery). So:
-//   1. when the endpoint is registered, the address must be `https://<host name>/<path>` on port 443 (any other port
+//   1. when the address is registered, the address must be `https://<host name>/<path>` on port 443 (any other port
 //      would let the server be used to probe ports of other people's machines): no IP literal, no
 //      user name or password, no fragment, a host name with a dot that is not a known internal suffix;
 //   2. at EVERY delivery the host name is looked up again and EVERY address it resolves to must be public; the
@@ -11,6 +12,7 @@
 //      at an internal address between the check and the connection (DNS rebinding);
 //   3. redirects are not followed (transport.ts).
 // The rules below are pure; the lookup is passed in.
+import type { LookupAddress } from 'node:dns';
 import { BlockList, isIP } from 'node:net';
 
 export const MAX_URL_LENGTH = 2048;
@@ -91,4 +93,17 @@ export async function checkedAddress(host: string, resolve: Resolver, isAllowed:
   if (found.length === 0) return 'dns';
   if (!found.every((a) => isAllowed(a.address))) return 'address_refused';
   return found[0] as ResolvedAddress;
+}
+
+type LookupCallback = (err: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void;
+
+/** A lookup function that answers with the one address that was checked, whatever it is asked. */
+export function pinnedLookup(target: ResolvedAddress): (host: string, options: unknown, callback: LookupCallback) => void {
+  return (_host, options, callback) => {
+    if (typeof options === 'object' && options !== null && (options as { all?: boolean }).all === true) {
+      callback(null, [{ address: target.address, family: target.family }]);
+    } else {
+      callback(null, target.address, target.family);
+    }
+  };
 }

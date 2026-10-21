@@ -18,8 +18,8 @@ const MINT = Symbol('StrongFactorProof');
 export class StrongFactorProof {
   readonly cardId: string;
   readonly credentialId: string;
-  readonly factorType: 'passkey' | 'totp';
-  constructor(key: symbol, cardId: string, credentialId: string, factorType: 'passkey' | 'totp') {
+  readonly factorType: FactorType;
+  constructor(key: symbol, cardId: string, credentialId: string, factorType: FactorType) {
     if (key !== MINT) throw new Error('StrongFactorProof can only be created by verifying a passkey or TOTP code');
     this.cardId = cardId;
     this.credentialId = credentialId;
@@ -28,16 +28,40 @@ export class StrongFactorProof {
   }
 }
 
+/** passkey and authenticator app since Phase 1; 'sso' = a sign-in at the company's identity provider (D33). */
+export type FactorType = 'passkey' | 'totp' | 'sso';
+
 export interface StoredCredential {
   id: string;
   card_id: string;
-  type: 'passkey' | 'totp';
+  type: FactorType;
   webauthn_credential_id: string | null;
   webauthn_public_key: Buffer | null;
   webauthn_sign_count: string | null;
   webauthn_transports: string[] | null;
   totp_secret_enc: Buffer | null;
   totp_key_id: string | null;
+  sso_connection_id: string | null;
+  sso_subject: string | null;
+}
+
+/** An identity the company's provider vouched for during THIS sign-in (oidc.ts verified its ID token). */
+export interface SsoIdentity {
+  tenantId: string;
+  connectionId: string;
+  subject: string;
+}
+
+/**
+ * The SSO factor: the provider signed this person in during this very sign-in, and that identity is linked to THIS
+ * card through the company's current connection. A sign-in at another company's provider, through a removed
+ * connection, or as another identity, proves nothing. Constant work does not matter here: nothing secret is compared.
+ */
+export function verifySsoFactor(p: { tenantId: string; cardId: string | null; credentials: readonly StoredCredential[]; identity: SsoIdentity | null }): StrongFactorProof | null {
+  if (p.cardId === null || p.identity === null || p.identity.tenantId !== p.tenantId) return null;
+  const { connectionId, subject } = p.identity;
+  const match = p.credentials.find((c) => c.type === 'sso' && c.card_id === p.cardId && c.sso_connection_id === connectionId && c.sso_subject === subject);
+  return match === undefined ? null : new StrongFactorProof(MINT, p.cardId, match.id, 'sso');
 }
 
 export interface WebAuthnSettings {

@@ -13,10 +13,10 @@ import { WebhookStore } from './internal/endpoints.ts';
 import { webhookRoutes } from './internal/routes.ts';
 import { HttpsTransport, type WebhookTransport } from './internal/transport.ts';
 
-export { checkedAddress, isPublicAddress, MAX_URL_LENGTH, urlProblem, type AddressProblem, type ResolvedAddress, type Resolver } from './internal/address.ts';
+export { checkedAddress, isPublicAddress, MAX_URL_LENGTH, pinnedLookup, urlProblem, type AddressProblem, type ResolvedAddress, type Resolver } from '../platform/index.ts';
 export { endpointGets, messageBody, nextAttemptAt, shouldPause, TEST_TOPIC, TOPIC_TEXT, TOPICS, WEBHOOK_LIMITS, type OutboxEvent, type Topic } from './internal/rules.ts';
 export { newSigningSecret, SECRET_PREFIX, SIGNATURE_TOLERANCE_SECONDS, signatureOf, signedHeaders, verifySignature } from './internal/signing.ts';
-export { HttpsTransport, pinnedLookup, type HttpsTransportOptions, type SendError, type SendOutcome, type WebhookRequest, type WebhookTransport } from './internal/transport.ts';
+export { HttpsTransport, type HttpsTransportOptions, type SendError, type SendOutcome, type WebhookRequest, type WebhookTransport } from './internal/transport.ts';
 export { fanOut, type RunResult } from './internal/deliver.ts';
 export { secretAad, statusOf } from './internal/endpoints.ts';
 

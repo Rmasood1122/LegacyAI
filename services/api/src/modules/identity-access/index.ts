@@ -2,7 +2,7 @@
 // Other modules may import ONLY from this file - never from ./internal/*.
 
 import type { BillingPort, CompanyTermPort } from '../billing/index.ts';
-import { type AuthPort, type Config, type Database, type ExportRegistry, type Notifier, type RateLimiter, type RouteDef, type Tx } from '../platform/index.ts';
+import { httpsRequest, SealingCipher, type AuthPort, type Config, type Database, type ExportRegistry, type Notifier, type RateLimiter, type RouteDef, type Tx } from '../platform/index.ts';
 import { AnomalyGuard, type AnomalySettings } from './internal/anomaly.ts';
 import { ApiKeyService, parseApiKey } from './internal/api-keys.ts';
 import { apiKeyRoutes } from './internal/routes-api-keys.ts';
@@ -16,6 +16,9 @@ import { sweepRetirementNudges } from './internal/leaving.ts';
 import { identityRoutes } from './internal/routes.ts';
 import { leavingRoutes, type PersonHoldingsLoader } from './internal/routes-leaving.ts';
 import { safetyRoutes } from './internal/routes-safety.ts';
+import { OidcCache, type OidcHttp } from './internal/oidc.ts';
+import { ssoRoutes } from './internal/routes-sso.ts';
+import { SsoService } from './internal/sso.ts';
 import { SecretCodeHasher } from './internal/secret-code.ts';
 import { resolveSession, tenantOfToken } from './internal/sessions.ts';
 
@@ -41,7 +44,11 @@ export {
   dammCheckDigit, dammValid, formatCardNumber, generateCardNumber, isValidCardNumber, luhnValid, maskCardNumber, normalizeCardNumber,
 } from './internal/card-number.ts';
 export { CardService } from './internal/cards.ts';
-export { SeedCipher, StrongFactorProof } from './internal/factors.ts';
+export { SeedCipher, StrongFactorProof, verifySsoFactor, type FactorType, type SsoIdentity } from './internal/factors.ts';
+export {
+  authorizationUrl, codeChallenge, discover, exchangeCode, newFlowSecrets, OidcCache, OidcError, verifyIdToken, type Discovery, type OidcHttp,
+} from './internal/oidc.ts';
+export { issuerProblem, ssoIdentityOf, SSO_CONTINUE_TTL_SECONDS, SSO_FLOW_TTL_SECONDS } from './internal/sso.ts';
 export {
   accessPhase, canTransition, CARD_STATES, computeDates, effectiveState, LEGAL_TRANSITIONS, TERMINAL_STATES,
 } from './internal/lifecycle.ts';
@@ -63,6 +70,8 @@ export interface IdentityAccessDeps {
   limits?: AuthLimits;
   /** Anomaly-lock rules for companies that have not set their own (default: ANOMALY_DEFAULTS). */
   anomalyDefaults?: AnomalySettings;
+  /** For tests: a stand-in for the company identity providers (no network). Default: the guarded https client. */
+  oidcHttp?: OidcHttp;
   /** Where a failure of the anomaly counter is reported (it must never fail the refusal it was counting). */
   log?: { error(fields: Record<string, unknown>, message: string): void };
 }
@@ -94,10 +103,13 @@ export function createIdentityAccess(deps: IdentityAccessDeps): IdentityAccess {
   let holdings: PersonHoldingsLoader | null = null;
   const anomaly = new AnomalyGuard({ cards, notifier: deps.notifier, hmacKey, defaults: deps.anomalyDefaults });
   const apiKeys = new ApiKeyService(deps.rateLimiter, deps.notifier);
+  // Requests to a company's identity provider go through the platform's guarded https client (public addresses only).
+  const oidcHttp: OidcHttp = deps.oidcHttp ?? ((req) => httpsRequest(req, { timeoutMs: 5_000, maxBytes: 256 * 1024 }));
+  const sso = new SsoService({ cipher: new SealingCipher(config.credentialEnc), cache: new OidcCache(oidcHttp), redirectUri: config.sso.redirectUri, hmacKey });
   const auth = new AuthService({
     db, hasher, cipher, cards, authorizer, anomaly, rateLimiter: deps.rateLimiter, notifier: deps.notifier, hmacKey,
     webauthn: { rpId: config.webauthn.rpId, rpName: config.webauthn.rpName, origins: config.allowedOrigins },
-    limits: deps.limits ?? DEFAULT_AUTH_LIMITS,
+    limits: deps.limits ?? DEFAULT_AUTH_LIMITS, sso,
   });
 
   // What a tenant export contains from this module. Column lists are explicit: no SC hashes,
@@ -121,6 +133,7 @@ export function createIdentityAccess(deps: IdentityAccessDeps): IdentityAccess {
       ...safetyRoutes({ authorizer, anomaly }),
       ...leavingRoutes({ authorizer, notifier: deps.notifier, holdings: () => holdings }),
       ...apiKeyRoutes({ authorizer, apiKeys }),
+      ...ssoRoutes({ auth, sso, cards }),
     ],
     authPort: {
       tenantOf: (credential) => (credential.kind === 'session' ? tenantOfToken(credential.token) : parseApiKey(credential.token)?.tenantId ?? null),

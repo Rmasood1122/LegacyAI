@@ -237,9 +237,9 @@ const OUR_FUNCTIONS = [
   'audit_write', 'cards_enforce_lifecycle', 'cards_register_directory', 'chunks_count', 'chunks_guard',
   'citations_guard', 'consent_is_valid', 'consents_guard', 'consents_hide_on_withdrawal', 'erase_version', 'expert_questions_guard',
   'interviews_guard', 'invoices_guard', 'knowledge_items_end_conflicts', 'knowledge_items_guard', 'knowledge_items_outbox', 'knowledge_items_touch_scenarios', 'knowledge_versions_immutable',
-  'purge_login_attempts', 'quiz_attempts_guard', 'quiz_items_guard', 'relabel', 'resolve_card', 'review_tasks_guard',
+  'purge_login_attempts', 'quiz_attempts_guard', 'quiz_items_guard', 'relabel', 'resolve_card', 'resolve_sso_company', 'review_tasks_guard',
   'scenario_attempts_guard', 'scenario_is_hidden', 'scenario_parts_guard', 'scenarios_guard', 'sources_guard',
-  'topics_delete_guard', 'topics_guard', 'webhook_endpoints_guard',
+  'sso_connections_guard', 'topics_delete_guard', 'topics_guard', 'webhook_endpoints_guard',
 ];
 const OUR_DEFINER_FUNCTIONS = [
   'audit_log_chain', 'audit_write', 'cards_register_directory', 'chunks_count', 'consents_hide_on_withdrawal', 'erase_version',
@@ -249,7 +249,9 @@ const OUR_DEFINER_FUNCTIONS = [
   // takes the scenarios built on that item out of use (it hides them; their words are erased by the erasure step)
   // knowledge_items_outbox: the same reason - every change of an item, from any session, writes its webhook event;
   // neither service has a right on the outbox itself (docs/phase4/06)
-  'knowledge_items_end_conflicts', 'knowledge_items_guard', 'knowledge_items_outbox', 'knowledge_items_touch_scenarios', 'purge_login_attempts', 'resolve_card', 'sources_guard',
+  'knowledge_items_end_conflicts', 'knowledge_items_guard', 'knowledge_items_outbox', 'knowledge_items_touch_scenarios', 'purge_login_attempts', 'resolve_card',
+  // resolve_sso_company: answers, before anyone is signed in, only whether a named company has a live SSO connection
+  'resolve_sso_company', 'sources_guard',
 ];
 
 describe('SECURITY DEFINER functions cannot be hijacked', () => {
@@ -306,7 +308,8 @@ describe('least privilege on global and design-only tables', () => {
     ['delete card history', 'DELETE FROM card_events'],
     ['write the audit chain head', `UPDATE audit_chain_heads SET last_seq = 0`],
     ['read analytics events (design-only table)', 'SELECT * FROM analytics_events'],   // webhook_endpoints is a real table since Phase 4 (docs/phase4/06)
-    ['read SSO connections (design-only table)', 'SELECT * FROM sso_connections'],
+    ['read card tokens (design-only table)', 'SELECT * FROM card_tokens'],   // sso_connections is a real table since Phase 4 (docs/phase4/07)
+    ['delete an SSO connection', 'DELETE FROM sso_connections'],
     ['create a table', 'CREATE TABLE intruder (id int)'],
     ['disable row-level security', 'ALTER TABLE cards DISABLE ROW LEVEL SECURITY'],
     ['drop a policy', 'DROP POLICY tenant_isolation ON cards'],

@@ -74,6 +74,12 @@ export interface Config {
    * No real e-mail service is connected yet (the founder chooses one).
    */
   mail: { sender: 'none' | 'fake'; from: string };
+  /**
+   * SSO (docs/phase4/07). Where a company's identity provider sends the browser back after a sign-in: a page of the
+   * web application. Each company registers this exact address at its provider. Default: the first allowed origin
+   * + '/sso/return'.
+   */
+  sso: { redirectUri: string };
 }
 
 export class ConfigError extends Error {
@@ -298,7 +304,19 @@ export function loadConfig(env: Env): Config {
     payment: { provider: oneOf('PAYMENT_PROVIDER', ['none', 'fake'] as const, 'none'), eventKey: null },
     webhooks: { delivery: oneOf('WEBHOOK_DELIVERY', ['none', 'https'] as const, 'none') },
     mail: { sender: oneOf('MAIL_SENDER', ['none', 'fake'] as const, 'none'), from: raw('MAIL_FROM') ?? 'LegacyAI <no-reply@localhost>' },
+    sso: { redirectUri: raw('SSO_REDIRECT_URI') ?? `${allowedOrigins[0] ?? 'http://localhost:3000'}/sso/return` },
   };
+  {
+    let ok = false;
+    try {
+      const u = new URL(config.sso.redirectUri);
+      ok = (u.protocol === 'https:' || (u.protocol === 'http:' && nodeEnv !== 'production' && ['localhost', '127.0.0.1'].includes(u.hostname)))
+        && u.hash === '' && u.username === '' && allowedOrigins.includes(u.origin);
+    } catch {
+      ok = false;
+    }
+    if (!ok) problems.push('SSO_REDIRECT_URI must be an https address of the web application (one of ALLOWED_ORIGINS); http only on localhost outside production');
+  }
   if (config.mail.sender === 'fake' && nodeEnv !== 'test') problems.push('MAIL_SENDER=fake sends nothing and is allowed only when NODE_ENV=test');
   if (/[\r\n]/.test(config.mail.from) || config.mail.from.length > 200) problems.push('MAIL_FROM must be one line of at most 200 characters');
   const eventKeyText = raw('PAYMENT_EVENT_KEY');

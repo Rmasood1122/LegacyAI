@@ -234,3 +234,16 @@ CONSEQUENCES:
 - Chosen (founder, from three options): ignore exactly these eight IDs in the CI audit, with the reason next to them; any other advisory still fails. Rejected: forcing pillow 13 against fastembed's declared limit and D2; leaving CI red.
 - pypdf moved 6.19.0 -> 6.20.1 for its four advisories (same major version; D2 does not apply).
 - Re-check when fastembed allows pillow 13 and pillow 13 is 60 days old (2026-12-15). Details: docs/DEPENDENCIES.md 9.1.
+
+**D33 — SSO: the company's identity provider is a strong factor, chosen by the company the person names, linked by the provider's subject (2026-10-21).**
+- Details: `docs/phase4/07-sso-scim.md`, part A. Feature 16, part A (SCIM follows).
+- Phase 1's rule kept: an SSO sign-in counts as the strong factor and never replaces the card or the 3-digit code.
+- OpenID Connect only (authorization code + PKCE, confidential client). Rejected for now: SAML (an XML-signature library and its history of signature-wrapping flaws; no customer asked yet).
+- **The provider is chosen by the company the person names, never by the card**, so the answer cannot reveal whether a card number exists. Price: the person types the company's short name.
+- An identity is the provider's `sub`, linked to a card only during the card's set-up (set-up token + 3-digit code). Never by e-mail address. One identity opens at most one live card.
+- The provider's tokens are checked with `jose` (already a dependency): published keys, asymmetric algorithms only, issuer, audience/azp, expiry, age, nonce. All requests through the guarded https client shared with webhooks (moved to the platform module).
+- Nothing is kept in the browser between the steps; the API swaps the sign-in step for a new one carrying the vouched-for identity. Every failure is one 401.
+- The client secret is stored encrypted (it must be sent again), never shown again. One connection per company; its provider never changes.
+- Removing the connection revokes the SSO factors, ends their sessions and (D30) the API keys of those cards.
+- The rollback refuses to run when SSO credentials exist (the append-only card history refers to them).
+- **For the founder to confirm:** which providers first; Owner only; that people type the company's short name; that removal ends those people's API keys.

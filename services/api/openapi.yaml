@@ -36,6 +36,8 @@ tags:
   - name: billing
   - name: api-keys
     description: API keys for machines. These operations never accept a key themselves.
+  - name: sso
+    description: "The company's identity provider (OpenID Connect) as a strong factor. Company Owner only; these operations never accept a key."
   - name: webhooks
     description: Outgoing webhooks - signed messages to a company's https endpoints when its knowledge changes. Company Owner only; these operations never accept a key.
 paths:
@@ -7599,6 +7601,217 @@ paths:
           $ref: "#/components/responses/NotFound"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+  /v1/auth/sso/start:
+    post:
+      operationId: ssoStart
+      summary: "Sign in or set up with the company's identity provider: returns the provider's sign-in address. When signing in, the person names their company (its short name); the provider is chosen by the company, never by the card. One answer for every refusal."
+      tags:
+        - auth
+      x-public: true
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - txn
+              properties:
+                txn:
+                  description: The login_txn of a sign-in, or the enrollment_txn of a set-up with factor_type sso.
+                  type: string
+                  minLength: 20
+                  maxLength: 200
+                company:
+                  description: The company's short name. Required when signing in.
+                  type: string
+                  pattern: "^[a-z0-9-]{3,40}$"
+      responses:
+        "200":
+          description: Go to this address.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - authorization_url
+                properties:
+                  authorization_url:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/auth/sso/finish:
+    post:
+      operationId: ssoFinish
+      summary: "Back from the identity provider (the web application passes on the code and state it received). Returns the step to continue with: a login_txn to sign in with factor sso and the 3-digit code, or an enrollment_txn to complete the set-up. Single use; one answer for every failure."
+      tags:
+        - auth
+      x-public: true
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - state
+                - code
+              properties:
+                state:
+                  type: string
+                  minLength: 20
+                  maxLength: 200
+                code:
+                  type: string
+                  minLength: 1
+                  maxLength: 2048
+      responses:
+        "200":
+          description: Continue with this step.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - purpose
+                properties:
+                  purpose:
+                    type: string
+                    enum:
+                      - login
+                      - enroll
+                  login_txn:
+                    type: string
+                  enrollment_txn:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/sso/connection:
+    get:
+      operationId: getSsoConnection
+      summary: "The company's identity-provider connection (null if none) and the redirect address to register at the provider. Never the client secret."
+      tags:
+        - sso
+      x-permission: sso:read
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - connection
+                  - redirect_uri
+                properties:
+                  connection:
+                    oneOf:
+                      - $ref: "#/components/schemas/SsoConnection"
+                      - type: "null"
+                  redirect_uri:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    put:
+      operationId: putSsoConnection
+      summary: "Set up the connection, or change its name, client id, client secret or switch. The provider (issuer) of a connection never changes: remove it first. People still need the factor allowed in the company settings (allowed_factor_types) and must link their sign-in during their card's set-up."
+      tags:
+        - sso
+      x-permission: sso:manage
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SsoConnectionInput"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SsoConnection"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: "Conflict. `sso-issuer-changed`: another provider needs a new connection (remove this one first)."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/sso/connection/remove:
+    post:
+      operationId: removeSsoConnection
+      summary: "Remove the connection for good. Every SSO factor linked through it is revoked, the sessions opened with them end, and (as for any change of a card's sign-in) the API keys those cards made end too."
+      tags:
+        - sso
+      x-permission: sso:manage
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - removed
+                  - factors_revoked
+                properties:
+                  removed:
+                    type: boolean
+                  factors_revoked:
+                    type: integer
+                    minimum: 0
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 components:
   securitySchemes:
     sessionCookie:
@@ -10319,6 +10532,15 @@ components:
                 code:
                   type: string
                   pattern: ^[0-9]{6}$
+            - type: object
+              additionalProperties: false
+              description: "The company's identity provider signed this person in during this step (POST /v1/auth/sso/start, then /finish, which returned this login_txn). Still needs the card's 3-digit code."
+              required:
+                - type
+              properties:
+                type:
+                  type: string
+                  const: sso
     Session:
       type: object
       additionalProperties: false
@@ -10387,9 +10609,11 @@ components:
           maxLength: 200
         factor_type:
           type: string
+          description: "`sso`: the company's identity provider, when the company switched it on (its Owner set up a connection and allowed the factor)."
           enum:
             - passkey
             - totp
+            - sso
         label:
           type: string
           maxLength: 80
@@ -10407,6 +10631,7 @@ components:
           enum:
             - passkey
             - totp
+            - sso
         webauthn_options: *a2
         totp:
           type: object
@@ -10449,6 +10674,7 @@ components:
           enum:
             - passkey
             - totp
+            - sso
         label:
           type: string
         created_at: *a5
@@ -11096,6 +11322,7 @@ components:
             enum:
               - passkey
               - totp
+              - sso
     UpdateTenantSettingsRequest:
       type: object
       additionalProperties: false
@@ -11141,6 +11368,7 @@ components:
             enum:
               - passkey
               - totp
+              - sso
       minProperties: 1
     TenantUsage:
       type: object
@@ -12983,3 +13211,77 @@ components:
               type: integer
             pause_after_failures:
               type: integer
+    SsoConnection:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - protocol
+        - issuer
+        - client_id
+        - enabled
+        - has_client_secret
+        - redirect_uri
+        - created_by_card_id
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        protocol:
+          type: string
+          const: oidc
+        issuer:
+          type: string
+        client_id:
+          type: string
+        enabled:
+          type: boolean
+        has_client_secret:
+          type: boolean
+        redirect_uri:
+          description: Register exactly this address at the provider.
+          type: string
+        created_by_card_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    SsoConnectionInput:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - issuer
+        - client_id
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: "^[^\\u0000-\\u001f\\u007f]+$"
+        issuer:
+          description: The provider's issuer (OpenID Connect), exactly as its discovery document states it. https only.
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https://"
+        client_id:
+          type: string
+          minLength: 1
+          maxLength: 255
+        client_secret:
+          description: Required when the connection is made; left out = keep the stored one. Stored encrypted, never shown again.
+          type: string
+          minLength: 1
+          maxLength: 1024
+        enabled:
+          type: boolean

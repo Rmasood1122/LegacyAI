@@ -24,12 +24,12 @@ beforeAll(async () => {
 afterAll(async () => t.close());
 
 /** Paths of the Phase 2 (knowledge) operations. */
-const PHASE2_PATH = /^\/v1\/(sources|knowledge|interviews|gaps|topics|job-roles|expert-questions|readiness|consents|review|redaction|quality|ai|me\/(consents|contributions)|people\/\{person_id\}\/consent-withdrawals|tenants\/\{tenant_id\}\/ai-budget|platform\/(ai|storage)|topic-templates|analytics|scenarios|scenario-offers|scenario-attempts|scenario-answers|scenario-rubric-proposals|billing|tenants\/\{tenant_id\}\/billing)(\/|$)/;   // billing: walked by test/integration/billing.test.ts
+const PHASE2_PATH = /^\/v1\/(sources|knowledge|interviews|gaps|topics|job-roles|expert-questions|readiness|consents|review|redaction|quality|ai|me\/(consents|contributions)|people\/\{person_id\}\/consent-withdrawals|tenants\/\{tenant_id\}\/ai-budget|platform\/(ai|storage)|topic-templates|analytics|scenarios|scenario-offers|scenario-attempts|scenario-answers|scenario-rubric-proposals|billing|tenants\/\{tenant_id\}\/billing|auth\/sso)(\/|$)/;   // billing: walked by test/integration/billing.test.ts; auth/sso (start, finish): needs an identity provider, walked by test/integration/sso.test.ts
 
 describe('the contract file', () => {
-  it('is OpenAPI 3.1 with 177 operations (46 from Phase 1, 78 from Phase 2, 53 from Phase 4), all under /v1, each with a unique operationId', () => {
+  it('is OpenAPI 3.1 with 182 operations (46 from Phase 1, 78 from Phase 2, 58 from Phase 4), all under /v1, each with a unique operationId', () => {
     const c = loadContract(CONTRACT_PATH);
-    expect(c.operations.size).toBe(177);
+    expect(c.operations.size).toBe(182);
     for (const op of c.operations.values()) {
       expect(op.path.startsWith('/v1/')).toBe(true);
       expect(op.responses.size).toBeGreaterThanOrEqual(2);
@@ -45,8 +45,8 @@ describe('the contract file', () => {
     const count = (needle: string): number => yaml.split(needle).length - 1;
     expect(count('$ref: "#/components/parameters/Limit"')).toBe(12);   // + listWebhookEndpoints, listWebhookDeliveries   // + listApiKeys   // + getTenantBilling;   // + listInvoices;   // + listAnomalyEvents
     expect(count('$ref: "#/components/parameters/Cursor"')).toBe(26);   // + listWebhookEndpoints, listWebhookDeliveries   // + listApiKeys   // + getTenantBilling;   // + listInvoices;   // + listScenarios, listScenarioAttempts;   // 13 + listReadinessAttempts, listExpertQuestions, listMyConsents (listJobRoles has its own, longer name cursor)
-    expect(count('$ref: "#/components/parameters/IdempotencyKey"')).toBe(97);   // + the five webhook writes   // + createApiKey, revokeApiKey   // + setTenantSeatLimit;   // + updateSubscription, startRenewal, recordManualPayment;   // + the nine scenario writes;   // + anomaly settings, leaving date (set, clear), apply a template
-    expect(count('$ref: "#/components/responses/TooManyRequests"')).toBe(177);   // + the eight webhook operations   // + getApiKeyOptions
+    expect(count('$ref: "#/components/parameters/IdempotencyKey"')).toBe(99);   // + putSsoConnection, removeSsoConnection   // + the five webhook writes   // + createApiKey, revokeApiKey   // + setTenantSeatLimit;   // + updateSubscription, startRenewal, recordManualPayment;   // + the nine scenario writes;   // + anomaly settings, leaving date (set, clear), apply a template
+    expect(count('$ref: "#/components/responses/TooManyRequests"')).toBe(182);   // + the five SSO operations   // + the eight webhook operations   // + getApiKeyOptions
     // the one operation where the key is optional (a retried question is answered once): askKnowledge
     expect(count('$ref: "#/components/parameters/IdempotencyKeyOptional"')).toBe(1);
     expect(yaml).toContain('openapi: 3.1.0');
@@ -303,6 +303,11 @@ describe('every one of the 47 operations returns a contract-conforming success',
     ok('rotateWebhookSecret', await o.post(`/v1/webhooks/${hook.body.id}/rotate-secret`), 200);
     ok('removeWebhookEndpoint', await o.post(`/v1/webhooks/${hook.body.id}/remove`), 200);
 
+    // SSO (Phase 4): the Owner's connection. (Signing in through a provider is walked by test/integration/sso.test.ts.)
+    ok('getSsoConnection', await o.get('/v1/sso/connection'), 200);
+    ok('putSsoConnection', await o.request('PUT', '/v1/sso/connection', { name: 'Walk IdP', issuer: 'https://idp.example.com', client_id: 'walk', client_secret: 'walk-secret-not-real' }, { idem: `walk-${Date.now()}` }), 200);
+    ok('removeSsoConnection', await o.post('/v1/sso/connection/remove'), 200);
+
     ok('logout', await member.request('POST', '/v1/auth/logout'), 401); // the member's session ended when the card was replaced...
     hit.delete('logout');
     const fresh = await addMember(t, o, [{ role_key: 'expert' }]);
@@ -311,8 +316,8 @@ describe('every one of the 47 operations returns a contract-conforming success',
     // Phase 2 operations need the AI service: they are walked, with the real service, by test/contract/phase2-walk.test.ts.
     const all = [...t.app.http.contract.operations.values()].filter((op) => !PHASE2_PATH.test(op.path)).map((op) => op.operationId).sort();
     expect([...hit].sort()).toEqual(all);
-    expect(hit.size).toBe(46 + 7 + 4 + 8);   // ... and the eight webhook operations   // ... and the four API-key operations (create, list, options, revoke)   // Phase 1, plus the seven anomaly-lock and retirement-radar operations of Phase 4
-    expect(t.app.http.contract.operations.size).toBe(46 + 78 + 5 + 7 + 2 + 3 + 15 + 9 + 4 + 8);   // + the eight webhook operations   // + the four API-key operations (three, and the options for the form);   // + the nine billing operations (seven, then getInvoice and setTenantSeatLimit);   // + the fifteen scenario operations (fourteen, and the step a grader reads);   // + the three insight operations (activity, map, map export)
+    expect(hit.size).toBe(46 + 7 + 4 + 8 + 3);   // ... and the three SSO connection operations   // ... and the eight webhook operations   // ... and the four API-key operations (create, list, options, revoke)   // Phase 1, plus the seven anomaly-lock and retirement-radar operations of Phase 4
+    expect(t.app.http.contract.operations.size).toBe(46 + 78 + 5 + 7 + 2 + 3 + 15 + 9 + 4 + 8 + 5);   // + the five SSO operations   // + the eight webhook operations   // + the four API-key operations (three, and the options for the form);   // + the nine billing operations (seven, then getInvoice and setTenantSeatLimit);   // + the fifteen scenario operations (fourteen, and the step a grader reads);   // + the three insight operations (activity, map, map export)
   });
 });
 

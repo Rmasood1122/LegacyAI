@@ -21,11 +21,12 @@ import type { Authorizer } from './authz.ts';
 import { maskCardNumber, normalizeCardNumber } from './card-number.ts';
 import { CARD_COLUMNS, type CardRow, type CardService } from './cards.ts';
 import {
-  newTotpSecret, passkeyLoginOptions, passkeyRegistrationOptions, verifyPasskeyAssertion, verifyPasskeyRegistration,
-  verifyTotpCode, verifyTotpEnrollment, type SeedCipher, type StoredCredential, type StrongFactorProof, type WebAuthnSettings,
+  newTotpSecret, passkeyLoginOptions, passkeyRegistrationOptions, verifyPasskeyAssertion, verifyPasskeyRegistration, verifySsoFactor,
+  verifyTotpCode, verifyTotpEnrollment, type FactorType, type SeedCipher, type StoredCredential, type StrongFactorProof, type WebAuthnSettings,
 } from './factors.ts';
 import { effectiveState } from './lifecycle.ts';
 import type { ScProof, SecretCodeHasher } from './secret-code.ts';
+import { ssoIdentityOf, type SsoService } from './sso.ts';
 import { createSession, resolveSession, revokeSession, subjectForCard, VerifiedLogin } from './sessions.ts';
 
 export interface AuthLimits {
@@ -71,9 +72,10 @@ export interface AuthDeps {
   webauthn: WebAuthnSettings;
   hmacKey: Buffer;
   limits: AuthLimits;
+  sso: SsoService;
 }
 
-const CREDENTIAL_COLUMNS = `id, card_id, type, webauthn_credential_id, webauthn_public_key, webauthn_sign_count::text AS webauthn_sign_count,
+const CREDENTIAL_COLUMNS = `id, card_id, type, sso_connection_id, sso_subject, webauthn_credential_id, webauthn_public_key, webauthn_sign_count::text AS webauthn_sign_count,
   webauthn_transports, totp_secret_enc, totp_key_id`;
 
 export class AuthService {
@@ -112,6 +114,24 @@ export class AuthService {
     );
   }
 
+  // -------------------------------------------------------- SSO: start and finish
+
+  /** The provider's sign-in page for a sign-in or set-up step in progress (D33). The same limits as signing in. */
+  async ssoStart(ctx: RequestContext, body: { txn: string; company?: string }): Promise<HandlerResult> {
+    await this.#enforceLimits(ctx);
+    const url = await this.#d.sso.start(this.#d.db, { txn: body.txn, company: body.company, ip: ctx.ip, now: ctx.now });
+    if (url === null) throw problems.authFailed();
+    return { body: { authorization_url: url } };
+  }
+
+  /** Back from the provider: the step to continue with, now carrying the identity the provider vouched for. */
+  async ssoFinish(ctx: RequestContext, body: { state: string; code: string }): Promise<HandlerResult> {
+    await this.#enforceLimits(ctx);
+    const next = await this.#d.sso.finish(this.#d.db, { state: body.state, code: body.code, ip: ctx.ip, now: ctx.now });
+    if (next === null) throw problems.authFailed();
+    return { body: next.purpose === 'login' ? { purpose: 'login', login_txn: next.txn } : { purpose: 'enroll', enrollment_txn: next.txn } };
+  }
+
   // ----------------------------------------------------------------- login: begin
 
   async loginBegin(ctx: RequestContext, body: { card_number: string }): Promise<HandlerResult> {
@@ -136,7 +156,7 @@ export class AuthService {
 
   async loginVerify(
     ctx: RequestContext,
-    body: { login_txn: string; sc: string; factor: { type: 'passkey'; assertion: unknown } | { type: 'totp'; code: string } },
+    body: { login_txn: string; sc: string; factor: { type: 'passkey'; assertion: unknown } | { type: 'totp'; code: string } | { type: 'sso' } },
   ): Promise<HandlerResult> {
     await this.#enforceLimits(ctx);
     const { db } = this.#d;
@@ -191,6 +211,10 @@ export class AuthService {
           expectedChallenge: txn?.challenge ?? 'no-such-challenge',
         });
         if (res) ({ proof: strong, newSignCount } = res);
+      } else if (body.factor.type === 'sso') {
+        // The company's provider signed this person in during THIS step (sso.ts finish) - as an identity linked to
+        // this card through the company's current connection, or it proves nothing (D33).
+        strong = verifySsoFactor({ tenantId, cardId: card?.id ?? null, credentials, identity: ssoIdentityOf(txn?.payload) });
       } else {
         // While TOTP is paused for this card (too many wrong codes), a code is examined ONLY when
         // the SC in the same request is right. A stranger guessing codes therefore learns nothing
@@ -351,7 +375,7 @@ export class AuthService {
 
   async enrollmentBegin(
     ctx: RequestContext,
-    body: { card_number: string; sc: string; enrollment_token: string; factor_type: 'passkey' | 'totp'; label?: string },
+    body: { card_number: string; sc: string; enrollment_token: string; factor_type: FactorType; label?: string },
   ): Promise<HandlerResult> {
     await this.#enforceLimits(ctx);
     const resolved = await this.#resolveCard(body.card_number);
@@ -391,12 +415,19 @@ export class AuthService {
       if (card.kind !== 'person' || (effective !== 'issued' && effective !== 'active')) return fail('state');
       const settings = await getSettings(tx, tenantId);
       if (!settings.allowed_factor_types.includes(body.factor_type)) return fail('state');
+      if (body.factor_type === 'sso') {
+        const live = await tx.query(`SELECT 1 FROM sso_connections WHERE tenant_id = $1 AND removed_at IS NULL AND enabled`, [tenantId]);
+        if (live.rowCount === 0) return fail('state');
+      }
 
       const token = randomToken(32);
       const payload: Record<string, unknown> = { factor_type: body.factor_type, label: body.label ?? '', enrollment_token_id: tokenRow.id };
       const out: Record<string, unknown> = { enrollment_txn: token, factor_type: body.factor_type };
       let challenge = 'totp';
-      if (body.factor_type === 'passkey') {
+      if (body.factor_type === 'sso') {
+        // the browser now signs in at the provider (sso.ts start/finish) and completes with the step it gets back
+        challenge = 'sso';
+      } else if (body.factor_type === 'passkey') {
         const existing = await tx.query<{ webauthn_credential_id: string }>(
           `SELECT webauthn_credential_id FROM credentials WHERE tenant_id = $1 AND card_id = $2 AND type = 'passkey' AND status = 'active'`,
           [tenantId, card.id]);
@@ -433,7 +464,7 @@ export class AuthService {
     await this.#enforceLimits(ctx);
     const consumed = await this.#d.db.global<{
       tenant_id: string; card_id: string; challenge: string;
-      payload: { factor_type: 'passkey' | 'totp'; label: string; enrollment_token_id: string; totp_secret_enc?: string; totp_key_id?: string };
+      payload: { factor_type: FactorType; label: string; enrollment_token_id: string; totp_secret_enc?: string; totp_key_id?: string; sso?: unknown };
     }>(
       `UPDATE auth_transactions SET consumed_at = $2
         WHERE txn_hash = $1 AND purpose = 'enroll' AND consumed_at IS NULL AND expires_at > $2
@@ -454,8 +485,15 @@ export class AuthService {
         : null;
       let totpSecretEnc: Buffer | null = null;
       let totpStep: number | null = null;
+      const identity = txn.payload.factor_type === 'sso' ? ssoIdentityOf(txn.payload) : null;
       if (txn.payload.factor_type === 'passkey') {
         if (!reg) return false;
+      } else if (txn.payload.factor_type === 'sso') {
+        // the provider vouched for this identity during this set-up, through the company's connection that is still live
+        if (identity === null || identity.tenantId !== txn.tenant_id) return false;
+        const live = await tx.query(`SELECT 1 FROM sso_connections WHERE tenant_id = $1 AND id = $2 AND removed_at IS NULL AND enabled`,
+          [txn.tenant_id, identity.connectionId]);
+        if (live.rowCount === 0) return false;
       } else {
         if (typeof body.totp_code !== 'string' || !txn.payload.totp_secret_enc || !txn.payload.totp_key_id) return false;
         totpSecretEnc = Buffer.from(txn.payload.totp_secret_enc, 'base64');
@@ -471,7 +509,15 @@ export class AuthService {
       if (claimed.rowCount !== 1) return false;
 
       let credentialId: string;
-      if (reg) {
+      if (identity !== null) {
+        const inserted = await tx.query<{ id: string }>(
+          `INSERT INTO credentials (tenant_id, card_id, type, label, sso_connection_id, sso_subject) VALUES ($1, $2, 'sso', $3, $4, $5)
+           ON CONFLICT (tenant_id, sso_connection_id, sso_subject) WHERE type = 'sso' AND status = 'active' DO NOTHING RETURNING id`,
+          [txn.tenant_id, card.id, txn.payload.label, identity.connectionId, identity.subject]);
+        // An identity that already opens another card is refused; throwing rolls the token claim back.
+        if (!inserted.rows[0]) throw problems.authFailed();
+        credentialId = inserted.rows[0].id;
+      } else if (reg) {
         const inserted = await tx.query<{ id: string }>(
           `INSERT INTO credentials (tenant_id, card_id, type, label, webauthn_credential_id, webauthn_public_key, webauthn_sign_count, webauthn_transports)
            VALUES ($1, $2, 'passkey', $3, $4, $5, $6, $7) ON CONFLICT (webauthn_credential_id) DO NOTHING RETURNING id`,

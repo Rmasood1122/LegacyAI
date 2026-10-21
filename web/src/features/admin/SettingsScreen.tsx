@@ -196,7 +196,7 @@ function CardRules({ settings, mayChange }: { settings: TenantSettings; mayChang
     e.preventDefault();
     update.mutate({ body: changes });
   };
-  const factor = (type: 'passkey' | 'totp', on: boolean): void =>
+  const factor = (type: 'passkey' | 'totp' | 'sso', on: boolean): void =>
     setDraft({ ...draft, allowed_factor_types: on ? [...new Set([...draft.allowed_factor_types, type])] : draft.allowed_factor_types.filter((t) => t !== type) });
   return (
     <Card title="Cards and signing in">
@@ -206,6 +206,7 @@ function CardRules({ settings, mayChange }: { settings: TenantSettings; mayChang
           <legend>Second step at sign-in</legend>
           <CheckboxField label="Passkey (fingerprint, face or security key)" checked={draft.allowed_factor_types.includes('passkey')} disabled={!mayChange} onChange={(on) => factor('passkey', on)} />
           <CheckboxField label="Authenticator app (6-digit code)" checked={draft.allowed_factor_types.includes('totp')} disabled={!mayChange} onChange={(on) => factor('totp', on)} />
+          <CheckboxField label="The company's own sign-in (SSO; set it up on the Company sign-in screen first)" checked={draft.allowed_factor_types.includes('sso')} disabled={!mayChange} onChange={(on) => factor('sso', on)} />
         </fieldset>
         <CheckboxField label="Pilot: experts and administrators may also review (until dedicated reviewers exist)" checked={draft.pilot_reviewer_grant} disabled={!mayChange}
           onChange={(on) => setDraft({ ...draft, pilot_reviewer_grant: on })} />

@@ -715,6 +715,8 @@ export type LoginVerifyRequest = {
   } | {
     type: "totp";
     code: string;
+  } | {
+    type: "sso";
   };
 };
 
@@ -740,13 +742,13 @@ export interface EnrollmentBeginRequest {
   card_number: string;
   sc: string;
   enrollment_token: string;
-  factor_type: "passkey" | "totp";
+  factor_type: "passkey" | "totp" | "sso";
   label?: string;
 }
 
 export interface EnrollmentBeginResponse {
   enrollment_txn: string;
-  factor_type: "passkey" | "totp";
+  factor_type: "passkey" | "totp" | "sso";
   webauthn_options?: {
     [key: string]: unknown;
   };
@@ -766,7 +768,7 @@ export interface EnrollmentCompleteRequest {
 
 export interface Credential {
   id: string;
-  type: "passkey" | "totp";
+  type: "passkey" | "totp" | "sso";
   label: string;
   created_at: string;
   last_used_at: string | null;
@@ -985,7 +987,7 @@ export interface TenantSettings {
   session_absolute_hours: number;
   enabled_roles: Array<"company_owner" | "admin" | "department_manager" | "auditor" | "reviewer" | "expert" | "successor" | "contractor">;
   pilot_reviewer_grant: boolean;
-  allowed_factor_types: Array<"passkey" | "totp">;
+  allowed_factor_types: Array<"passkey" | "totp" | "sso">;
 }
 
 export interface UpdateTenantSettingsRequest {
@@ -997,7 +999,7 @@ export interface UpdateTenantSettingsRequest {
   session_absolute_hours?: number;
   enabled_roles?: Array<"company_owner" | "admin" | "department_manager" | "auditor" | "reviewer" | "expert" | "successor" | "contractor">;
   pilot_reviewer_grant?: boolean;
-  allowed_factor_types?: Array<"passkey" | "totp">;
+  allowed_factor_types?: Array<"passkey" | "totp" | "sso">;
 }
 
 export interface TenantUsage {
@@ -1506,6 +1508,28 @@ export interface WebhookOptions {
   };
 }
 
+export interface SsoConnection {
+  id: string;
+  name: string;
+  protocol: "oidc";
+  issuer: string;
+  client_id: string;
+  enabled: boolean;
+  has_client_secret: boolean;
+  redirect_uri: string;
+  created_by_card_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SsoConnectionInput {
+  name: string;
+  issuer: string;
+  client_id: string;
+  client_secret?: string;
+  enabled?: boolean;
+}
+
 export const operations = {
   getHealth: { method: "GET", path: "/v1/health", status: 200, idempotent: false, public: true, permission: null, contentTypes: [] },
   getReady: { method: "GET", path: "/v1/ready", status: 200, idempotent: false, public: true, permission: null, contentTypes: [] },
@@ -1684,6 +1708,11 @@ export const operations = {
   rotateWebhookSecret: { method: "POST", path: "/v1/webhooks/{webhook_id}/rotate-secret", status: 200, idempotent: true, public: false, permission: "webhook:manage", contentTypes: [] },
   sendWebhookTest: { method: "POST", path: "/v1/webhooks/{webhook_id}/test", status: 202, idempotent: true, public: false, permission: "webhook:manage", contentTypes: [] },
   listWebhookDeliveries: { method: "GET", path: "/v1/webhooks/{webhook_id}/deliveries", status: 200, idempotent: false, public: false, permission: "webhook:read", contentTypes: [] },
+  ssoStart: { method: "POST", path: "/v1/auth/sso/start", status: 200, idempotent: false, public: true, permission: null, contentTypes: ["application/json"] },
+  ssoFinish: { method: "POST", path: "/v1/auth/sso/finish", status: 200, idempotent: false, public: true, permission: null, contentTypes: ["application/json"] },
+  getSsoConnection: { method: "GET", path: "/v1/sso/connection", status: 200, idempotent: false, public: false, permission: "sso:read", contentTypes: [] },
+  putSsoConnection: { method: "PUT", path: "/v1/sso/connection", status: 200, idempotent: true, public: false, permission: "sso:manage", contentTypes: ["application/json"] },
+  removeSsoConnection: { method: "POST", path: "/v1/sso/connection/remove", status: 200, idempotent: true, public: false, permission: "sso:manage", contentTypes: [] },
 } as const;
 
 export type OperationId = keyof typeof operations;
@@ -2999,6 +3028,54 @@ export interface OperationTypes {
     response: {
       items: WebhookDelivery[];
       next_cursor: string | null;
+    };
+  };
+  ssoStart: {
+    path: undefined;
+    query: undefined;
+    body: {
+      txn: string;
+      company?: string;
+    };
+    response: {
+      authorization_url: string;
+    };
+  };
+  ssoFinish: {
+    path: undefined;
+    query: undefined;
+    body: {
+      state: string;
+      code: string;
+    };
+    response: {
+      purpose: "login" | "enroll";
+      login_txn?: string;
+      enrollment_txn?: string;
+    };
+  };
+  getSsoConnection: {
+    path: undefined;
+    query: undefined;
+    body: undefined;
+    response: {
+      connection: SsoConnection | null;
+      redirect_uri: string;
+    };
+  };
+  putSsoConnection: {
+    path: undefined;
+    query: undefined;
+    body: SsoConnectionInput;
+    response: SsoConnection;
+  };
+  removeSsoConnection: {
+    path: undefined;
+    query: undefined;
+    body: undefined;
+    response: {
+      removed: boolean;
+      factors_revoked: number;
     };
   };
 }

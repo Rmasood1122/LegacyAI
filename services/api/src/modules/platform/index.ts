@@ -4,6 +4,10 @@
 
 export { ARGON2_FLOOR, ConfigError, loadConfig, Secret, type Config, type Keyring } from './internal/config.ts';
 export { SealingCipher } from './internal/sealing.ts';
+export {
+  checkedAddress, isPublicAddress, MAX_URL_LENGTH, pinnedLookup, urlProblem, type AddressProblem, type ResolvedAddress, type Resolver,
+} from './internal/address.ts';
+export { httpsRequest, type HttpsOptions, type HttpsRequest, type HttpsResponse } from './internal/outbound.ts';
 export { createLogger, scrub, scrubString, type Logger } from './internal/logger.ts';
 export {
   Database, EXPECTED_SCHEMA_VERSION, PLATFORM_TENANT_ID, UnsafeDatabaseRoleError, type QueryResult, type Tx,
