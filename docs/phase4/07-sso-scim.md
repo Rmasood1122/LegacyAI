@@ -20,7 +20,8 @@ their company account still types their card number and their 3-digit code.
 
 ### What the Owner does
 
-1. On the "Company sign-in" screen: registers the address shown there (`.../sso/return`) at the provider, then enters
+1. On the "Company sign-in" screen: registers the address shown there (`.../sso/return/<company id>`, the company's own
+   return address) at the provider, then enters
    the provider's issuer address, the client id and the client secret, and switches the connection on.
 2. In the settings: allows the factor "The company's own sign-in" (off by default).
 
@@ -53,19 +54,38 @@ adds a detour:
 | Step | What happens |
 |---|---|
 | `POST /v1/auth/sso/start` | names the sign-in or set-up step (and, when signing in, the company); a new step (purpose `sso`, 10 minutes) holds the state, the nonce and the PKCE verifier; answers the provider's address |
-| the provider | the person signs in there; the provider sends the browser to the web application's `/sso/return` with a code and the state |
-| `POST /v1/auth/sso/finish` | the web application hands code and state on at once; the API redeems the code once at the provider, checks the ID token, ends the original step and opens a new one (5 minutes) that carries the identity the provider vouched for |
+| the provider | the person signs in there; the provider sends the browser to the company's own return address `/sso/return/<company id>` with a code and the state |
+| `POST /v1/auth/sso/finish` | the web application hands code, state and the company id from the address on at once; only the browser that started can finish (a cookie set at start); the API redeems the code once at the provider, checks the ID token, ends the original step and opens a new one (5 minutes) that carries the identity the provider vouched for |
 | `POST /v1/auth/login/verify` with factor `sso` | as always: 3-digit code + strong factor. The factor holds only if the identity is linked to THIS card, through the company's current connection, and was vouched for in THIS step |
 
-Nothing is kept in the browser between the steps (the web application uses no browser storage; its lint rule forbids
-it). Every failure is the same 401.
+The web application uses no browser storage (its lint rule forbids it). The one thing the browser keeps between start
+and finish is an HttpOnly cookie the API sets and the page cannot read. Every failure is the same 401. Starting the
+detour keeps the original step alive for as long as the detour may take (10 minutes), because a provider sign-in with
+a second factor can take longer than the usual 5.
+
+### Two attacks it is built against (found by review, fixed before the first push)
+
+- **"Mix-up".** Every company brings its own provider, and one of them may be hostile. With ONE shared return address,
+  a hostile company's provider could pass a person's sign-in code from their real company's provider into a flow of the
+  hostile company, so the code would be sent to the hostile provider. That provider could then use it in a flow it
+  started for that person's card. Fix: each company has its **own** return address, a provider sends codes only to the
+  address registered for it, and the API refuses a code that came back to another company's address than the flow's.
+  When the provider names itself on the way back (RFC 9207 `iss`), it must be the flow's provider.
+- **Finishing in someone else's browser.** Someone hands a person a link to a provider sign-in that the attacker
+  started, so the person's identity would land in the attacker's step (and could be linked to the attacker's card).
+  Fix: the cookie above. A browser without it, or with the cookie of another start, is refused, and the flow is not
+  spent by such an attempt.
 
 ### What is checked about the provider
 
 - Its discovery document comes from the configured issuer and must name exactly that issuer; all endpoints https.
+- The issuer and every endpoint must follow the same address rules as a webhook endpoint: https on port 443, a host
+  name (no address literal), not an internal name. The provider's sign-in page must be on the issuer's own host, because
+  people are sent there from our sign-in screen. The token endpoint and the key set may be on another public host;
+  one large provider does that.
 - Every request goes through the platform's guarded https client: public addresses only (every address the name
   resolves to), the connection pinned to the checked address, no redirects, 5 seconds, 256 KB. An Owner cannot point
-  the server at an internal address.
+  the server at an internal address, or at another port of someone else's machine.
 - The ID token: signature against the provider's published keys (fetched again once if the key is unknown —
   providers rotate keys), asymmetric algorithms only (`none` and shared-secret algorithms refused), issuer, audience =
   our client id (and `azp` when there are several audiences), expiry (2 minutes of tolerance), issued within the last
@@ -75,7 +95,8 @@ it). Every failure is the same 401.
 
 ### Removing the connection
 
-Every SSO factor linked through it is revoked; the sessions opened with them end; and — as for any change of a card's
+Switching it OFF stops every sign-in that is already under way (the factor is checked against a switched-on connection
+at the last step). Removing it: every SSO factor linked through it is revoked; the sessions opened with them end; and — as for any change of a card's
 sign-in (D30) — the API keys those cards made end too. A person whose only factor was SSO has to set up a passkey or
 an app code again with a new set-up token.
 
@@ -103,18 +124,40 @@ history (append-only) refers to them and the rollback will not rewrite history.
 
 ### What was tested, and what was not
 
-- **Run locally (no database):** 33 unit tests — the PKCE challenge against the example in RFC 7636; the sign-in
-  address; a proper sign-in against the stand-in provider; refused ID tokens (a key the provider does not publish, no
-  signature, another nonce, another client, several audiences without `azp`, `azp` of another client, another issuer,
-  expired, issued too long ago); a wrong client secret or PKCE verifier; the discovery document naming another issuer;
-  what the SSO factor proves (another person, another connection, another company, another card); the issuer and
-  redirect rules. 7 screen tests.
+- **Run locally (no database):** 44 unit tests. They cover:
+  - the PKCE challenge, checked against the example in RFC 7636;
+  - the sign-in address;
+  - a proper sign-in against the stand-in provider;
+  - refused ID tokens: a key the provider does not publish, no signature, another nonce, another client, several
+    audiences without `azp`, `azp` of another client, another issuer, expired, issued too long ago;
+  - a wrong client secret or PKCE verifier;
+  - discovery documents that name another issuer, a sign-in page on another host, another port, an address literal,
+    an internal name or plain http;
+  - what the SSO factor proves: another person, another connection, another company, another card;
+  - the issuer and redirect rules.
+
+  Plus 7 screen tests.
 - **Run only by GitHub:** the database tests (set-up and sign-in through the stand-in provider; a wrong 3-digit code;
   another person; the right person at another company's provider; an unknown card gets the same answer and fails at
   the end; every step single use; the factor without a provider sign-in; one identity, one card; a company that did
-  not allow the factor; the client secret stored only encrypted and absent from audit, retry records and log; Owner
-  only; the provider of a connection cannot change; removal revokes factors and ends sessions) and a browser test of
-  the Owner's screen.
+  not allow the factor; finishing in another browser; the mix-up (a code under another company's return address, or
+  another provider's `iss`, never reaches the other provider); switching the connection off mid-sign-in; issuers on
+  another port, an address literal or an internal name; the client secret stored only encrypted and absent from audit,
+  retry records and log; Owner only; the provider of a connection cannot change; removal revokes factors and ends
+  sessions) and a browser test of the Owner's screen.
+- **Review before the first push** (two read-only reviews, by reading the code, nothing run). They found:
+  - the mix-up and the other-browser attack above;
+  - endpoints on other ports;
+  - the switch-off gap;
+  - the original step expiring during a slow provider sign-in;
+  - a database lookup of the company that, as first written, could never find a company. Row-level security hid the
+    rows from it, so every SSO sign-in would have failed. It now opens exactly the two settings it needs, for its own
+    duration;
+  - test set-up that gave every card a passkey first.
+
+  All of these are fixed, with tests. Still open and accepted: the retry record of the Owner's "save connection"
+  request keeps a SHA-256 of the request body, which includes the client secret. That is a one-way hash of a
+  high-entropy value, kept for 24 hours.
 - **Not tested:** a real provider (Microsoft Entra ID, Google Workspace, Okta, ...); a whole sign-in in a real browser
   (the browser would have to reach the provider); SAML (not built).
 

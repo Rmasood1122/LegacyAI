@@ -11,10 +11,21 @@
 //           and state to the API. The API redeems the code ONCE, checks the ID token, ends the original step and
 //           opens a new one of the same kind that carries the identity the provider vouched for. The browser then
 //           completes the sign-in (3-digit code + factor 'sso') or the set-up as before.
-// Nothing is kept in the browser between the two (the web application keeps no storage); everything that matters
-// is in the database, under single-use hashed tokens. Every failure is one answer: 401.
-import { randomToken, sha256, hmacSha256 } from '../../../shared/crypto.ts';
-import { getSettings, type Database, type SealingCipher, type Tx } from '../../platform/index.ts';
+// The web application keeps no storage; everything that matters is in the database, under single-use hashed tokens.
+// Every failure is one answer: 401.
+//
+// TWO ATTACKS THIS IS BUILT AGAINST (found by review before the first push):
+//   - "mix-up": every company has its own provider, and one of them may be hostile. If all companies shared one return
+//     address, a hostile company's provider could pass a person's code from THEIR company's provider into a flow of
+//     its own, and receive that code at its token endpoint. So each company has its OWN return address
+//     (.../sso/return/<company id>), registered at its provider; a provider sends codes only to the address registered
+//     for it; and finish refuses a code that came back to another company's address than the flow's. When the
+//     provider says who it is (RFC 9207 `iss`), that must be the flow's issuer too.
+//   - a flow finished in another browser (someone hands a person a link to a provider sign-in that the attacker
+//     started, so that the person's identity lands in the attacker's step): start sets an HttpOnly cookie in the
+//     browser that started; finish requires the same cookie.
+import { hmacSha256, isUuid, randomToken, sha256 } from '../../../shared/crypto.ts';
+import { getSettings, urlProblem, type Database, type SealingCipher, type Tx } from '../../platform/index.ts';
 import type { SsoIdentity } from './factors.ts';
 import { authorizationUrl, exchangeCode, newFlowSecrets, OidcError, type OidcCache } from './oidc.ts';
 
@@ -58,11 +69,15 @@ export interface ConnectionInput {
 
 export type ConnectionProblem = 'issuer-changed' | 'secret-required' | 'bad-issuer';
 
-/** The issuer as a provider writes it: https, a host name, no query, no fragment, no credentials. Pure. */
+/**
+ * The issuer as a provider writes it, and an address the server may call: https on port 443, a public host name (no
+ * address literal, no internal name), no credentials, no query, no fragment. Pure. (The same address rules as a
+ * webhook endpoint: otherwise an Owner could make the server knock on any port of any machine.)
+ */
 export function issuerProblem(issuer: string): boolean {
+  if (urlProblem(issuer) !== null) return true;
   try {
-    const u = new URL(issuer);
-    return u.protocol !== 'https:' || u.username !== '' || u.password !== '' || u.search !== '' || u.hash !== '' || issuer.length > 2048;
+    return new URL(issuer).search !== '';
   } catch {
     return true;
   }
@@ -76,23 +91,26 @@ interface FlowPayload {
   parent_hash: string;
   parent_purpose: 'login' | 'enroll';
   code_verifier: string;
+  /** sha256 of the cookie set in the browser that started (hex) */
+  browser_hash: string;
 }
 
 export class SsoService {
   readonly #cipher: SealingCipher;
   readonly #cache: OidcCache;
-  readonly #redirectUri: string;
+  readonly #redirectBase: string;
   readonly #hmacKey: Buffer;
 
   constructor(p: { cipher: SealingCipher; cache: OidcCache; redirectUri: string; hmacKey: Buffer }) {
     this.#cipher = p.cipher;
     this.#cache = p.cache;
-    this.#redirectUri = p.redirectUri;
+    this.#redirectBase = p.redirectUri.replace(/\/+$/, '');
     this.#hmacKey = p.hmacKey;
   }
 
-  get redirectUri(): string {
-    return this.#redirectUri;
+  /** The company's own return address, to be registered at its provider (see "mix-up" at the top of this file). */
+  redirectUriFor(tenantId: string): string {
+    return `${this.#redirectBase}/${tenantId}`;
   }
 
   async get(tx: Tx, tenantId: string): Promise<ConnectionRow | null> {
@@ -144,12 +162,17 @@ export class SsoService {
     return { connectionId: current.id, revoked: rows.map((r) => ({ cardId: r.card_id, credentialId: r.id })) };
   }
 
-  /** Where the browser must go to sign in at the provider, or null (one answer for every refusal). */
-  async start(db: Database, p: { txn: string; company?: string; ip: string; now: Date }): Promise<string | null> {
-    const parent = (await db.global<{ purpose: 'login' | 'enroll'; tenant_id: string | null }>(
-      `SELECT purpose, tenant_id FROM auth_transactions WHERE txn_hash = $1 AND purpose IN ('login', 'enroll') AND consumed_at IS NULL AND expires_at > $2`,
+  /**
+   * Where the browser must go to sign in at the provider, and the value of the cookie that binds the flow to this
+   * browser - or null (one answer for every refusal).
+   */
+  async start(db: Database, p: { txn: string; company?: string; ip: string; now: Date }): Promise<{ url: string; browserToken: string } | null> {
+    const parent = (await db.global<{ purpose: 'login' | 'enroll'; tenant_id: string | null; payload: { factor_type?: string } | null }>(
+      `SELECT purpose, tenant_id, payload FROM auth_transactions WHERE txn_hash = $1 AND purpose IN ('login', 'enroll') AND consumed_at IS NULL AND expires_at > $2`,
       [sha256(p.txn), p.now])).rows[0];
     if (parent === undefined) return null;
+    // a set-up that chose another factor has no business at the provider
+    if (parent.purpose === 'enroll' && parent.payload?.factor_type !== 'sso') return null;
     let tenantId: string;
     if (parent.purpose === 'login') {
       // decided by the company the person named - never by the card (see the top of this file)
@@ -173,29 +196,43 @@ export class SsoService {
     const secrets = newFlowSecrets();
     try {
       const discovery = await this.#cache.discovery(connection.issuer, p.now.getTime());
-      url = authorizationUrl(discovery, { clientId: connection.client_id, redirectUri: this.#redirectUri, secrets });
+      url = authorizationUrl(discovery, { clientId: connection.client_id, redirectUri: this.redirectUriFor(tenantId), secrets });
     } catch (err) {
       if (err instanceof OidcError) return null;
       throw err;
     }
-    const payload: FlowPayload = { connection_id: connection.id, parent_hash: sha256(p.txn).toString('hex'), parent_purpose: parent.purpose, code_verifier: secrets.codeVerifier };
+    const browserToken = randomToken(32);
+    const payload: FlowPayload = {
+      connection_id: connection.id, parent_hash: sha256(p.txn).toString('hex'), parent_purpose: parent.purpose, code_verifier: secrets.codeVerifier,
+      browser_hash: sha256(browserToken).toString('hex'),
+    };
+    const until = new Date(p.now.getTime() + SSO_FLOW_TTL_SECONDS * 1000);
     await db.global(
       `INSERT INTO auth_transactions (txn_hash, purpose, tenant_id, card_id, challenge, payload, ip_hash, expires_at)
        VALUES ($1, 'sso', $2, NULL, $3, $4, $5, $6)`,
-      [sha256(secrets.state), tenantId, secrets.nonce, JSON.stringify(payload), hmacSha256(this.#hmacKey, `ip:${p.ip}`),
-        new Date(p.now.getTime() + SSO_FLOW_TTL_SECONDS * 1000)]);
-    return url;
+      [sha256(secrets.state), tenantId, secrets.nonce, JSON.stringify(payload), hmacSha256(this.#hmacKey, `ip:${p.ip}`), until]);
+    // the original step must still be there when the person comes back (a provider sign-in with a second factor
+    // can take longer than the step's usual 5 minutes): it lives as long as the flow, no longer
+    await db.global(
+      'UPDATE auth_transactions SET expires_at = greatest(expires_at, $3) WHERE txn_hash = $1 AND purpose = $2 AND consumed_at IS NULL',
+      [sha256(p.txn), parent.purpose, until]);
+    return { url, browserToken };
   }
 
   /**
    * The provider sent the browser back: redeem the code once, check the ID token, and swap the original step for a
    * new one of the same kind that carries the identity. Returns the new step's token, or null (one answer).
    */
-  async finish(db: Database, p: { state: string; code: string; ip: string; now: Date }): Promise<{ purpose: 'login' | 'enroll'; txn: string } | null> {
+  async finish(db: Database, p: {
+    state: string; code: string; returnedTo: string; iss?: string | undefined; browserToken: string | undefined; ip: string; now: Date;
+  }): Promise<{ purpose: 'login' | 'enroll'; txn: string } | null> {
+    // only the browser that started (its cookie), and only a code that came back to THIS company's address
+    if (typeof p.browserToken !== 'string' || p.browserToken.length < 20 || p.browserToken.length > 100 || !isUuid(p.returnedTo)) return null;
     const flow = (await db.global<{ tenant_id: string; challenge: string; payload: FlowPayload }>(
       `UPDATE auth_transactions SET consumed_at = $2
         WHERE txn_hash = $1 AND purpose = 'sso' AND consumed_at IS NULL AND expires_at > $2
-        RETURNING tenant_id, challenge, payload`, [sha256(p.state), p.now])).rows[0];
+          AND payload->>'browser_hash' = $3 AND tenant_id = $4::uuid
+        RETURNING tenant_id, challenge, payload`, [sha256(p.state), p.now, sha256(p.browserToken).toString('hex'), p.returnedTo])).rows[0];
     if (flow === undefined) return null;
     const tenantId = flow.tenant_id;
     const connection = await db.withTenantTx(tenantId, async (tx) => {
@@ -205,12 +242,14 @@ export class SsoService {
       return rows[0] ?? null;
     });
     if (connection === null || connection.client_secret_enc === null || connection.secret_key_id === null) return null;
+    // RFC 9207: a provider that names itself on the way back must be the flow's provider
+    if (p.iss !== undefined && p.iss !== connection.issuer) return null;
     const clientSecret = this.#cipher.decrypt(connection.client_secret_enc, connection.secret_key_id, secretAad(tenantId, flow.payload.connection_id));
     if (clientSecret === null) return null;
     let subject: string;
     try {
       ({ subject } = await exchangeCode(this.#cache, {
-        issuer: connection.issuer, clientId: connection.client_id, clientSecret, redirectUri: this.#redirectUri, code: p.code,
+        issuer: connection.issuer, clientId: connection.client_id, clientSecret, redirectUri: this.redirectUriFor(tenantId), code: p.code,
         codeVerifier: flow.payload.code_verifier, nonce: flow.challenge, now: p.now,
       }));
     } catch (err) {

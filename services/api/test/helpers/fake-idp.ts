@@ -35,6 +35,8 @@ export class FakeIdp {
   tweakNext: TokenTweaks | null = null;
   /** The discovery document says another issuer. */
   lieAboutIssuer = false;
+  /** The discovery document names these endpoints instead of its own. */
+  endpoints: Partial<Record<'authorization_endpoint' | 'token_endpoint' | 'jwks_uri', string>> = {};
 
   constructor(p: { issuer?: string; clientId?: string; clientSecret?: string } = {}) {
     this.issuer = p.issuer ?? `https://idp-${randomBytes(4).toString('hex')}.example.test`;
@@ -59,7 +61,7 @@ export class FakeIdp {
     if (req.method === 'GET' && url.pathname === '/.well-known/openid-configuration') {
       return json(200, {
         issuer: this.lieAboutIssuer ? 'https://other.example.test' : this.issuer, authorization_endpoint: `${this.issuer}/authorize`,
-        token_endpoint: `${this.issuer}/token`, jwks_uri: `${this.issuer}/jwks`,
+        token_endpoint: `${this.issuer}/token`, jwks_uri: `${this.issuer}/jwks`, ...this.endpoints,
       });
     }
     if (req.method === 'GET' && url.pathname === '/jwks') return json(200, { keys: [this.#jwk] });

@@ -63,12 +63,29 @@ GRANT SELECT, INSERT, UPDATE ON sso_connections TO legacyai_app;
 --    which is not secret) and the sign-in goes to that company's provider. This function answers ONLY whether that
 --    company has a connection that is switched on, and which - never anything about a card. Deciding by the
 --    company and not by the card means the answer cannot reveal whether a card number exists.
+--    Both tables keep FORCE row-level security, which binds this function's owner too, and nobody is signed in yet:
+--    the function opens exactly the two doors it needs, for its own duration only. The SET clauses make PostgreSQL
+--    put both settings back when the function returns (also on error), whatever they were before:
+--      app.platform_scope = 'on'  -> the tenants policy platform_read lets it find the company by its short name;
+--      app.tenant_id = <that company> (set inside) -> sso_connections shows that company's connection, no other.
+--    (Found by review: as a plain SQL function it saw no rows at all, so every SSO sign-in would have failed.)
 CREATE FUNCTION resolve_sso_company(p_slug text) RETURNS TABLE (tenant_id uuid, connection_id uuid)
-LANGUAGE sql STABLE SECURITY DEFINER
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, public, pg_temp
+SET app.platform_scope = 'on'
+SET app.tenant_id = ''
 AS $$
-  SELECT t.id, c.id FROM tenants t JOIN sso_connections c ON c.tenant_id = t.id
-   WHERE t.slug = p_slug AND t.status = 'active' AND NOT t.is_platform AND c.enabled AND c.removed_at IS NULL
+DECLARE
+  v_tenant uuid;
+BEGIN
+  SELECT t.id INTO v_tenant FROM tenants t WHERE t.slug = p_slug AND t.status = 'active' AND NOT t.is_platform;
+  IF v_tenant IS NULL THEN
+    RETURN;
+  END IF;
+  PERFORM set_config('app.tenant_id', v_tenant::text, true);
+  RETURN QUERY
+    SELECT c.tenant_id, c.id FROM sso_connections c WHERE c.tenant_id = v_tenant AND c.enabled AND c.removed_at IS NULL;
+END
 $$;
 REVOKE ALL ON FUNCTION resolve_sso_company(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION resolve_sso_company(text) TO legacyai_app;

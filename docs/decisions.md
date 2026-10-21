@@ -242,7 +242,10 @@ CONSEQUENCES:
 - **The provider is chosen by the company the person names, never by the card**, so the answer cannot reveal whether a card number exists. Price: the person types the company's short name.
 - An identity is the provider's `sub`, linked to a card only during the card's set-up (set-up token + 3-digit code). Never by e-mail address. One identity opens at most one live card.
 - The provider's tokens are checked with `jose` (already a dependency): published keys, asymmetric algorithms only, issuer, audience/azp, expiry, age, nonce. All requests through the guarded https client shared with webhooks (moved to the platform module).
-- Nothing is kept in the browser between the steps; the API swaps the sign-in step for a new one carrying the vouched-for identity. Every failure is one 401.
+- The API swaps the sign-in step for a new one carrying the vouched-for identity. Every failure is one 401.
+- **Each company has its own return address** (`/sso/return/<company id>`). A code that comes back to another company's address than the flow's is refused, and so is a provider `iss` (RFC 9207) other than the flow's. This defends against the "mix-up" of one hostile company's provider with another's.
+- **Only the browser that started can finish:** an HttpOnly, SameSite=Strict cookie is set at start and required at finish. This is the one thing kept in the browser between the steps, and the page cannot read it.
+- The issuer and all endpoints follow the webhook address rules (https, port 443, host name, not internal). The sign-in page must be on the issuer's host.
 - The client secret is stored encrypted (it must be sent again), never shown again. One connection per company; its provider never changes.
 - Removing the connection revokes the SSO factors, ends their sessions and (D30) the API keys of those cards.
 - The rollback refuses to run when SSO credentials exist (the append-only card history refers to them).

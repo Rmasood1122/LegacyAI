@@ -3,7 +3,9 @@
 //
 // What is trusted, and why:
 //   - the provider's endpoints come from its discovery document, fetched from the configured issuer; the document's
-//     own `issuer` must equal the configured one exactly, and every endpoint must be https;
+//     own `issuer` must equal the configured one exactly; every endpoint must be an address the server may call
+//     (https, port 443, a public host name - the webhook rules), and the sign-in page must be on the issuer's own
+//     host (the browser is sent there from our sign-in screen: it must not become a way to send people anywhere);
 //   - every request goes through the platform's guarded https client (public addresses only, pinned, no redirect,
 //     time and size limits) - a company cannot point the server at an internal address;
 //   - the ID token is checked with `jose` (already a dependency): signature against the provider's published keys,
@@ -13,7 +15,7 @@
 //     anyone: a provider may let people choose them.
 import { createHash, randomBytes } from 'node:crypto';
 import { createLocalJWKSet, jwtVerify, type JSONWebKeySet } from 'jose';
-import type { HttpsRequest, HttpsResponse } from '../../platform/index.ts';
+import { urlProblem, type HttpsRequest, type HttpsResponse } from '../../platform/index.ts';
 
 export type OidcHttp = (req: HttpsRequest) => Promise<HttpsResponse>;
 
@@ -36,14 +38,8 @@ export class OidcError extends Error {
   }
 }
 
-const isHttps = (v: unknown): v is string => {
-  if (typeof v !== 'string' || v.length > 2048) return false;
-  try {
-    return new URL(v).protocol === 'https:';
-  } catch {
-    return false;
-  }
-};
+const callable = (v: unknown): v is string => typeof v === 'string' && urlProblem(v) === null;
+const hostOf = (v: string): string => new URL(v).hostname.toLowerCase();
 
 async function getJson(http: OidcHttp, url: string, failure: OidcFailure): Promise<unknown> {
   const res = await http({ url, method: 'GET', headers: { accept: 'application/json' } });
@@ -61,7 +57,8 @@ export async function discover(http: OidcHttp, issuer: string): Promise<Discover
   if (doc === null || typeof doc !== 'object') throw new OidcError('discovery_invalid');
   if (doc.issuer !== issuer) throw new OidcError('issuer_mismatch');
   const { authorization_endpoint: auth, token_endpoint: token, jwks_uri: jwks } = doc;
-  if (!isHttps(auth) || !isHttps(token) || !isHttps(jwks)) throw new OidcError('discovery_invalid');
+  if (!callable(auth) || !callable(token) || !callable(jwks)) throw new OidcError('discovery_invalid');
+  if (hostOf(auth) !== hostOf(issuer)) throw new OidcError('discovery_invalid');
   return { issuer, authorization_endpoint: auth, token_endpoint: token, jwks_uri: jwks };
 }
 

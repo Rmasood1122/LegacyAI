@@ -7604,7 +7604,7 @@ paths:
   /v1/auth/sso/start:
     post:
       operationId: ssoStart
-      summary: "Sign in or set up with the company's identity provider: returns the provider's sign-in address. When signing in, the person names their company (its short name); the provider is chosen by the company, never by the card. One answer for every refusal."
+      summary: "Sign in or set up with the company's identity provider: returns the provider's sign-in address. When signing in, the person names their company (its short name); the provider is chosen by the company, never by the card. Sets an HttpOnly flow cookie that ssoFinish requires (the sign-in can only be finished in the browser that started it). One answer for every refusal."
       tags:
         - auth
       x-public: true
@@ -7650,7 +7650,7 @@ paths:
   /v1/auth/sso/finish:
     post:
       operationId: ssoFinish
-      summary: "Back from the identity provider (the web application passes on the code and state it received). Returns the step to continue with: a login_txn to sign in with factor sso and the 3-digit code, or an enrollment_txn to complete the set-up. Single use; one answer for every failure."
+      summary: "Back from the identity provider (the web application passes on what it received at /sso/return/{tenant_id}: the code, the state and - if the provider sent it - iss). Only the browser that called ssoStart can finish (it holds the flow cookie set then), and only a code that came back to the address of the flow's company. Returns the step to continue with: a login_txn to sign in with factor sso and the 3-digit code, or an enrollment_txn to complete the set-up. Single use; one answer for every failure."
       tags:
         - auth
       x-public: true
@@ -7665,12 +7665,22 @@ paths:
               required:
                 - state
                 - code
+                - tenant_id
               properties:
                 state:
                   type: string
                   minLength: 20
                   maxLength: 200
                 code:
+                  type: string
+                  minLength: 1
+                  maxLength: 2048
+                tenant_id:
+                  description: "The company id in the return address the provider sent the browser to (/sso/return/{tenant_id})."
+                  type: string
+                  format: uuid
+                iss:
+                  description: "The provider's `iss` parameter on the return address (RFC 9207), when it sends one."
                   type: string
                   minLength: 1
                   maxLength: 2048

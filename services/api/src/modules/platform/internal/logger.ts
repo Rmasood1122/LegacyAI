@@ -10,7 +10,7 @@ const SENSITIVE_KEYS = new Set([
   'session_token', 'csrf_token', 'x-csrf-token', 'cookie', 'set-cookie', 'authorization', 'pepper', 'assertion',
   'attestation', 'code', 'totp_code', 'totp', 'otpauth_uri', 'sc_hash', 'totp_secret_enc', 'webauthn_public_key',
   'database_url', 'databaseurl', 'connectionstring', 'email', 'owner_email', 'display_name', 'owner_display_name',
-  'name', 'ip', 'card_number', 'idempotency-key',
+  'name', 'ip', 'card_number', 'idempotency-key', 'client_secret', 'nonce', 'code_verifier',
 ]);
 
 const REDACTED = '[redacted]';

@@ -10,7 +10,7 @@ import { toApiConnection, type ConnectionInput, type ConnectionProblem, type Sso
 const PROBLEM_TEXT: Readonly<Record<ConnectionProblem, [number, string, string]>> = {
   'issuer-changed': [409, 'sso-issuer-changed', 'The provider of a connection cannot change; remove the connection first'],
   'secret-required': [422, 'unprocessable', 'A new connection needs the client secret'],
-  'bad-issuer': [422, 'unprocessable', 'The issuer must be an https address without a query or fragment'],
+  'bad-issuer': [422, 'unprocessable', 'The issuer must be a public https address (port 443, a host name, no query or fragment)'],
 };
 
 const theConnection = async ({ subject }: { subject: CardSubject }): Promise<ResourceRef> => ({ type: 'sso_connection', tenant_id: subject.tenant_id, collection: true });
@@ -22,13 +22,15 @@ export function ssoRoutes(deps: { auth: AuthService; sso: SsoService; cards: Car
       operationId: 'ssoStart',
       kind: 'public',
       policy: { public: true, reason: 'Signing in at the company identity provider happens before there is a session. Decided by the company named, never by the card.' },
+      flowCookie: true,
       handler: ({ ctx, body }) => auth.ssoStart(ctx, body),
     },
     {
       operationId: 'ssoFinish',
       kind: 'public',
       policy: { public: true, reason: 'The identity provider sends the browser back before there is a session. Redeems a single-use state; one answer for every failure.' },
-      handler: ({ ctx, body }) => auth.ssoFinish(ctx, body),
+      flowCookie: true,
+      handler: ({ ctx, body, flowCookie }) => auth.ssoFinish(ctx, body, flowCookie),
     },
     {
       operationId: 'getSsoConnection',
@@ -37,7 +39,7 @@ export function ssoRoutes(deps: { auth: AuthService; sso: SsoService; cards: Car
       policy: { resource: theConnection },
       handler: async ({ tx, subject }) => {
         const row = await sso.get(tx, subject.tenant_id);
-        return { body: { connection: row === null ? null : toApiConnection(row, sso.redirectUri), redirect_uri: sso.redirectUri } };
+        return { body: { connection: row === null ? null : toApiConnection(row, sso.redirectUriFor(subject.tenant_id)), redirect_uri: sso.redirectUriFor(subject.tenant_id) } };
       },
     },
     {
@@ -55,7 +57,7 @@ export function ssoRoutes(deps: { auth: AuthService; sso: SsoService; cards: Car
           resourceId: result.id, decision: 'event', reasonCode: 'SSO_CONNECTION_SET', requestId: ctx.requestId, ip: ctx.ip,
           details: { sso_connection_id: result.id, changed: Object.keys(body as object).filter((k) => k !== 'client_secret').sort().join(','), status: result.enabled ? 'on' : 'off' },
         });
-        return { body: toApiConnection(result, sso.redirectUri) };
+        return { body: toApiConnection(result, sso.redirectUriFor(subject.tenant_id)) };
       },
     },
     {

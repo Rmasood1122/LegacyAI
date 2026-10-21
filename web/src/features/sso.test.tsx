@@ -17,6 +17,9 @@ const PROVIDER = 'https://idp.example.com/authorize?state=s';
 const noPasskeys: Passkeys = { supported: () => false, authenticate: vi.fn(), register: vi.fn() };
 const SETUP_TOKEN = ['synthetic', 'setup', 'token', 'value'].join('-');
 const CLIENT_SECRET = ['synthetic', 'client', 'secret'].join('-');
+const COMPANY = '01a10174-0000-7000-8000-00000000c0de';
+/** The return screen as the router mounts it: the company id is part of the address. */
+const returnScreen = { at: `/sso/return/${COMPANY}`, route: '/sso/return/:tenantId' };
 
 describe('signing in with the company account', () => {
   it('the person names the company and leaves for the provider; the 3-digit code is asked for on return', async () => {
@@ -56,24 +59,24 @@ describe('signing in with the company account', () => {
 
   it('back from the provider: the code is handed on once and removed from the address bar; then the 3-digit code signs in', async () => {
     const user = userEvent.setup();
-    window.history.replaceState(null, '', '/sso/return?code=provider-code&state=provider-state');
+    window.history.replaceState(null, '', `/sso/return/${COMPANY}?code=provider-code&state=provider-state&iss=https%3A%2F%2Fidp.example.com`);
     const session = makeSession(['knowledge:ask']);
     const signedIn = vi.fn();
     const api = new FakeApi({ ssoFinish: () => ({ purpose: 'login' as const, login_txn: NEXT }), loginVerify: () => session });
-    renderScreen(<SsoReturnScreen />, { api, session: sessionValue(null, { signedIn }) });
+    renderScreen(<SsoReturnScreen />, { api, session: sessionValue(null, { signedIn }), ...returnScreen });
     await user.type(await screen.findByLabelText('3-digit code'), '123');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
     await waitFor(() => expect(signedIn).toHaveBeenCalled());
     expect(signedIn.mock.calls[0]?.[0]).toBe(session);
-    expect(api.callsTo('ssoFinish')).toEqual([{ body: { code: 'provider-code', state: 'provider-state' } }]);
+    expect(api.callsTo('ssoFinish')).toEqual([{ body: { code: 'provider-code', state: 'provider-state', tenant_id: COMPANY, iss: 'https://idp.example.com' } }]);
     expect(api.callsTo('loginVerify')[0]?.body).toEqual({ login_txn: NEXT, sc: '123', factor: { type: 'sso' } });
     expect(window.location.search).toBe('');
   });
 
   it('a return that cannot be confirmed (used, expired, forged) says so and offers to start again', async () => {
-    window.history.replaceState(null, '', '/sso/return?code=x&state=y');
+    window.history.replaceState(null, '', `/sso/return/${COMPANY}?code=x&state=y`);
     const api = new FakeApi({ ssoFinish: () => { throw problem(401, 'Authentication failed'); } });
-    renderScreen(<SsoReturnScreen />, { api, session: sessionValue(null) });
+    renderScreen(<SsoReturnScreen />, { api, session: sessionValue(null), ...returnScreen });
     expect(await screen.findByText('That did not work')).toBeTruthy();
   });
 });
@@ -96,11 +99,12 @@ describe('setting up a card with the company account', () => {
     expect(api.callsTo('enrollmentBegin')[0]?.body).toMatchObject({ factor_type: 'sso' });
     expect(api.callsTo('ssoStart')[0]?.body).toEqual({ txn: TXN });
 
-    window.history.replaceState(null, '', '/sso/return?code=c&state=s');
+    window.history.replaceState(null, '', `/sso/return/${COMPANY}?code=c&state=s`);
     const back = new FakeApi({ ssoFinish: () => ({ purpose: 'enroll' as const, enrollment_txn: NEXT }), enrollmentComplete: () => undefined });
-    renderScreen(<SsoReturnScreen />, { api: back, session: sessionValue(null) });
+    renderScreen(<SsoReturnScreen />, { api: back, session: sessionValue(null), ...returnScreen });
     expect(await screen.findByText('Your card is ready')).toBeTruthy();
     expect(back.callsTo('enrollmentComplete')).toEqual([{ body: { enrollment_txn: NEXT } }]);
+    expect(back.callsTo('ssoFinish')[0]?.body).toEqual({ code: 'c', state: 's', tenant_id: COMPANY });
   });
 });
 
@@ -109,7 +113,7 @@ describe('the Owner\'s company sign-in screen', () => {
   const as = (...ops: Parameters<typeof permissionsFor>) => sessionValue(makeSession(permissionsFor(...ops)));
   const conn: SsoConnection = {
     id: '01a10174-0000-7000-8000-000000000001', name: 'Company sign-in', protocol: 'oidc', issuer: 'https://idp.example.com', client_id: 'legacyai',
-    enabled: true, has_client_secret: true, redirect_uri: 'https://app.example.com/sso/return', created_by_card_id: '01a10174-0000-7000-8000-000000000002',
+    enabled: true, has_client_secret: true, redirect_uri: `https://app.example.com/sso/return/${COMPANY}`, created_by_card_id: '01a10174-0000-7000-8000-000000000002',
     created_at: '2026-10-07T09:00:00.000Z', updated_at: '2026-10-07T09:00:00.000Z',
   };
 
@@ -117,14 +121,14 @@ describe('the Owner\'s company sign-in screen', () => {
     const user = userEvent.setup();
     let stored: SsoConnection | null = null;
     const api = new FakeApi({
-      getSsoConnection: () => ({ connection: stored, redirect_uri: 'https://app.example.com/sso/return' }),
+      getSsoConnection: () => ({ connection: stored, redirect_uri: `https://app.example.com/sso/return/${COMPANY}` }),
       putSsoConnection: () => {
         stored = conn;
         return conn;
       },
     });
     renderScreen(<SsoScreen />, { api, session: as(...OWNER) });
-    expect((await screen.findByTestId('redirect-uri')).textContent).toBe('https://app.example.com/sso/return');
+    expect((await screen.findByTestId('redirect-uri')).textContent).toBe(`https://app.example.com/sso/return/${COMPANY}`);
     await user.clear(screen.getByLabelText('Provider (issuer)'));
     await user.type(screen.getByLabelText('Provider (issuer)'), 'https://idp.example.com');
     await user.type(screen.getByLabelText('Client id'), 'legacyai');

@@ -1,9 +1,11 @@
-// Back from the company's identity provider (SSO, docs/phase4/07). The address carries the provider's code and the
-// state; this screen hands both to the API at once (single use), and removes them from the address bar. Then:
+// Back from the company's identity provider (SSO, docs/phase4/07). The address is the company's own return address
+// (/sso/return/<company id>) and carries the provider's code and the state (and, from some providers, `iss`); this
+// screen hands them to the API at once (single use), and removes them from the address bar. The API accepts them only
+// from the browser that started (a cookie it set then) and only for the company in the address. Then:
 //   - a sign-in: the person types the card's 3-digit code - the provider alone never signs anyone in;
 //   - a set-up: the set-up is finished; the person signs in next time with the company's account.
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Link } from 'react-router';
+import { Link, useParams } from 'react-router';
 import type { OperationTypes } from '../../api/generated.ts';
 
 type SsoFinishResponse = OperationTypes['ssoFinish']['response'];
@@ -19,6 +21,7 @@ export function SsoReturnScreen() {
   const [step, setStep] = useState<SsoFinishResponse | null>(null);
   const [sc, setSc] = useState('');
   const asked = useRef(false);
+  const { tenantId } = useParams();
 
   useEffect(() => {
     if (asked.current) return;
@@ -26,16 +29,17 @@ export function SsoReturnScreen() {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
     const state = params.get('state');
+    const iss = params.get('iss');
     // the code and state are spent now; they do not stay in the address bar or the history
     window.history.replaceState(null, '', window.location.pathname);
-    if (code === null || state === null) return;
-    finish.mutate({ body: { code, state } }, {
+    if (code === null || state === null || tenantId === undefined) return;
+    finish.mutate({ body: { code, state, tenant_id: tenantId, ...(iss === null ? {} : { iss }) } }, {
       onSuccess: (next) => {
         setStep(next);
         if (next.purpose === 'enroll' && next.enrollment_txn !== undefined) complete.mutate({ body: { enrollment_txn: next.enrollment_txn } });
       },
     });
-  }, [finish, complete]);
+  }, [finish, complete, tenantId]);
 
   const onCode = (e: FormEvent): void => {
     e.preventDefault();

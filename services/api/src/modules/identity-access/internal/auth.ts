@@ -119,17 +119,25 @@ export class AuthService {
   /** The provider's sign-in page for a sign-in or set-up step in progress (D33). The same limits as signing in. */
   async ssoStart(ctx: RequestContext, body: { txn: string; company?: string }): Promise<HandlerResult> {
     await this.#enforceLimits(ctx);
-    const url = await this.#d.sso.start(this.#d.db, { txn: body.txn, company: body.company, ip: ctx.ip, now: ctx.now });
-    if (url === null) throw problems.authFailed();
-    return { body: { authorization_url: url } };
+    const started = await this.#d.sso.start(this.#d.db, { txn: body.txn, company: body.company, ip: ctx.ip, now: ctx.now });
+    if (started === null) throw problems.authFailed();
+    // the browser that started is the only one that can finish (see SsoService.finish)
+    return { body: { authorization_url: started.url }, setFlowCookie: started.browserToken };
   }
 
   /** Back from the provider: the step to continue with, now carrying the identity the provider vouched for. */
-  async ssoFinish(ctx: RequestContext, body: { state: string; code: string }): Promise<HandlerResult> {
+  async ssoFinish(
+    ctx: RequestContext, body: { state: string; code: string; tenant_id: string; iss?: string }, browserToken: string | undefined,
+  ): Promise<HandlerResult> {
     await this.#enforceLimits(ctx);
-    const next = await this.#d.sso.finish(this.#d.db, { state: body.state, code: body.code, ip: ctx.ip, now: ctx.now });
+    const next = await this.#d.sso.finish(this.#d.db, {
+      state: body.state, code: body.code, returnedTo: body.tenant_id, iss: body.iss, browserToken, ip: ctx.ip, now: ctx.now,
+    });
     if (next === null) throw problems.authFailed();
-    return { body: next.purpose === 'login' ? { purpose: 'login', login_txn: next.txn } : { purpose: 'enroll', enrollment_txn: next.txn } };
+    return {
+      body: next.purpose === 'login' ? { purpose: 'login', login_txn: next.txn } : { purpose: 'enroll', enrollment_txn: next.txn },
+      setFlowCookie: null,
+    };
   }
 
   // ----------------------------------------------------------------- login: begin
@@ -236,7 +244,11 @@ export class AuthService {
       // active factor - otherwise a sign-in already in flight would outlive the reset.
       if (strong !== null || sc !== null) {
         const stillActive = strong === null ? null : (await tx.query(
-          `SELECT 1 FROM credentials WHERE id = $1 AND tenant_id = $2 AND card_id = $3 AND status = 'active'`, [strong.credentialId, tenantId, card.id])).rowCount;
+          // an SSO factor also needs its connection still switched on (switching it off stops sign-ins already under way)
+          `SELECT 1 FROM credentials c WHERE c.id = $1 AND c.tenant_id = $2 AND c.card_id = $3 AND c.status = 'active'
+              AND (c.type <> 'sso' OR EXISTS (SELECT 1 FROM sso_connections s
+                                               WHERE s.tenant_id = c.tenant_id AND s.id = c.sso_connection_id AND s.enabled AND s.removed_at IS NULL))`,
+          [strong.credentialId, tenantId, card.id])).rowCount;
         const currentSecret = (await tx.query<{ id: string }>(
           `SELECT id FROM card_secrets WHERE tenant_id = $1 AND card_id = $2 AND status = 'current'`, [tenantId, card.id])).rows[0]?.id ?? null;
         if (stillActive === 0 || (sc !== null && currentSecret !== secret?.id)) return fail('superseded', card);

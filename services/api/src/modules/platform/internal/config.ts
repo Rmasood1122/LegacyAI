@@ -311,7 +311,7 @@ export function loadConfig(env: Env): Config {
     try {
       const u = new URL(config.sso.redirectUri);
       ok = (u.protocol === 'https:' || (u.protocol === 'http:' && nodeEnv !== 'production' && ['localhost', '127.0.0.1'].includes(u.hostname)))
-        && u.hash === '' && u.username === '' && allowedOrigins.includes(u.origin);
+        && u.hash === '' && u.search === '' && u.username === '' && allowedOrigins.includes(u.origin);
     } catch {
       ok = false;
     }

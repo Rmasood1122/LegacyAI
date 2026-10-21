@@ -22,7 +22,7 @@ export function App() {
       <main id="main">
         <Routes>
           <Route path="/set-up" element={<EnrollScreen />} />
-          <Route path="/sso/return" element={<SsoReturnScreen />} />
+          <Route path="/sso/return/:tenantId" element={<SsoReturnScreen />} />
           <Route path="*" element={<SignInScreen />} />
         </Routes>
       </main>

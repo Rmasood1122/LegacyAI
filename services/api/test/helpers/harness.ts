@@ -7,7 +7,7 @@ import { generate as totpGenerate } from 'otplib';
 import pg from 'pg';
 import { createApp, type App, type AppOverrides } from '../../src/app.ts';
 import { ANOMALY_DEFAULTS, DEFAULT_AUTH_LIMITS, formatCardNumber } from '../../src/modules/identity-access/index.ts';
-import { createLogger, getSettings, loadConfig, PLATFORM_TENANT_ID, SESSION_COOKIE } from '../../src/modules/platform/index.ts';
+import { createLogger, FLOW_COOKIE, getSettings, loadConfig, PLATFORM_TENANT_ID, SESSION_COOKIE } from '../../src/modules/platform/index.ts';
 import { ManualClock } from '../../src/shared/clock.ts';
 import { DB_URLS, TEST_ORIGIN, TEST_RP_ID, testEnv } from './env.ts';
 
@@ -63,6 +63,8 @@ export interface Res {
 export class Client {
   readonly t: TestApp;
   cookie: string | null = null;
+  /** The SSO flow cookie (FLOW_COOKIE), kept like a browser would keep it. */
+  flowCookie: string | null = null;
   csrf: string | null = null;
   ip = '127.0.0.1';
 
@@ -83,8 +85,12 @@ export class Client {
     const res = await this.t.app.http.app.inject({
       method, url, headers, remoteAddress: this.ip,
       ...(body === undefined ? {} : { payload: body as object }),
-      ...(this.cookie ? { cookies: { [SESSION_COOKIE]: this.cookie } } : {}),
+      ...(this.cookie || this.flowCookie
+        ? { cookies: { ...(this.cookie ? { [SESSION_COOKIE]: this.cookie } : {}), ...(this.flowCookie ? { [FLOW_COOKIE]: this.flowCookie } : {}) } }
+        : {}),
     });
+    const flow = res.cookies.find((c) => c.name === FLOW_COOKIE);
+    if (flow) this.flowCookie = flow.value === '' ? null : flow.value;
     const setCookie = res.cookies.find((c) => c.name === SESSION_COOKIE);
     if (setCookie) this.cookie = setCookie.value === '' ? null : setCookie.value;
     let parsed: unknown = null;
@@ -325,18 +331,25 @@ export interface TestMember {
   client: Client;
 }
 
-/** Creates a person, issues a card with the given roles, enrols a passkey and logs in. */
-export async function addMember(
-  t: TestApp, admin: Client, roles: Array<{ role_key: string; department_id?: string }>, opts: { departmentId?: string; login?: boolean } = {},
-): Promise<TestMember> {
+/** Creates a person and issues a card with the given roles - nothing set up yet (its enrollment token is unused). */
+export async function issueMember(
+  admin: Client, roles: Array<{ role_key: string; department_id?: string }>, opts: { departmentId?: string } = {},
+): Promise<{ personId: string; card: IssuedCard }> {
   const person = await admin.post('/v1/people', { display_name: `Member ${randomUUID().slice(0, 8)}`, department_id: opts.departmentId ?? null });
   if (person.status !== 201) throw new Error(`create person failed: ${person.status} ${person.raw}`);
   const issued = await admin.post('/v1/cards', { person_id: person.body.id, roles });
   if (issued.status !== 201) throw new Error(`issue card failed: ${issued.status} ${issued.raw}`);
-  const card = fromSecrets(issued.body);
+  return { personId: person.body.id, card: fromSecrets(issued.body) };
+}
+
+/** Creates a person, issues a card with the given roles, enrols a passkey and logs in. */
+export async function addMember(
+  t: TestApp, admin: Client, roles: Array<{ role_key: string; department_id?: string }>, opts: { departmentId?: string; login?: boolean } = {},
+): Promise<TestMember> {
+  const { personId, card } = await issueMember(admin, roles, opts);
   const passkey = await enrollPasskey(t, card);
   const client = opts.login === false ? new Client(t) : await login(t, card, { passkey });
-  return { personId: person.body.id, card, passkey, client };
+  return { personId, card, passkey, client };
 }
 
 export { fromSecrets };

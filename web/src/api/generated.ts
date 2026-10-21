@@ -3047,6 +3047,8 @@ export interface OperationTypes {
     body: {
       state: string;
       code: string;
+      tenant_id: string;
+      iss?: string;
     };
     response: {
       purpose: "login" | "enroll";

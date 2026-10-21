@@ -26,7 +26,7 @@ export {
   type ExportTable, type TenantRow, type TenantSettings,
 } from './internal/tenants.ts';
 export {
-  API_KEY_SCHEME, checkedHeaderNames, createHttpServer, credentialOf, declaredHeaders, NEVER_DECLARED_HEADERS, SESSION_COOKIE,
+  API_KEY_SCHEME, checkedHeaderNames, createHttpServer, credentialOf, declaredHeaders, FLOW_COOKIE, NEVER_DECLARED_HEADERS, SESSION_COOKIE,
   type AuthPort, type AuthorizedHandlerArgs, type CallerHandlerArgs, type Credential, type GatewayCallArgs, type GatewayPrepared,
   type HandlerResult, type HttpDeps, type HttpServer, type PresentedCredential, type PublicHandlerArgs, type ResolvedCredential,
   type ResourcePolicy, honoursFilter, type ListFilter, type RegisteredRoute, type RouteDef, type SessionHandlerArgs,

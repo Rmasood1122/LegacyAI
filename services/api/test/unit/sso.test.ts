@@ -69,6 +69,24 @@ describe('what the client trusts from the provider', () => {
     await refused(discover(liar.http, liar.issuer), 'issuer_mismatch');
   });
 
+  it.each([
+    ['a sign-in page on another host (people would be sent there from our screen)', { authorization_endpoint: 'https://elsewhere.example.test/authorize' }],
+    ['a token endpoint on another port', { token_endpoint: 'https://idp.example.test:22/token' }],
+    ['a key set at an address literal', { jwks_uri: 'https://203.0.113.9/jwks' }],
+    ['a key set at an internal name', { jwks_uri: 'https://keys.internal/jwks' }],
+    ['a plain-http endpoint', { token_endpoint: 'http://idp.example.test/token' }],
+  ])('the discovery document is refused when it names %s', async (_name, endpoints) => {
+    const odd = await new FakeIdp().start();
+    odd.endpoints = endpoints;
+    await refused(discover(odd.http, odd.issuer), 'discovery_invalid');
+  });
+
+  it('token endpoint and key set may live on another public host of the provider (as some large providers do)', async () => {
+    const split = await new FakeIdp().start();
+    split.endpoints = { jwks_uri: 'https://keys.example.test/jwks' };
+    expect((await discover(split.http, split.issuer)).jwks_uri).toBe('https://keys.example.test/jwks');
+  });
+
   it.each<[string, TokenTweaks]>([
     ['signed with a key the provider does not publish', { foreignKey: true }],
     ['not signed at all (alg none)', { alg: 'none' }],
@@ -137,6 +155,7 @@ describe('issuer and redirect address', () => {
   it.each([
     ['https://login.example.com/tenant-1/v2.0', false], ['https://idp.example.com', false],
     ['http://idp.example.com', true], ['https://idp.example.com/?x=1', true], ['https://idp.example.com/#a', true], ['https://u:p@idp.example.com', true], ['nope', true],
+    ['https://idp.example.com:8443', true], ['https://10.0.0.1', true], ['https://[::1]', true], ['https://idp.corp', true], ['https://localhost', true],
   ])('issuer %s refused: %s', (issuer, expected) => {
     expect(issuerProblem(issuer)).toBe(expected);
   });
