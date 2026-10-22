@@ -250,7 +250,7 @@ CONSEQUENCES:
 - The client secret is stored encrypted (it must be sent again), never shown again. One connection per company; its provider never changes.
 - Removing the connection revokes the SSO factors, ends their sessions and (D30) the API keys of those cards.
 - The rollback refuses to run when SSO credentials exist (the append-only card history refers to them).
-- **For the founder to confirm:** which providers first; Owner only; that people type the company's short name; that removal ends those people's API keys.
+- **Confirmed by the founder (2026-10-22, the recommended defaults):** Owner only; people type the company's short name; removal ends those people's API keys. Still open until a customer asks: which providers first.
 
 **D34 — SCIM: a directory key that carries one permission alone; Owners are outside its reach (2026-10-21).**
 - Details: `docs/phase4/07-sso-scim.md`, part B. Feature 16, part B.
@@ -261,7 +261,7 @@ CONSEQUENCES:
 - DELETE records that the person left and takes them out of the directory's reach (404 from then on, RFC 7644 3.6). Nothing is erased.
 - Deviations from SCIM, written down in the details: problem-details errors; JSON answers; two filters only; no groups or bulk.
 - No new library.
-- **For the founder to confirm:** Owners out of reach; no roles from the directory; removed people keep their history; the first customer's directory.
+- **Confirmed by the founder (2026-10-22, the recommended defaults):** Owners out of reach; no roles from the directory; removed people keep their history. Still open until a customer asks: the first customer's directory.
 
 **D35 — Bring-your-own-key: envelope encryption of the secrets the API keeps; documents and knowledge not yet (2026-10-21).**
 - Details: `docs/phase4/08-bring-your-own-key.md`. Feature 21, the key part; regional hosting stays in Batch C.
@@ -272,4 +272,4 @@ CONSEQUENCES:
 - Set and cleared by the platform operator only (platform permission `tenant:encryption_key`). A key that does not work is refused before use.
 - Key services: `none` (default) and `local` (a stand-in, refused in production). A real KMS is one adapter, and a founder decision (it needs a cloud account).
 - No new library.
-- **For the founder to confirm:** secrets first; operator sets the key; the 5-minute delay; which key service.
+- **Confirmed by the founder (2026-10-22, the recommended defaults):** secrets first (and no "your data under your key" claim until documents and knowledge are covered); the operator sets the key; the 5-minute delay. Still open until a customer asks: which key service.

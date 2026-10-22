@@ -411,7 +411,19 @@ Details: `07-sso-scim.md`, decisions D33 and D34.
 - **Locally, no database:**
   - API: 729 unit tests, type check, lint, contract lint;
   - web: 211 screen tests.
-- **CI (database and browser tests):** not yet run on this work at the time of writing. The commits wait for PR #2.
+- **CI, green on `main`** after merging PR #2 (merge commit `04ffaa4`,
+  [run 39772914102](https://github.com/Rmasood1122/LegacyAI/actions/runs/39772914102), 2026-10-22). All 10 jobs passed:
+  - API: 1,257 tests passed and 1 skipped, against PostgreSQL 18. This includes the SSO, SCIM and company-key
+    database tests, the contract walk and the route-policy coverage.
+  - Browser: 39 tests passed, including the Owner's company sign-in screen and its accessibility scan.
+  - Migrations: applied, rolled back and re-applied, with both engines agreeing.
+  - AI service: lint, strict type check and tests passed. The audit found no known vulnerabilities, with 24 pillow
+    advisories ignored by ID (D32).
+- **What the first CI runs found** (each fixed before the merge):
+  - PostgreSQL refused a function-level `SET` of a custom setting, so the SSO company lookup could not be created;
+  - the "Removed" message on the company sign-in screen disappeared together with the connection;
+  - two test mistakes (a too-short retry key, the wrong field for a card's id);
+  - new Python advisories, published overnight.
 
 ### What reviews found before the first push
 
@@ -448,7 +460,7 @@ those stop working, here and for everyone.
 ### What was measured
 
 - 12 unit tests locally.
-- The database tests run in CI only (not yet run at the time of writing).
+- The database tests passed in CI on `main` (the same run as step 7).
 - Tested only with a local stand-in key service; no real key service was used.
 
 ## Step 9 — Batch C, prepared (not complete)

@@ -140,9 +140,11 @@ fails whenever the constant is not the newest migration file.
     which takes longer than for an unknown card. ASSUMPTION: this tells an observer at most that the card's company
     brought a key, and that the card exists. The cache shortens the window; measuring it needs a real key service.
 
-## For the founder to confirm
+## Confirmed by the founder (2026-10-22: the recommended defaults)
 
-1. That covering secrets first, and documents and knowledge only after a separate design decision, is acceptable.
-2. That the operator, not the company's Owner, sets the key.
-3. The 5-minute delay before switching a key off takes effect.
-4. Which key service first (Google Cloud KMS fits the current hosting), when a customer asks.
+1. Secrets are covered first. Documents and knowledge come only after a separate design decision. **Until then,
+   nobody may tell a customer "your data is under your key".**
+2. The operator, not the company's Owner, sets the key.
+3. Switching a key off may take up to 5 minutes to take effect.
+
+Still open, because it needs a customer: which key service first (Google Cloud KMS fits the current hosting).
