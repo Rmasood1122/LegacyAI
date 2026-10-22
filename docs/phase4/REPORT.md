@@ -472,6 +472,16 @@ Details: `09-batch-c-prepared.md`.
   nothing is reachable through the API.
 - Passive capture, offline mode and regional hosting: written designs only, with the reasons.
 
+## Step 10 — e-mail through Resend (the founder's choice, 2026-10-22)
+
+Details: `06-open-api-webhooks-email.md`, part C, "Resend"; decision D36; runbook `docs/runbooks/outbound-delivery.md`.
+
+- `MAIL_SENDER=resend` sends each notice as one HTTPS request to Resend, with the message id as the idempotency key
+  (a retry is not sent twice). No library added.
+- Measured: 16 unit tests locally, against a local stand-in for Resend (see the details for the list).
+- **Not done or proven:** no Resend account, key or sending domain exists; no real e-mail has been sent. Whether
+  Resend's real answers match its documentation is an ASSUMPTION until the founder's first test e-mail.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

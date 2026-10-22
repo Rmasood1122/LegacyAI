@@ -71,9 +71,9 @@ export interface Config {
   /**
    * E-mail of notices (docs/phase4/06, part C). 'none' (default): no notice is queued and no e-mail leaves; notices
    * are written to the log as before. 'fake': a stand-in that sends nothing, for tests - refused unless NODE_ENV=test.
-   * No real e-mail service is connected yet (the founder chooses one).
+   * 'resend': Resend (decision D36), with the key in RESEND_API_KEY.
    */
-  mail: { sender: 'none' | 'fake'; from: string };
+  mail: { sender: 'none' | 'fake' | 'resend'; from: string; resendApiKey: Secret | null };
   /**
    * SSO (docs/phase4/07). Where a company's identity provider sends the browser back after a sign-in: a page of the
    * web application. Each company registers its own address under it (`<this>/<company id>`) at its provider.
@@ -309,7 +309,9 @@ export function loadConfig(env: Env): Config {
     webDistDir: raw('WEB_DIST_DIR') ?? null,
     payment: { provider: oneOf('PAYMENT_PROVIDER', ['none', 'fake'] as const, 'none'), eventKey: null },
     webhooks: { delivery: oneOf('WEBHOOK_DELIVERY', ['none', 'https'] as const, 'none') },
-    mail: { sender: oneOf('MAIL_SENDER', ['none', 'fake'] as const, 'none'), from: raw('MAIL_FROM') ?? 'LegacyAI <no-reply@localhost>' },
+    mail: {
+      sender: oneOf('MAIL_SENDER', ['none', 'fake', 'resend'] as const, 'none'), from: raw('MAIL_FROM') ?? 'LegacyAI <no-reply@localhost>', resendApiKey: null,
+    },
     sso: { redirectUri: raw('SSO_REDIRECT_URI') ?? `${allowedOrigins[0] ?? 'http://localhost:3000'}/sso/return` },
     keyService: { kind: oneOf('KEY_SERVICE', ['none', 'local'] as const, 'none'), localKeys: new Map() },
   };
@@ -347,6 +349,18 @@ export function loadConfig(env: Env): Config {
   }
   if (config.mail.sender === 'fake' && nodeEnv !== 'test') problems.push('MAIL_SENDER=fake sends nothing and is allowed only when NODE_ENV=test');
   if (/[\r\n]/.test(config.mail.from) || config.mail.from.length > 200) problems.push('MAIL_FROM must be one line of at most 200 characters');
+  if (config.mail.sender === 'resend') {
+    const key = raw('RESEND_API_KEY');
+    // Resend's keys start with re_; the placeholder in .env.example is re_FAKE_... and never sends from production
+    if (key === undefined || !/^re_[A-Za-z0-9_-]{8,200}$/.test(key)) problems.push('RESEND_API_KEY must be a Resend API key (re_...) when MAIL_SENDER=resend');
+    else if (nodeEnv === 'production' && key.startsWith('re_FAKE')) problems.push('RESEND_API_KEY is the placeholder from .env.example');
+    else config.mail.resendApiKey = new Secret(key);
+    // Resend sends only from a domain verified in the account: the default sender line cannot work
+    const address = /<([^<>]+)>\s*$/.exec(config.mail.from)?.[1] ?? config.mail.from;
+    if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(address) || /@localhost$/i.test(address)) {
+      problems.push('MAIL_FROM must be "Name <address@your-verified-domain>" when MAIL_SENDER=resend');
+    }
+  }
   const eventKeyText = raw('PAYMENT_EVENT_KEY');
   if (eventKeyText !== undefined) {
     const key = decodeKey('PAYMENT_EVENT_KEY', eventKeyText, 32);

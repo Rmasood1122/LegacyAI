@@ -6,7 +6,7 @@ Status on 2026-10-06:
 |---|---|---|
 | A | API keys for machines (read and ask only; since D34 also the directory key for SCIM, see `07-sso-scim.md`) | Built; CI green on 2026-10-04 (run 37225661324), database and browser tests included. |
 | B | Outgoing webhooks, one example receiver | Built; CI green on 2026-10-20 (run 39383861491), database and browser tests included. See Part B. |
-| C | E-mail delivery of notices | Built against a stand-in sender; CI green in the same run. **No real e-mail service is connected** (the founder chooses one). See Part C. |
+| C | E-mail delivery of notices | Built against a stand-in sender; CI green in the same run. Since 2026-10-22 a **Resend** sender (D36), tested only against a stand-in for Resend: **no real e-mail has been sent**. See Part C. |
 
 Nothing here calls an outside service in tests. No new library was added: webhooks use `node:https`, `node:dns` and
 `node:net`; the signature format is the open Standard Webhooks specification (checked 2026-10-06), implemented with
@@ -329,10 +329,42 @@ breaks, angle brackets, ...) is never handed to the sender.
 
 ### The sender
 
-A `MailSender` port with one stand-in: `fake` (sends nothing, keeps what it was given; accepted only when
-`NODE_ENV=test`). With `MAIL_SENDER=none` (the default) **nothing is queued and nothing is sent**; notices are
-logged as before. A real service is one more `MailSender`; which service and which sending domain (SPF, DKIM,
-DMARC) is the founder's choice.
+A `MailSender` port with two senders: `fake` (sends nothing, keeps what it was given; accepted only when
+`NODE_ENV=test`) and, since 2026-10-22, `resend` (decision D36). With `MAIL_SENDER=none` (the default) **nothing is
+queued and nothing is sent**; notices are logged as before.
+
+#### Resend (`MAIL_SENDER=resend`)
+
+`services/api/src/modules/mail/internal/resend.ts`. One message is one `POST https://api.resend.com/emails` with
+`Authorization: Bearer <RESEND_API_KEY>` and the body `{from, to: [address], subject, text}` (plain text only, as
+every notice is). Read from Resend's documentation on 2026-10-22:
+[send email](https://resend.com/docs/api-reference/emails/send-email), [errors](https://resend.com/docs/api-reference/errors).
+
+- **No double sending on a retry.** The message id (notice + person) is sent as `Idempotency-Key`. Resend sends a
+  message once per key for 24 hours; our retries (5 min, 30 min, 2 h, 12 h) end within about 15 hours.
+- **What an answer means.** 2xx: sent. 400, 422, or 409 `invalid_idempotent_request`: this message cannot be sent
+  as it is, so it is marked failed and not tried again. 401/403 (wrong key, sending domain not verified), 404, 405:
+  our set-up is wrong, not the address; the message is tried again (so it goes out once the operator fixes the
+  set-up) and a warning is logged with the message id and Resend's error name only - never the key, the address, the
+  text or Resend's message (which can contain an address). 409 in progress, 429, 5xx, no answer: tried again.
+- **The connection** goes through the platform's guarded HTTPS client: public addresses only, certificate checked,
+  no redirect, a 10-second deadline, at most 64 KB of answer read.
+- **Start-up refuses** `MAIL_SENDER=resend` without a key of Resend's form (`re_...`), the `.env.example`
+  placeholder key in production, and a `MAIL_FROM` that is not `Name <address>` or is on `localhost`.
+- **No library.** Resend's Node package would add code that runs with the key; the request is ten lines with
+  `node:https`.
+
+**What the founder does once (not done by me - it needs the founder's account):**
+
+1. Create a Resend account and add the sending domain (for example `mail.<your domain>`). Resend shows the DNS
+   records (SPF, DKIM); add them at the domain's DNS and wait until Resend says "verified". Add a DMARC record.
+2. Create an API key with **sending access only** for that domain.
+3. Put the key in Secret Manager as `RESEND_API_KEY`; set `MAIL_SENDER=resend` and
+   `MAIL_FROM=LegacyAI <no-reply@mail.<your domain>>` on the API service.
+4. Run the delivery job once and check one e-mail arrives (for example to your own address, from a test company).
+
+Prices read on 2026-10-22 from [resend.com/pricing](https://resend.com/pricing) (an automated summary of the page,
+re-check before paying): free plan 3,000 e-mails a month; Pro $20 a month for 50,000; Scale $90 a month for 100,000.
 
 ### When a notice is worked out
 
@@ -371,11 +403,20 @@ just being issued, and drop the e-mail). A request transaction open longer than 
   queues a test message, removes it).
 - **Not tested at all:** a real receiver on the internet; real DNS; behaviour behind the production egress (a
   proxy in front of outgoing connections would need a change); a real e-mail service; a scheduled delivery job.
+- **Resend sender (2026-10-22), run on the developer's machine (no database):** 16 unit tests - what each answer
+  from Resend means (2xx, 400, 401, 403, 404, 405, 409 both kinds, 422, 429, 500, 503, timeout, no answer, a body
+  that is not Resend's), the request against a local TLS stand-in for Resend (method, path, Bearer key, JSON body,
+  the same idempotency key on a retry), the warning in the log (contains the message id and the error name; does
+  not contain the key, the address, the text or Resend's message), timeout, an untrusted certificate (nothing sent,
+  not even the key), a private address refused before any connection, and the configuration rules.
+  **Not tested:** Resend itself (no account, no key, nothing sent); whether Resend's real answers match its
+  documentation; delivery to real mailboxes (spam folders, SPF/DKIM/DMARC).
 
 ## Decided (parts B and C)
 
-On 2026-10-20 the founder accepted the recommended defaults below (decision D31). Only item 5 (the e-mail service
-and sending domain) is still open; opting out of notices stays "no".
+On 2026-10-20 the founder accepted the recommended defaults below (decision D31). On 2026-10-22 the founder chose
+Resend as the e-mail service (D36). Still open from item 5: the sending domain (set up in the founder's Resend
+account); opting out of notices stays "no".
 
 ## For the founder to confirm (parts B and C) — as asked; see "Decided" above
 
