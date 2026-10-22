@@ -122,7 +122,7 @@ describe('the Owner sets up the company\'s provider', () => {
   it('only the Owner: an Admin can neither read, set up nor remove the connection', async () => {
     const admin = await addMember(t, tenant.owner, [{ role_key: 'admin' }]);
     expect((await admin.client.get('/v1/sso/connection')).status).toBe(403);
-    expect((await admin.client.request('PUT', '/v1/sso/connection', { name: 'x', issuer: idp.issuer, client_id: 'c', client_secret: 's' }, { idem: 'adm-1' })).status).toBe(403);
+    expect((await admin.client.request('PUT', '/v1/sso/connection', { name: 'x', issuer: idp.issuer, client_id: 'c', client_secret: 's' }, { idem: 'admin-put-0001' })).status).toBe(403);
     expect((await admin.client.post('/v1/sso/connection/remove')).status).toBe(403);
   });
 });

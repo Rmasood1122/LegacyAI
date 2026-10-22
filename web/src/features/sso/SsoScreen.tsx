@@ -32,9 +32,10 @@ export function SsoScreen() {
               <ErrorNote error={remove.error} />
               <ConfirmButton label="Remove the company sign-in" confirmLabel="Yes, remove it for good" resetKey="remove-sso"
                 busy={remove.isPending} onConfirm={() => remove.mutate({})} />
-              {remove.isSuccess && <Banner tone="success">Removed. {remove.data.factors_revoked} linked company account(s) no longer sign anyone in.</Banner>}
             </Card>
           )}
+          {/* outside the card above: once removed there is no connection, and the card is gone */}
+          {remove.isSuccess && <Banner tone="success">Removed. {remove.data.factors_revoked} linked company account(s) no longer sign anyone in.</Banner>}
         </>
       )}
     </Page>

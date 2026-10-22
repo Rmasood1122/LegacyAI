@@ -150,12 +150,12 @@ describe('provisioning people', () => {
     expect(card.status).toBe(201);
     const off = await directory(key, 'PATCH', `/Users/${created.body.id}`, { Operations: [{ op: 'Replace', path: 'active', value: 'False' }] });
     expect(off.body.active).toBe(false);
-    expect((await su.query('SELECT state, revoked_reason FROM cards WHERE id = $1', [card.body.id])).rows[0]).toEqual({ state: 'revoked', revoked_reason: 'offboarded' });
+    expect((await su.query('SELECT state, revoked_reason FROM cards WHERE id = $1', [card.body.card.id])).rows[0]).toEqual({ state: 'revoked', revoked_reason: 'offboarded' });
     expect((await su.query('SELECT status FROM people WHERE id = $1', [created.body.id])).rows[0].status).toBe('departed');
     // back again: the person is active, the card stays revoked (an administrator issues a new one)
     const on = await directory(key, 'PATCH', `/Users/${created.body.id}`, { Operations: [{ op: 'replace', value: { active: true } }] });
     expect(on.body.active).toBe(true);
-    expect((await su.query('SELECT state FROM cards WHERE id = $1', [card.body.id])).rows[0].state).toBe('revoked');
+    expect((await su.query('SELECT state FROM cards WHERE id = $1', [card.body.card.id])).rows[0].state).toBe('revoked');
   });
 
   it('DELETE: the person has left and leaves the directory\'s reach (404 from then on); the record and its history stay', async () => {

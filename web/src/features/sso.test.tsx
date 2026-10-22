@@ -141,6 +141,25 @@ describe('the Owner\'s company sign-in screen', () => {
     expect(document.body.textContent).not.toContain(CLIENT_SECRET);
   });
 
+  it('removing it asks twice, and the result stays on the screen after the connection is gone (found by the browser test)', async () => {
+    const user = userEvent.setup();
+    let stored: SsoConnection | null = conn;
+    const api = new FakeApi({
+      getSsoConnection: () => ({ connection: stored, redirect_uri: conn.redirect_uri }),
+      removeSsoConnection: () => {
+        stored = null;
+        return { removed: true as const, factors_revoked: 2 };
+      },
+    });
+    renderScreen(<SsoScreen />, { api, session: as(...OWNER) });
+    await user.click(await screen.findByRole('button', { name: 'Remove the company sign-in…' }));
+    expect(api.callsTo('removeSsoConnection')).toEqual([]);
+    await user.click(screen.getByRole('button', { name: 'Yes, remove it for good' }));
+    expect(await screen.findByText(/2 linked company account\(s\) no longer sign anyone in/)).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('Stored (never shown)')).toBeNull());   // the connection is gone ...
+    expect(screen.getByText(/no longer sign anyone in/)).toBeTruthy();                     // ... and the result is still there
+  });
+
   it('a card that may only read sees no form and no remove button', async () => {
     const api = new FakeApi({ getSsoConnection: () => ({ connection: conn, redirect_uri: conn.redirect_uri }) });
     renderScreen(<SsoScreen />, { api, session: as('getSsoConnection') });

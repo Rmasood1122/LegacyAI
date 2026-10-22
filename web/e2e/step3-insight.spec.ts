@@ -25,7 +25,8 @@ test('a card is shown as a QR code, and its address fills in the card number on 
   const picture = page.getByRole('img', { name: /^QR code that opens the sign-in screen for card LGY-\d{4}-\d{4}-\d{4}-\d{4}$/ });
   await expect(picture).toBeVisible();
   await expect(page.getByText('It holds the card number only.')).toBeVisible();
-  await expect(page.getByText(/NFC cards are not supported/)).toBeVisible();
+  // NFC (prepared, docs/phase4/09): the browser in CI has no Web NFC, so the screen says where a tag can be written
+  await expect(page.getByText(/open this screen in Chrome on an Android phone/)).toBeVisible();
   await checkScreen(page, '50-card-qr');
   const cardNumber = (await picture.getAttribute('aria-label') ?? '').slice(-23);
   expect(cardNumber).toMatch(/^LGY-\d{4}-\d{4}-\d{4}-\d{4}$/);
