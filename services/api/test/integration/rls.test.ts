@@ -73,7 +73,7 @@ describe('every tenant table has forced row-level security', () => {
     const scoped = rows.filter((r) => !exempt.has(r.table));
     // 24 from Phase 1 + 25 from Phase 2 (docs/phase2/02) + 6 from Phase 4 (answer_feedback, knowledge_item_conflicts,
     // anomaly_settings, card_anomaly_counters, person_leaving, retirement_nudges)
-    expect(scoped.length).toBe(68);   // + 3 for webhooks and e-mail (5 new tables; the 2 design-only ones they replace were already counted)   // + 1 for API keys (api_keys);   // + 4 for billing (subscriptions, invoices, payment_events, billing_notices);   // + 5 for scenario replay (scenarios, steps, step items, attempts, answers)
+    expect(scoped.length).toBe(69);   // + 1 for bring-your-own-key (company_data_keys)   // + 3 for webhooks and e-mail (5 new tables; the 2 design-only ones they replace were already counted)   // + 1 for API keys (api_keys);   // + 4 for billing (subscriptions, invoices, payment_events, billing_notices);   // + 5 for scenario replay (scenarios, steps, step items, attempts, answers)
     for (const r of scoped) {
       expect(r, `table ${r.table}`).toMatchObject({ enabled: true, forced: true });
       expect(r.policies, `table ${r.table} has no policy`).toBeGreaterThanOrEqual(1);

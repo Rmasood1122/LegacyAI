@@ -213,6 +213,7 @@ export class AuthService {
       let strong: StrongFactorProof | null = null;
       let newSignCount: number | null = null;
       let totpStep: number | null = null;
+      let companyKeyOut = false;
       const throttled = body.factor.type === 'totp' && before?.factor_throttled_until != null && before.factor_throttled_until.getTime() > ctx.now.getTime();
       if (body.factor.type === 'passkey') {
         const res = await verifyPasskeyAssertion({
@@ -229,9 +230,11 @@ export class AuthService {
         // the SC in the same request is right. A stranger guessing codes therefore learns nothing
         // during the pause, while the real cardholder - who knows the SC - can still sign in.
         const examine = !throttled || sc !== null;
+        // an unknown card has no company whose key could be asked (and nothing to open)
+        const sealer = card === null ? this.#d.sealing.platform : await this.#d.sealing.forTenant(tx, tenantId);
+        companyKeyOut = sealer.unavailable === true;
         const res = await verifyTotpCode({
-          // an unknown card has no company whose key could be asked (and nothing to open)
-          cipher: card === null ? this.#d.sealing.platform : await this.#d.sealing.forTenant(tx, tenantId),
+          cipher: sealer,
           aad: totpAad(tenantId), cardId: examine ? (card?.id ?? null) : null, credentials, code: body.factor.code,
           now: ctx.now, lastStep: before?.last_totp_step == null ? null : Number(before.last_totp_step),
         });
@@ -271,7 +274,9 @@ export class AuthService {
           if (sc !== null) await this.#countScFailure(tx, card, state, ctx);
           return fail('factor_throttled', card);
         }
-        if (body.factor.type === 'totp') await this.#countTotpFailure(tx, card, state, ctx);
+        // the company's own key out of reach (D35): no code could verify, so none is counted as wrong - an outage at the
+        // company's key service must not pause its people's cards
+        if (body.factor.type === 'totp' && !companyKeyOut) await this.#countTotpFailure(tx, card, state, ctx);
         return fail('bad_factor', card);
       }
       // From here on the caller has proved possession of the card's strong factor.

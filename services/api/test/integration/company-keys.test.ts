@@ -59,7 +59,7 @@ describe('setting a company\'s key', () => {
     expect((await keyOf(op, tenant, 'local:acme')).body).toMatchObject({ key_ref: 'local:acme', version: 1, earlier_versions: 0 });
     expect((await keyOf(op, tenant, 'local:spare')).body).toMatchObject({ key_ref: 'local:spare', version: 2, earlier_versions: 1 });
     expect((await keyOf(op, tenant, null)).body).toMatchObject({ key_ref: null, version: null, earlier_versions: 2 });
-    const rows = await su.query(`SELECT actor_kind, reason_code, details::text AS details FROM audit_log WHERE tenant_id = $1 AND action = 'tenant:encryption_key' ORDER BY seq`, [tenant.tenantId]);
+    const rows = await su.query(`SELECT actor_kind, reason_code, details::text AS details FROM audit_log WHERE tenant_id = $1 AND action = 'tenant:encryption_key' AND decision = 'event' ORDER BY seq`, [tenant.tenantId]);
     expect(rows.rows.map((r) => [r.actor_kind, r.reason_code])).toEqual([['operator', 'COMPANY_KEY_SET'], ['operator', 'COMPANY_KEY_SET'], ['operator', 'COMPANY_KEY_CLEARED']]);
     for (const r of rows.rows) expect(r.details ?? '').not.toContain('local:');
     // a version never changes, and nothing is deleted

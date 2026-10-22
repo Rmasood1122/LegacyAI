@@ -106,10 +106,14 @@ describe('a company\'s sealer', () => {
     const sealed = (await sealing.forTenant(tx, TENANT)).encrypt('seed', 'aad');
     ks.disable('acme');
     const off = await sealing.forTenant(tx, TENANT);
+    // callers learn it is an outage, not a mistake: no wrong code is counted, no delivery attempt used up
+    expect(off.unavailable).toBe(true);
     expect(off.decrypt(sealed.ciphertext, sealed.keyId, 'aad')).toBeNull();
     expect(() => off.encrypt('another', 'aad')).toThrow(expect.objectContaining({ status: 503, code: 'company-key-unavailable' }));
     ks.enable('acme');
-    expect((await sealing.forTenant(tx, TENANT)).decrypt(sealed.ciphertext, sealed.keyId, 'aad')).toBe('seed');
+    const on = await sealing.forTenant(tx, TENANT);
+    expect(on.unavailable).toBe(false);
+    expect(on.decrypt(sealed.ciphertext, sealed.keyId, 'aad')).toBe('seed');
   });
 
   it('a change of key retires the live version; what the old version sealed opens while the old key works', async () => {

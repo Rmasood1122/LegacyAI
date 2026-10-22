@@ -45,6 +45,10 @@ export const ALLOWED_DETAIL_KEYS: ReadonlySet<string> = new Set([
   'api_key_id',
   // Phase 4 (webhooks): which endpoint - its id, never its address or secret
   'webhook_id',
+  // Phase 4 (SSO): which connection - its id, never its client secret
+  'sso_connection_id',
+  // Phase 4 (bring-your-own-key): which version of the company's data key - never a key or its reference
+  'key_version',
 ]);
 
 const FORBIDDEN_VALUE = /\b\d{16}\b/;

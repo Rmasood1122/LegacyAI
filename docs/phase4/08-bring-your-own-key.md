@@ -41,6 +41,13 @@ costs. It is the main remaining gap, and the founder must know it before anyone 
     Passkey sign-ins do not depend on a sealed secret and keep working;
   - nothing new is sealed with the platform's key instead. Setting up an authenticator app, adding a webhook or saving
     an SSO connection answers **503** `company-key-unavailable`.
+- **Only what was sealed after the key was brought.** Secrets sealed before the company brought its key stay sealed
+  with the platform's key, and switching the company's key off does not lock them. Nothing seals them again yet: the
+  person sets up the authenticator app again, the Owner rotates the webhook secret and saves the SSO secret again.
+  Re-sealing in bulk is not built.
+- **An outage is not a mistake.** While the company's key is out of reach:
+  - a failed authenticator code is not counted against the card, so an outage does not pause people's cards;
+  - webhook deliveries are not attempted. They wait for the next run instead of using up their retries.
 - **Delay.** Unwrapped data keys are kept in memory for at most **5 minutes**, so switching the key off takes effect
   within that time, not at once.
 - **Changing key.** Each change makes a new version of the data key, and the old version is retired. What the old
@@ -90,9 +97,22 @@ opened.
 `tenants.encryption_key_ref` (a Phase 1 placeholder) stays unused. The application may not update tenant rows, and the
 reference belongs with the wrapped key it opens.
 
+## Known limits (from the review)
+
+- **Timing:** a sign-in of such a company with a known card may ask the key service when the cache is empty; an
+  unknown card does not. With a real key service this difference could show that a card exists (see below).
+- **Race:** a secret sealed at the very moment the operator sets the key can still be sealed with the platform's key.
+- **Faults:** a key service fault other than "key unavailable" (a future adapter's bug) gives a 500, not the fail-closed
+  answer.
+- **No binding:** the key reference is not bound to the company. The operator could point one company at another
+  company's key. Only the operator can set keys, and every change is in both audit logs.
+
 ## Found on the way
 
-The readiness check (`/v1/ready`) compares the database's newest migration with a constant in the code. The SSO commit
+- `sso_connection_id`, which the SSO step writes to the audit log, was in the database's list of allowed detail keys
+  but not in the server's own list. Saving or removing an SSO connection would have failed with a 500. It is fixed
+  here, together with `key_version`.
+- The readiness check (`/v1/ready`) compares the database's newest migration with a constant in the code. The SSO commit
 did not raise it, so readiness would have said "not ready". It now names this step's migration, and a new unit test
 fails whenever the constant is not the newest migration file.
 

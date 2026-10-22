@@ -181,6 +181,9 @@ export class WebhookStore {
 
   /** A new secret at once; the old one stops being used for the next attempt. Null = no such live endpoint. */
   async rotate(tx: Tx, tenantId: string, id: string, now: Date): Promise<{ row: EndpointRow; secret: string } | null> {
+    // a removed endpoint is answered as such before anything is sealed (with the company's key off, that would be a 503)
+    const live = await tx.query('SELECT 1 FROM webhook_endpoints WHERE tenant_id = $1 AND id = $2 AND removed_at IS NULL', [tenantId, id]);
+    if (live.rowCount === 0) return null;
     const secret = newSigningSecret();
     const sealed = (await this.#sealing.forTenant(tx, tenantId)).encrypt(secret, secretAad(tenantId, id));
     const { rows } = await tx.query<EndpointRow>(

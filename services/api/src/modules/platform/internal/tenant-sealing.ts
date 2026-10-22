@@ -23,6 +23,11 @@ import type { SealingCipher } from './sealing.ts';
 
 /** What every place that seals a company's secret uses. The same shape as SealingCipher. */
 export interface Sealer {
+  /**
+   * True when the company brought its own key and it cannot be used right now. Callers must then not count what fails
+   * as somebody's mistake (a wrong authenticator code, a failed webhook delivery): an outage is not an attempt.
+   */
+  readonly unavailable?: boolean;
   encrypt(plaintext: string, aad: string): { ciphertext: Buffer; keyId: string };
   /** Null (never throws) when the value was altered or its key cannot be used. */
   decrypt(ciphertext: Buffer, keyId: string, aad: string): string | null;
@@ -109,6 +114,7 @@ export class TenantSealing {
     const live = rows.find((r) => r.retired_at === null) ?? null;
     const platform = this.#platform;
     return {
+      unavailable: [...keys.values()].some((k) => k === null),
       encrypt(plaintext, aad) {
         if (live === null) return platform.encrypt(plaintext, aad);
         const key = keys.get(live.version) ?? null;

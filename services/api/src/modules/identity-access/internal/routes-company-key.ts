@@ -59,7 +59,7 @@ export function companyKeyRoutes(deps: { db: Database; sealing: TenantSealing })
           if (set === 'unavailable') throw problems.unprocessable("The company's key could not be used: check that the platform was given access to it at the key service");
           // the company's own log records an operator action (no reference: it names the company's key service)
           await writeAudit(tx, {
-            tenantId, actorKind: 'operator', action: 'tenant:encryption_key', resourceType: 'tenant', resourceId: tenantId, decision: 'event',
+            tenantId, actorCardId: subject.card_id, actorKind: 'operator', action: 'tenant:encryption_key', resourceType: 'tenant', resourceId: tenantId, decision: 'event',
             reasonCode: ref === null ? 'COMPANY_KEY_CLEARED' : 'COMPANY_KEY_SET', requestId: ctx.requestId, ip: ctx.ip,
             ...(set.version === null ? {} : { details: { key_version: set.version } }),
           });
