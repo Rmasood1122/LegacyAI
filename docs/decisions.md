@@ -227,3 +227,49 @@ CONSEQUENCES:
 - Known and accepted: a notice from a request that is later rolled back is still queued (as it was always still logged); nothing schedules the delivery job; no real receiver, DNS or production egress was tested.
 - **Confirmed by the founder on 2026-10-20 ("use recommendations"):** the recommended defaults stand - the three knowledge events; Owner only; the limits (10 endpoints, 8 attempts over about two days, pause after 15 failures and a day); no backlog for paused endpoints; no opt-out of notices; the recipient table and the wording as written; the delivery job runs every minute once it is scheduled (scheduling it is infrastructure the founder applies; not done here).
 - **Still open:** which e-mail service and sending domain (no recommendation was made; e-mail cannot be switched on until this is chosen).
+
+**D32 — Eight pillow advisories accepted by ID until a fixed pillow can be installed (2026-10-21, founder's choice).**
+- pillow 12.3.0 (installed only because fastembed needs it) has eight advisories fixed only in pillow 13.0.0, a new major version released 2026-10-16. fastembed refuses pillow 13 in every release, and D2 asks for 60 days.
+- The AI service runs fastembed's text embedding only; nothing imports pillow, so the affected image decoders never run.
+- Chosen (founder, from three options): ignore exactly these eight IDs in the CI audit, with the reason next to them; any other advisory still fails. Rejected: forcing pillow 13 against fastembed's declared limit and D2; leaving CI red.
+- pypdf moved 6.19.0 -> 6.20.1 for its four advisories (same major version; D2 does not apply).
+- 2026-10-22 (founder's choice, same reasoning): 16 more pillow advisories, again fixed only in 13.0.0, accepted by ID: CVE-2026-112402, CVE-2026-112900, CVE-2026-112893, CVE-2026-112392, CVE-2026-112891, CVE-2026-112405, CVE-2026-112390, CVE-2026-112401, CVE-2026-112901, CVE-2026-112391, CVE-2026-112894, CVE-2026-112406, CVE-2026-112399, CVE-2026-112892, CVE-2026-112393, CVE-2026-112396. pypdf 6.20.1 -> 6.21.1 for CVE-2026-113786 (same major version).
+- Re-check when fastembed allows pillow 13 and pillow 13 is 60 days old (2026-12-15). Details: docs/DEPENDENCIES.md 9.1.
+
+**D33 — SSO: the company's identity provider is a strong factor, chosen by the company the person names, linked by the provider's subject (2026-10-21).**
+- Details: `docs/phase4/07-sso-scim.md`, part A. Feature 16, part A (SCIM follows).
+- Phase 1's rule kept: an SSO sign-in counts as the strong factor and never replaces the card or the 3-digit code.
+- OpenID Connect only (authorization code + PKCE, confidential client). Rejected for now: SAML (an XML-signature library and its history of signature-wrapping flaws; no customer asked yet).
+- **The provider is chosen by the company the person names, never by the card**, so the answer cannot reveal whether a card number exists. Price: the person types the company's short name.
+- An identity is the provider's `sub`, linked to a card only during the card's set-up (set-up token + 3-digit code). Never by e-mail address. One identity opens at most one live card.
+- The provider's tokens are checked with `jose` (already a dependency): published keys, asymmetric algorithms only, issuer, audience/azp, expiry, age, nonce. All requests through the guarded https client shared with webhooks (moved to the platform module).
+- The API swaps the sign-in step for a new one carrying the vouched-for identity. Every failure is one 401.
+- **Each company has its own return address** (`/sso/return/<company id>`). A code that comes back to another company's address than the flow's is refused, and so is a provider `iss` (RFC 9207) other than the flow's. This defends against the "mix-up" of one hostile company's provider with another's.
+- **Only the browser that started can finish:** an HttpOnly, SameSite=Strict cookie is set at start and required at finish. This is the one thing kept in the browser between the steps, and the page cannot read it.
+- The issuer and all endpoints follow the webhook address rules (https, port 443, host name, not internal). The sign-in page must be on the issuer's host.
+- The client secret is stored encrypted (it must be sent again), never shown again. One connection per company; its provider never changes.
+- Removing the connection revokes the SSO factors, ends their sessions and (D30) the API keys of those cards.
+- The rollback refuses to run when SSO credentials exist (the append-only card history refers to them).
+- **For the founder to confirm:** which providers first; Owner only; that people type the company's short name; that removal ends those people's API keys.
+
+**D34 — SCIM: a directory key that carries one permission alone; Owners are outside its reach (2026-10-21).**
+- Details: `docs/phase4/07-sso-scim.md`, part B. Feature 16, part B.
+- This changes D30, which said a key can only read and ask. The one exception is the **directory key**: an API key carrying `person:scim` and nothing else. The API, the database (`api_keys_directory_key_alone`) and the policy on every request all refuse any mix.
+- `person:scim` is **key-only**. The Owner's role holds it so that an Owner can make the key. A signed-in card is refused (`DENY_KEY_ONLY`), and the session does not report it.
+- The directory adds people (with no card), changes their names and addresses, and records that they left: their cards are revoked, through the same function an administrator's offboarding uses. It never issues cards, gives roles or touches knowledge.
+- It reaches only the people it added. It **never reaches anyone whose card holds the Owner role** (`DENY_DIRECTORY_OWNER`), so a directory mistake or attack cannot lock the company out.
+- DELETE records that the person left and takes them out of the directory's reach (404 from then on, RFC 7644 3.6). Nothing is erased.
+- Deviations from SCIM, written down in the details: problem-details errors; JSON answers; two filters only; no groups or bulk.
+- No new library.
+- **For the founder to confirm:** Owners out of reach; no roles from the directory; removed people keep their history; the first customer's directory.
+
+**D35 — Bring-your-own-key: envelope encryption of the secrets the API keeps; documents and knowledge not yet (2026-10-21).**
+- Details: `docs/phase4/08-bring-your-own-key.md`. Feature 21, the key part; regional hosting stays in Batch C.
+- A company's own key (at a key service the company controls) wraps a data key of the company's. The API stores only the wrapped key (`company_data_keys`) and never sees the company's key.
+- Covered: authenticator-app seeds, webhook signing secrets, SSO client secrets. One sealer decides per company; the key id stored with a secret says which key opens it, so earlier secrets keep opening.
+- **Not covered: documents and knowledge.** Search needs the database to read them. A separate design decision is needed before anyone promises "your data under your key".
+- Fail closed: with the key off nothing of it opens, and nothing new is sealed with the platform's key (503 `company-key-unavailable`). Unwrapped keys are cached for at most 5 minutes.
+- Set and cleared by the platform operator only (platform permission `tenant:encryption_key`). A key that does not work is refused before use.
+- Key services: `none` (default) and `local` (a stand-in, refused in production). A real KMS is one adapter, and a founder decision (it needs a cloud account).
+- No new library.
+- **For the founder to confirm:** secrets first; operator sets the key; the 5-minute delay; which key service.

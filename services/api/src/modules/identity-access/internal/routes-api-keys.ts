@@ -23,6 +23,7 @@ const PROBLEM_TEXT: Readonly<Record<KeyRequestProblem, string>> = {
   'bad-expiry': 'A key must expire within a year',
   'bad-networks': 'The list of networks cannot be read',
   'bad-ask-limit': 'The number of questions per hour is outside what a key may have',
+  'directory-key-alone': 'A directory key (person:scim) can do nothing else: make it on its own',
 };
 
 /** Of everything a card holds, what a key made by it may carry: permission -> highest level. Pure. */

@@ -7,16 +7,16 @@
 // any title, text or name - events hold identifiers and labels only.
 //
 // Nothing here imports another feature module: the platform gives it the database, the notifier and the keyring.
-import { SealingCipher, type Config, type Database, type Notifier, type RouteDef, type Tx } from '../platform/index.ts';
+import type { Config, Database, Notifier, RouteDef, TenantSealing, Tx } from '../platform/index.ts';
 import { runCompany, type RunResult } from './internal/deliver.ts';
 import { WebhookStore } from './internal/endpoints.ts';
 import { webhookRoutes } from './internal/routes.ts';
 import { HttpsTransport, type WebhookTransport } from './internal/transport.ts';
 
-export { checkedAddress, isPublicAddress, MAX_URL_LENGTH, urlProblem, type AddressProblem, type ResolvedAddress, type Resolver } from './internal/address.ts';
+export { checkedAddress, isPublicAddress, MAX_URL_LENGTH, pinnedLookup, urlProblem, type AddressProblem, type ResolvedAddress, type Resolver } from '../platform/index.ts';
 export { endpointGets, messageBody, nextAttemptAt, shouldPause, TEST_TOPIC, TOPIC_TEXT, TOPICS, WEBHOOK_LIMITS, type OutboxEvent, type Topic } from './internal/rules.ts';
 export { newSigningSecret, SECRET_PREFIX, SIGNATURE_TOLERANCE_SECONDS, signatureOf, signedHeaders, verifySignature } from './internal/signing.ts';
-export { HttpsTransport, pinnedLookup, type HttpsTransportOptions, type SendError, type SendOutcome, type WebhookRequest, type WebhookTransport } from './internal/transport.ts';
+export { HttpsTransport, type HttpsTransportOptions, type SendError, type SendOutcome, type WebhookRequest, type WebhookTransport } from './internal/transport.ts';
 export { fanOut, type RunResult } from './internal/deliver.ts';
 export { secretAad, statusOf } from './internal/endpoints.ts';
 
@@ -38,10 +38,12 @@ export interface WebhooksModule {
 
 export function createWebhooks(deps: {
   config: Config; db: Database; notifier: Notifier;
+  /** Seals endpoint signing secrets: with the platform's key, or the company's own (D35). */
+  sealing: TenantSealing;
   /** For tests: a stand-in sender. Default: HttpsTransport when WEBHOOK_DELIVERY=https, otherwise nothing is sent. */
   transport?: WebhookTransport;
 }): WebhooksModule {
-  const store = new WebhookStore(new SealingCipher(deps.config.credentialEnc));
+  const store = new WebhookStore(deps.sealing);
   const transport = deps.transport ?? (deps.config.webhooks.delivery === 'https' ? new HttpsTransport() : null);
   const deliveryEnabled = transport !== null;
   return {

@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { NavLink, Route, Routes } from 'react-router';
 import { EnrollScreen } from './features/auth/EnrollScreen.tsx';
 import { SignInScreen } from './features/auth/SignInScreen.tsx';
+import { SsoReturnScreen } from './features/auth/SsoReturnScreen.tsx';
 import { dropCardFragment } from './navigation/cardLink.ts';
 import { mayOpen } from './navigation/routes.ts';
 import { SCREENS } from './screens.tsx';
@@ -21,6 +22,7 @@ export function App() {
       <main id="main">
         <Routes>
           <Route path="/set-up" element={<EnrollScreen />} />
+          <Route path="/sso/return/:tenantId" element={<SsoReturnScreen />} />
           <Route path="*" element={<SignInScreen />} />
         </Routes>
       </main>

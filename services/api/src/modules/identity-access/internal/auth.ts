@@ -14,18 +14,19 @@ import { problems } from '../../../shared/errors.ts';
 import type { RequestContext } from '../../../shared/policy-types.ts';
 import {
   getSettings, getTenant, PLATFORM_TENANT_ID, writeAudit,
-  type Database, type HandlerResult, type Notifier, type RateLimiter, type Tx,
+  type Database, type HandlerResult, type Notifier, type RateLimiter, type TenantSealing, type Tx,
 } from '../../platform/index.ts';
 import type { AnomalyGuard } from './anomaly.ts';
 import type { Authorizer } from './authz.ts';
 import { maskCardNumber, normalizeCardNumber } from './card-number.ts';
 import { CARD_COLUMNS, type CardRow, type CardService } from './cards.ts';
 import {
-  newTotpSecret, passkeyLoginOptions, passkeyRegistrationOptions, verifyPasskeyAssertion, verifyPasskeyRegistration,
-  verifyTotpCode, verifyTotpEnrollment, type SeedCipher, type StoredCredential, type StrongFactorProof, type WebAuthnSettings,
+  newTotpSecret, passkeyLoginOptions, passkeyRegistrationOptions, verifyPasskeyAssertion, verifyPasskeyRegistration, verifySsoFactor,
+  verifyTotpCode, verifyTotpEnrollment, type FactorType, type StoredCredential, type StrongFactorProof, type WebAuthnSettings,
 } from './factors.ts';
 import { effectiveState } from './lifecycle.ts';
 import type { ScProof, SecretCodeHasher } from './secret-code.ts';
+import { ssoIdentityOf, type SsoService } from './sso.ts';
 import { createSession, resolveSession, revokeSession, subjectForCard, VerifiedLogin } from './sessions.ts';
 
 export interface AuthLimits {
@@ -62,7 +63,8 @@ interface AuthStateRow {
 export interface AuthDeps {
   db: Database;
   hasher: SecretCodeHasher;
-  cipher: SeedCipher;
+  /** Seals authenticator-app seeds: with the platform's key, or the company's own (D35). */
+  sealing: TenantSealing;
   cards: CardService;
   authorizer: Authorizer;
   rateLimiter: RateLimiter;
@@ -71,9 +73,10 @@ export interface AuthDeps {
   webauthn: WebAuthnSettings;
   hmacKey: Buffer;
   limits: AuthLimits;
+  sso: SsoService;
 }
 
-const CREDENTIAL_COLUMNS = `id, card_id, type, webauthn_credential_id, webauthn_public_key, webauthn_sign_count::text AS webauthn_sign_count,
+const CREDENTIAL_COLUMNS = `id, card_id, type, sso_connection_id, sso_subject, webauthn_credential_id, webauthn_public_key, webauthn_sign_count::text AS webauthn_sign_count,
   webauthn_transports, totp_secret_enc, totp_key_id`;
 
 export class AuthService {
@@ -112,6 +115,32 @@ export class AuthService {
     );
   }
 
+  // -------------------------------------------------------- SSO: start and finish
+
+  /** The provider's sign-in page for a sign-in or set-up step in progress (D33). The same limits as signing in. */
+  async ssoStart(ctx: RequestContext, body: { txn: string; company?: string }): Promise<HandlerResult> {
+    await this.#enforceLimits(ctx);
+    const started = await this.#d.sso.start(this.#d.db, { txn: body.txn, company: body.company, ip: ctx.ip, now: ctx.now });
+    if (started === null) throw problems.authFailed();
+    // the browser that started is the only one that can finish (see SsoService.finish)
+    return { body: { authorization_url: started.url }, setFlowCookie: started.browserToken };
+  }
+
+  /** Back from the provider: the step to continue with, now carrying the identity the provider vouched for. */
+  async ssoFinish(
+    ctx: RequestContext, body: { state: string; code: string; tenant_id: string; iss?: string }, browserToken: string | undefined,
+  ): Promise<HandlerResult> {
+    await this.#enforceLimits(ctx);
+    const next = await this.#d.sso.finish(this.#d.db, {
+      state: body.state, code: body.code, returnedTo: body.tenant_id, iss: body.iss, browserToken, ip: ctx.ip, now: ctx.now,
+    });
+    if (next === null) throw problems.authFailed();
+    return {
+      body: next.purpose === 'login' ? { purpose: 'login', login_txn: next.txn } : { purpose: 'enroll', enrollment_txn: next.txn },
+      setFlowCookie: null,
+    };
+  }
+
   // ----------------------------------------------------------------- login: begin
 
   async loginBegin(ctx: RequestContext, body: { card_number: string }): Promise<HandlerResult> {
@@ -136,7 +165,7 @@ export class AuthService {
 
   async loginVerify(
     ctx: RequestContext,
-    body: { login_txn: string; sc: string; factor: { type: 'passkey'; assertion: unknown } | { type: 'totp'; code: string } },
+    body: { login_txn: string; sc: string; factor: { type: 'passkey'; assertion: unknown } | { type: 'totp'; code: string } | { type: 'sso' } },
   ): Promise<HandlerResult> {
     await this.#enforceLimits(ctx);
     const { db } = this.#d;
@@ -184,6 +213,7 @@ export class AuthService {
       let strong: StrongFactorProof | null = null;
       let newSignCount: number | null = null;
       let totpStep: number | null = null;
+      let companyKeyOut = false;
       const throttled = body.factor.type === 'totp' && before?.factor_throttled_until != null && before.factor_throttled_until.getTime() > ctx.now.getTime();
       if (body.factor.type === 'passkey') {
         const res = await verifyPasskeyAssertion({
@@ -191,13 +221,21 @@ export class AuthService {
           expectedChallenge: txn?.challenge ?? 'no-such-challenge',
         });
         if (res) ({ proof: strong, newSignCount } = res);
+      } else if (body.factor.type === 'sso') {
+        // The company's provider signed this person in during THIS step (sso.ts finish) - as an identity linked to
+        // this card through the company's current connection, or it proves nothing (D33).
+        strong = verifySsoFactor({ tenantId, cardId: card?.id ?? null, credentials, identity: ssoIdentityOf(txn?.payload) });
       } else {
         // While TOTP is paused for this card (too many wrong codes), a code is examined ONLY when
         // the SC in the same request is right. A stranger guessing codes therefore learns nothing
         // during the pause, while the real cardholder - who knows the SC - can still sign in.
         const examine = !throttled || sc !== null;
+        // an unknown card has no company whose key could be asked (and nothing to open)
+        const sealer = card === null ? this.#d.sealing.platform : await this.#d.sealing.forTenant(tx, tenantId);
+        companyKeyOut = sealer.unavailable === true;
         const res = await verifyTotpCode({
-          cipher: this.#d.cipher, aad: totpAad(tenantId), cardId: examine ? (card?.id ?? null) : null, credentials, code: body.factor.code,
+          cipher: sealer,
+          aad: totpAad(tenantId), cardId: examine ? (card?.id ?? null) : null, credentials, code: body.factor.code,
           now: ctx.now, lastStep: before?.last_totp_step == null ? null : Number(before.last_totp_step),
         });
         if (res) ({ proof: strong, step: totpStep } = res);
@@ -212,7 +250,11 @@ export class AuthService {
       // active factor - otherwise a sign-in already in flight would outlive the reset.
       if (strong !== null || sc !== null) {
         const stillActive = strong === null ? null : (await tx.query(
-          `SELECT 1 FROM credentials WHERE id = $1 AND tenant_id = $2 AND card_id = $3 AND status = 'active'`, [strong.credentialId, tenantId, card.id])).rowCount;
+          // an SSO factor also needs its connection still switched on (switching it off stops sign-ins already under way)
+          `SELECT 1 FROM credentials c WHERE c.id = $1 AND c.tenant_id = $2 AND c.card_id = $3 AND c.status = 'active'
+              AND (c.type <> 'sso' OR EXISTS (SELECT 1 FROM sso_connections s
+                                               WHERE s.tenant_id = c.tenant_id AND s.id = c.sso_connection_id AND s.enabled AND s.removed_at IS NULL))`,
+          [strong.credentialId, tenantId, card.id])).rowCount;
         const currentSecret = (await tx.query<{ id: string }>(
           `SELECT id FROM card_secrets WHERE tenant_id = $1 AND card_id = $2 AND status = 'current'`, [tenantId, card.id])).rows[0]?.id ?? null;
         if (stillActive === 0 || (sc !== null && currentSecret !== secret?.id)) return fail('superseded', card);
@@ -232,7 +274,9 @@ export class AuthService {
           if (sc !== null) await this.#countScFailure(tx, card, state, ctx);
           return fail('factor_throttled', card);
         }
-        if (body.factor.type === 'totp') await this.#countTotpFailure(tx, card, state, ctx);
+        // the company's own key out of reach (D35): no code could verify, so none is counted as wrong - an outage at the
+        // company's key service must not pause its people's cards
+        if (body.factor.type === 'totp' && !companyKeyOut) await this.#countTotpFailure(tx, card, state, ctx);
         return fail('bad_factor', card);
       }
       // From here on the caller has proved possession of the card's strong factor.
@@ -351,7 +395,7 @@ export class AuthService {
 
   async enrollmentBegin(
     ctx: RequestContext,
-    body: { card_number: string; sc: string; enrollment_token: string; factor_type: 'passkey' | 'totp'; label?: string },
+    body: { card_number: string; sc: string; enrollment_token: string; factor_type: FactorType; label?: string },
   ): Promise<HandlerResult> {
     await this.#enforceLimits(ctx);
     const resolved = await this.#resolveCard(body.card_number);
@@ -391,12 +435,19 @@ export class AuthService {
       if (card.kind !== 'person' || (effective !== 'issued' && effective !== 'active')) return fail('state');
       const settings = await getSettings(tx, tenantId);
       if (!settings.allowed_factor_types.includes(body.factor_type)) return fail('state');
+      if (body.factor_type === 'sso') {
+        const live = await tx.query(`SELECT 1 FROM sso_connections WHERE tenant_id = $1 AND removed_at IS NULL AND enabled`, [tenantId]);
+        if (live.rowCount === 0) return fail('state');
+      }
 
       const token = randomToken(32);
       const payload: Record<string, unknown> = { factor_type: body.factor_type, label: body.label ?? '', enrollment_token_id: tokenRow.id };
       const out: Record<string, unknown> = { enrollment_txn: token, factor_type: body.factor_type };
       let challenge = 'totp';
-      if (body.factor_type === 'passkey') {
+      if (body.factor_type === 'sso') {
+        // the browser now signs in at the provider (sso.ts start/finish) and completes with the step it gets back
+        challenge = 'sso';
+      } else if (body.factor_type === 'passkey') {
         const existing = await tx.query<{ webauthn_credential_id: string }>(
           `SELECT webauthn_credential_id FROM credentials WHERE tenant_id = $1 AND card_id = $2 AND type = 'passkey' AND status = 'active'`,
           [tenantId, card.id]);
@@ -408,7 +459,7 @@ export class AuthService {
         out.webauthn_options = reg.options;
       } else {
         const totp = newTotpSecret(this.#d.webauthn.rpName, maskCardNumber(card.card_number));
-        const enc = this.#d.cipher.encrypt(totp.secret, totpAad(tenantId));
+        const enc = (await this.#d.sealing.forTenant(tx, tenantId)).encrypt(totp.secret, totpAad(tenantId));
         payload.totp_secret_enc = enc.ciphertext.toString('base64');
         payload.totp_key_id = enc.keyId;
         out.totp = { secret: totp.secret, otpauth_uri: totp.uri };
@@ -433,7 +484,7 @@ export class AuthService {
     await this.#enforceLimits(ctx);
     const consumed = await this.#d.db.global<{
       tenant_id: string; card_id: string; challenge: string;
-      payload: { factor_type: 'passkey' | 'totp'; label: string; enrollment_token_id: string; totp_secret_enc?: string; totp_key_id?: string };
+      payload: { factor_type: FactorType; label: string; enrollment_token_id: string; totp_secret_enc?: string; totp_key_id?: string; sso?: unknown };
     }>(
       `UPDATE auth_transactions SET consumed_at = $2
         WHERE txn_hash = $1 AND purpose = 'enroll' AND consumed_at IS NULL AND expires_at > $2
@@ -454,12 +505,19 @@ export class AuthService {
         : null;
       let totpSecretEnc: Buffer | null = null;
       let totpStep: number | null = null;
+      const identity = txn.payload.factor_type === 'sso' ? ssoIdentityOf(txn.payload) : null;
       if (txn.payload.factor_type === 'passkey') {
         if (!reg) return false;
+      } else if (txn.payload.factor_type === 'sso') {
+        // the provider vouched for this identity during this set-up, through the company's connection that is still live
+        if (identity === null || identity.tenantId !== txn.tenant_id) return false;
+        const live = await tx.query(`SELECT 1 FROM sso_connections WHERE tenant_id = $1 AND id = $2 AND removed_at IS NULL AND enabled`,
+          [txn.tenant_id, identity.connectionId]);
+        if (live.rowCount === 0) return false;
       } else {
         if (typeof body.totp_code !== 'string' || !txn.payload.totp_secret_enc || !txn.payload.totp_key_id) return false;
         totpSecretEnc = Buffer.from(txn.payload.totp_secret_enc, 'base64');
-        const secret = this.#d.cipher.decrypt(totpSecretEnc, txn.payload.totp_key_id, totpAad(txn.tenant_id));
+        const secret = (await this.#d.sealing.forTenant(tx, txn.tenant_id)).decrypt(totpSecretEnc, txn.payload.totp_key_id, totpAad(txn.tenant_id));
         if (secret === null) return false;
         totpStep = await verifyTotpEnrollment(secret, body.totp_code, ctx.now);
         if (totpStep === null) return false;
@@ -471,7 +529,15 @@ export class AuthService {
       if (claimed.rowCount !== 1) return false;
 
       let credentialId: string;
-      if (reg) {
+      if (identity !== null) {
+        const inserted = await tx.query<{ id: string }>(
+          `INSERT INTO credentials (tenant_id, card_id, type, label, sso_connection_id, sso_subject) VALUES ($1, $2, 'sso', $3, $4, $5)
+           ON CONFLICT (tenant_id, sso_connection_id, sso_subject) WHERE type = 'sso' AND status = 'active' DO NOTHING RETURNING id`,
+          [txn.tenant_id, card.id, txn.payload.label, identity.connectionId, identity.subject]);
+        // An identity that already opens another card is refused; throwing rolls the token claim back.
+        if (!inserted.rows[0]) throw problems.authFailed();
+        credentialId = inserted.rows[0].id;
+      } else if (reg) {
         const inserted = await tx.query<{ id: string }>(
           `INSERT INTO credentials (tenant_id, card_id, type, label, webauthn_credential_id, webauthn_public_key, webauthn_sign_count, webauthn_transports)
            VALUES ($1, $2, 'passkey', $3, $4, $5, $6, $7) ON CONFLICT (webauthn_credential_id) DO NOTHING RETURNING id`,

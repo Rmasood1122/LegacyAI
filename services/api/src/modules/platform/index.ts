@@ -4,6 +4,12 @@
 
 export { ARGON2_FLOOR, ConfigError, loadConfig, Secret, type Config, type Keyring } from './internal/config.ts';
 export { SealingCipher } from './internal/sealing.ts';
+export { KeyUnavailable, keyServiceFrom, LocalKeyService, NoKeyService, type KeyService } from './internal/key-service.ts';
+export { TenantSealing, type CompanyKeyRow, type Sealer, type SetKeyOutcome } from './internal/tenant-sealing.ts';
+export {
+  checkedAddress, isPublicAddress, MAX_URL_LENGTH, pinnedLookup, urlProblem, type AddressProblem, type ResolvedAddress, type Resolver,
+} from './internal/address.ts';
+export { httpsRequest, type HttpsOptions, type HttpsRequest, type HttpsResponse } from './internal/outbound.ts';
 export { createLogger, scrub, scrubString, type Logger } from './internal/logger.ts';
 export {
   Database, EXPECTED_SCHEMA_VERSION, PLATFORM_TENANT_ID, UnsafeDatabaseRoleError, type QueryResult, type Tx,
@@ -22,7 +28,7 @@ export {
   type ExportTable, type TenantRow, type TenantSettings,
 } from './internal/tenants.ts';
 export {
-  API_KEY_SCHEME, checkedHeaderNames, createHttpServer, credentialOf, declaredHeaders, NEVER_DECLARED_HEADERS, SESSION_COOKIE,
+  API_KEY_SCHEME, checkedHeaderNames, createHttpServer, credentialOf, declaredHeaders, FLOW_COOKIE, NEVER_DECLARED_HEADERS, SESSION_COOKIE,
   type AuthPort, type AuthorizedHandlerArgs, type CallerHandlerArgs, type Credential, type GatewayCallArgs, type GatewayPrepared,
   type HandlerResult, type HttpDeps, type HttpServer, type PresentedCredential, type PublicHandlerArgs, type ResolvedCredential,
   type ResourcePolicy, honoursFilter, type ListFilter, type RegisteredRoute, type RouteDef, type SessionHandlerArgs,

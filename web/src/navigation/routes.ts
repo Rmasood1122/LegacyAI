@@ -98,6 +98,7 @@ export const ROUTES = {
   // Keys for machines. Only an Owner holds the right to list them.
   apiKeys: { path: '/api-keys', label: 'API keys', requiredOperation: 'listApiKeys', menu: 'manage' },
   webhooks: { path: '/webhooks', label: 'Webhooks', requiredOperation: 'listWebhookEndpoints', menu: 'manage' },
+  sso: { path: '/company-sign-in', label: 'Company sign-in', requiredOperation: 'getSsoConnection', menu: 'manage' },
   audit: { path: '/audit', label: 'Audit log', requiredOperation: 'listAuditEvents', menu: 'manage' },
   operator: { path: '/operator', label: 'Operator console', requiredOperation: 'listTenants', menu: 'manage' },
 } as const satisfies Record<string, RouteDef>;

@@ -3,8 +3,7 @@
 // on and the HTTP layer asks the policy decision point before the handler runs.
 import { problems } from '../../../shared/errors.ts';
 import type { CardSubject, ResourceRef } from '../../../shared/policy-types.ts';
-import { decodeIdCursor, encodeCursor, pageOf, writeAudit, type RouteDef, type Tx } from '../../platform/index.ts';
-import { urlProblem, type AddressProblem } from './address.ts';
+import { decodeIdCursor, encodeCursor, pageOf, urlProblem, writeAudit, type AddressProblem, type RouteDef, type Tx } from '../../platform/index.ts';
 import { statusOf, toApiDelivery, toApiEndpoint, type EndpointChange, type NewEndpointRequest, type WebhookStore } from './endpoints.ts';
 import { TOPIC_TEXT, TOPICS, WEBHOOK_LIMITS } from './rules.ts';
 

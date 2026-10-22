@@ -1,17 +1,19 @@
 // First-time set-up of a card: the card number, the 3-digit code and the one-time set-up token,
-// then either a passkey on this device or an authenticator app.
+// then a passkey on this device, an authenticator app, or the company's own sign-in (SSO, when the company set it up:
+// the person signs in at the company's identity provider and comes back to /sso/return, which finishes the set-up).
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import type { EnrollmentBeginResponse } from '../../api/generated.ts';
 import { Banner, Button, Card, ErrorNote, TextField } from '../../ui/index.tsx';
-import { keepDigits, useEnrollmentBegin, useEnrollmentComplete } from './hooks.ts';
+import { goToProvider, keepDigits, useEnrollmentBegin, useEnrollmentComplete, useSsoStart, type GoTo } from './hooks.ts';
 import { browserPasskeys, passkeyProblem, type Passkeys } from './passkeys.ts';
 
-type Method = 'passkey' | 'totp';
+type Method = 'passkey' | 'totp' | 'sso';
 
-export function EnrollScreen({ passkeys = browserPasskeys }: { passkeys?: Passkeys }) {
+export function EnrollScreen({ passkeys = browserPasskeys, goTo = goToProvider }: { passkeys?: Passkeys; goTo?: GoTo }) {
   const begin = useEnrollmentBegin();
   const complete = useEnrollmentComplete();
+  const ssoStart = useSsoStart();
   const canUsePasskey = passkeys.supported();
   const [cardNumber, setCardNumber] = useState('');
   const [sc, setSc] = useState('');
@@ -39,6 +41,7 @@ export function EnrollScreen({ passkeys = browserPasskeys }: { passkeys?: Passke
         onSuccess: (step) => {
           setStarted(step);
           if (step.factor_type === 'passkey') void createPasskey(step);
+          if (step.factor_type === 'sso') ssoStart.mutate({ body: { txn: step.enrollment_txn } }, { onSuccess: (r) => goTo(r.authorization_url) });
         },
       },
     );
@@ -80,11 +83,21 @@ export function EnrollScreen({ passkeys = browserPasskeys }: { passkeys?: Passke
                 <input type="radio" name="method" checked={method === 'totp'} onChange={() => setMethod('totp')} />
                 <span>An authenticator app that shows 6-digit codes</span>
               </label>
+              <label className="choice">
+                <input type="radio" name="method" checked={method === 'sso'} onChange={() => setMethod('sso')} />
+                <span>My company's account (only if your company set this up)</span>
+              </label>
             </fieldset>
             <ErrorNote error={begin.error} />
             <Button type="submit" variant="primary" busy={begin.isPending} disabled={cardNumber.trim().length < 16 || sc.length !== 3 || token.trim().length < 20}>Continue</Button>
           </form>
           <p className="hint">Already set up? <Link to="/">Sign in</Link>.</p>
+        </Card>
+      ) : started.factor_type === 'sso' ? (
+        <Card title="Signing in with your company's account">
+          {ssoStart.error === null ? <p>Taking you to your company's sign-in page…</p> : (
+            <Banner tone="warning" title="Your company's sign-in is not available">Choose a passkey or an authenticator app instead.</Banner>
+          )}
         </Card>
       ) : started.factor_type === 'totp' && started.totp !== undefined ? (
         <Card title="Add this card to your authenticator app">

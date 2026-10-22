@@ -1,7 +1,7 @@
 // Sending one webhook message. The port is what the delivery job sees; HttpsTransport is the one real sender.
 //
 // HttpsTransport (node:https only - no new library):
-//   - looks the host name up, refuses it unless EVERY address is public (address.ts), and connects to the address
+//   - looks the host name up, refuses it unless EVERY address is public (platform/internal/address.ts), and connects to the address
 //     it checked: the lookup is pinned, so the name cannot be re-pointed between the check and the connection;
 //   - verifies the TLS certificate against the host name (node's default; never switched off);
 //   - follows no redirect (a 3xx is a failed attempt);
@@ -10,8 +10,7 @@
 //     back is stored or shown (a receiver that trickles a body cannot keep the delivery job waiting).
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { request } from 'node:https';
-import type { LookupAddress } from 'node:dns';
-import { checkedAddress, isPublicAddress, type ResolvedAddress, type Resolver } from './address.ts';
+import { checkedAddress, isPublicAddress, pinnedLookup, type Resolver } from '../../platform/index.ts';
 import { WEBHOOK_LIMITS } from './rules.ts';
 
 export interface WebhookRequest {
@@ -97,17 +96,4 @@ export class HttpsTransport implements WebhookTransport {
       r.end(req.body);
     });
   }
-}
-
-type LookupCallback = (err: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void;
-
-/** A lookup function that answers with the one address that was checked, whatever it is asked. */
-export function pinnedLookup(target: ResolvedAddress): (host: string, options: unknown, callback: LookupCallback) => void {
-  return (_host, options, callback) => {
-    if (typeof options === 'object' && options !== null && (options as { all?: boolean }).all === true) {
-      callback(null, [{ address: target.address, family: target.family }]);
-    } else {
-      callback(null, target.address, target.family);
-    }
-  };
 }

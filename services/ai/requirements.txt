@@ -9,7 +9,7 @@ psycopg-binary==3.3.6
 psycopg-pool==3.3.3
 pgvector==0.5.0
 PyJWT==2.15.1
-pypdf==6.19.0
+pypdf==6.21.1
 puremagic==2.2.0
 PyYAML==6.0.3
 presidio-analyzer==2.2.364

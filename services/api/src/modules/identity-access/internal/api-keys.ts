@@ -17,7 +17,7 @@ import { API_KEY_SCHEME, writeAudit, type Notifier, type RateLimiter, type Tx } 
 import type { AnomalySettings } from './anomaly.ts';
 import { countsTowardAnomaly, shouldLockForDenials } from './anomaly.ts';
 import { effectiveState } from './lifecycle.ts';
-import { API_KEY_PERMISSIONS, cidrsAllow, validCidrs } from './policy.ts';
+import { API_KEY_PERMISSIONS, cidrsAllow, DIRECTORY_KEY_PERMISSION, validCidrs } from './policy.ts';
 import { subjectForCard } from './sessions.ts';
 
 /** `lak1.<company id>.<key id>.<secret>`. The two ids only say where to look; forging them finds nothing. */
@@ -66,7 +66,7 @@ export interface NewKeyRequest {
 
 export type KeyRequestProblem =
   | 'empty-scope' | 'permission-not-allowed-for-keys' | 'permission-not-held' | 'level-above-own' | 'bad-expiry' | 'bad-networks'
-  | 'bad-ask-limit';
+  | 'bad-ask-limit' | 'directory-key-alone';
 
 /**
  * Is this a key its maker may ask for? Pure. `held` maps each permission the maker's card holds to the highest
@@ -77,6 +77,7 @@ export function keyRequestProblem(req: NewKeyRequest, held: ReadonlyMap<string, 
   const scope = [...new Set(req.scope)];
   if (scope.length === 0) return 'empty-scope';
   if (scope.some((p) => !API_KEY_PERMISSIONS.has(p))) return 'permission-not-allowed-for-keys';
+  if (scope.includes(DIRECTORY_KEY_PERMISSION) && scope.length !== 1) return 'directory-key-alone';
   if (scope.some((p) => !held.has(p))) return 'permission-not-held';
   if (!Number.isInteger(req.max_sensitivity) || req.max_sensitivity < 0 || req.max_sensitivity > 3) return 'level-above-own';
   if (scope.some((p) => (held.get(p) as number) < req.max_sensitivity)) return 'level-above-own';

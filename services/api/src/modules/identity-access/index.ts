@@ -2,7 +2,7 @@
 // Other modules may import ONLY from this file - never from ./internal/*.
 
 import type { BillingPort, CompanyTermPort } from '../billing/index.ts';
-import { type AuthPort, type Config, type Database, type ExportRegistry, type Notifier, type RateLimiter, type RouteDef, type Tx } from '../platform/index.ts';
+import { httpsRequest, type TenantSealing, type AuthPort, type Config, type Database, type ExportRegistry, type Notifier, type RateLimiter, type RouteDef, type Tx } from '../platform/index.ts';
 import { AnomalyGuard, type AnomalySettings } from './internal/anomaly.ts';
 import { ApiKeyService, parseApiKey } from './internal/api-keys.ts';
 import { apiKeyRoutes } from './internal/routes-api-keys.ts';
@@ -10,12 +10,16 @@ import { AuthService, DEFAULT_AUTH_LIMITS, type AuthLimits } from './internal/au
 import { auditDetailsOf, Authorizer } from './internal/authz.ts';
 import { CardService } from './internal/cards.ts';
 import { companyTerm } from './internal/company-term.ts';
-import { SeedCipher } from './internal/factors.ts';
 import { recipientDirectory } from './internal/recipients.ts';
 import { sweepRetirementNudges } from './internal/leaving.ts';
 import { identityRoutes } from './internal/routes.ts';
 import { leavingRoutes, type PersonHoldingsLoader } from './internal/routes-leaving.ts';
 import { safetyRoutes } from './internal/routes-safety.ts';
+import { OidcCache, type OidcHttp } from './internal/oidc.ts';
+import { companyKeyRoutes } from './internal/routes-company-key.ts';
+import { scimRoutes } from './internal/routes-scim.ts';
+import { ssoRoutes } from './internal/routes-sso.ts';
+import { SsoService } from './internal/sso.ts';
 import { SecretCodeHasher } from './internal/secret-code.ts';
 import { resolveSession, tenantOfToken } from './internal/sessions.ts';
 
@@ -41,12 +45,17 @@ export {
   dammCheckDigit, dammValid, formatCardNumber, generateCardNumber, isValidCardNumber, luhnValid, maskCardNumber, normalizeCardNumber,
 } from './internal/card-number.ts';
 export { CardService } from './internal/cards.ts';
-export { SeedCipher, StrongFactorProof } from './internal/factors.ts';
+export { StrongFactorProof, verifySsoFactor, type FactorType, type SsoIdentity } from './internal/factors.ts';
+export {
+  authorizationUrl, codeChallenge, discover, exchangeCode, newFlowSecrets, OidcCache, OidcError, verifyIdToken, type Discovery, type OidcHttp,
+} from './internal/oidc.ts';
+export { issuerProblem, ssoIdentityOf, SSO_CONTINUE_TTL_SECONDS, SSO_FLOW_TTL_SECONDS } from './internal/sso.ts';
+export { applyPatch, parseScimFilter, ScimInputError, scimStateOf, toScimUser, type ScimState } from './internal/scim.ts';
 export {
   accessPhase, canTransition, CARD_STATES, computeDates, effectiveState, LEGAL_TRANSITIONS, TERMINAL_STATES,
 } from './internal/lifecycle.ts';
 export {
-  API_KEY_PERMISSIONS, buildResourceFilter, buildResourceFilterSpec, cidrsAllow, decide, usageKey, validCidrs,
+  API_KEY_PERMISSIONS, buildResourceFilter, buildResourceFilterSpec, cidrsAllow, decide, DIRECTORY_KEY_PERMISSION, KEY_ONLY_PERMISSIONS, usageKey, validCidrs,
   type FilterGrant, type FilterSpec, type Grant, type Matrix, type PermissionDef, type PolicyContext, type ResourceDescriptor,
   type ResourceFilter, type Restriction,
 } from './internal/policy.ts';
@@ -63,6 +72,10 @@ export interface IdentityAccessDeps {
   limits?: AuthLimits;
   /** Anomaly-lock rules for companies that have not set their own (default: ANOMALY_DEFAULTS). */
   anomalyDefaults?: AnomalySettings;
+  /** For tests: a stand-in for the company identity providers (no network). Default: the guarded https client. */
+  oidcHttp?: OidcHttp;
+  /** Seals the secrets this module keeps for a company: with the platform's key or the company's own (D35). */
+  sealing: TenantSealing;
   /** Where a failure of the anomaly counter is reported (it must never fail the refusal it was counting). */
   log?: { error(fields: Record<string, unknown>, message: string): void };
 }
@@ -88,16 +101,18 @@ export function createIdentityAccess(deps: IdentityAccessDeps): IdentityAccess {
   const { config, db } = deps;
   const hmacKey = config.hmacIndexKey.reveal();
   const hasher = new SecretCodeHasher(config.scPepper, config.argon2);
-  const cipher = new SeedCipher(config.credentialEnc);
   const cards = new CardService({ hasher, notifier: deps.notifier, hmacKey });
   const authorizer = new Authorizer(deps.billing);
   let holdings: PersonHoldingsLoader | null = null;
   const anomaly = new AnomalyGuard({ cards, notifier: deps.notifier, hmacKey, defaults: deps.anomalyDefaults });
   const apiKeys = new ApiKeyService(deps.rateLimiter, deps.notifier);
+  // Requests to a company's identity provider go through the platform's guarded https client (public addresses only).
+  const oidcHttp: OidcHttp = deps.oidcHttp ?? ((req) => httpsRequest(req, { timeoutMs: 5_000, maxBytes: 256 * 1024 }));
+  const sso = new SsoService({ sealing: deps.sealing, cache: new OidcCache(oidcHttp), redirectUri: config.sso.redirectUri, hmacKey });
   const auth = new AuthService({
-    db, hasher, cipher, cards, authorizer, anomaly, rateLimiter: deps.rateLimiter, notifier: deps.notifier, hmacKey,
+    db, hasher, sealing: deps.sealing, cards, authorizer, anomaly, rateLimiter: deps.rateLimiter, notifier: deps.notifier, hmacKey,
     webauthn: { rpId: config.webauthn.rpId, rpName: config.webauthn.rpName, origins: config.allowedOrigins },
-    limits: deps.limits ?? DEFAULT_AUTH_LIMITS,
+    limits: deps.limits ?? DEFAULT_AUTH_LIMITS, sso,
   });
 
   // What a tenant export contains from this module. Column lists are explicit: no SC hashes,
@@ -121,6 +136,9 @@ export function createIdentityAccess(deps: IdentityAccessDeps): IdentityAccess {
       ...safetyRoutes({ authorizer, anomaly }),
       ...leavingRoutes({ authorizer, notifier: deps.notifier, holdings: () => holdings }),
       ...apiKeyRoutes({ authorizer, apiKeys }),
+      ...ssoRoutes({ auth, sso, cards }),
+      ...scimRoutes({ cards }),
+      ...companyKeyRoutes({ db, sealing: deps.sealing }),
     ],
     authPort: {
       tenantOf: (credential) => (credential.kind === 'session' ? tenantOfToken(credential.token) : parseApiKey(credential.token)?.tenantId ?? null),

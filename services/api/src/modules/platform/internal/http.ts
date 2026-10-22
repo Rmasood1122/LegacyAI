@@ -30,6 +30,13 @@ import { WEB_APP_CSP, type StaticSite } from './static-site.ts';
 import { hashRequest, type IdempotencyStore, type RateLimiter } from './support.ts';
 
 export const SESSION_COOKIE = '__Host-lai_session';
+/**
+ * Binds a sign-in step that leaves for another site (the company's identity provider) to the browser that started
+ * it: set when the step starts, required when the browser comes back. HttpOnly and SameSite=Strict, like the session
+ * cookie; only public routes that declare `flowCookie` read or set it.
+ */
+export const FLOW_COOKIE = '__Host-lai_flow';
+const FLOW_COOKIE_SECONDS = 600;
 
 /** How a machine's API key starts in the Authorization header ("Bearer lak1...."). Anything else there is not a key. */
 export const API_KEY_SCHEME = 'lak1.';
@@ -92,6 +99,8 @@ export interface HandlerResult {
   body?: unknown;
   setSessionCookie?: string;
   clearSessionCookie?: boolean;
+  /** Public routes that declare `flowCookie` only: a new value, or null to clear it. */
+  setFlowCookie?: string | null;
 }
 
 export interface PublicHandlerArgs {
@@ -102,13 +111,15 @@ export interface PublicHandlerArgs {
    * can never be declared.
    */
   headers: Readonly<Record<string, string | undefined>>;
+  /** The flow cookie (FLOW_COOKIE) - only for a public route that declares `flowCookie`; undefined everywhere else. */
+  flowCookie?: string;
   body: any;
   params: any;
   query: any;
 }
 
 /** What a handler gets once the policy allowed the request. `S` says who may be asking. */
-export interface AuthorizedHandlerArgs<S extends Subject> extends Omit<PublicHandlerArgs, 'headers'> {
+export interface AuthorizedHandlerArgs<S extends Subject> extends Omit<PublicHandlerArgs, 'headers' | 'flowCookie'> {
   /** The request's content type (without parameters), for raw-file uploads. */
   contentType?: string;
   tx: Tx;
@@ -167,6 +178,8 @@ export type RouteDef =
       kind: 'public'; operationId: string; policy: { public: true; reason: string };
       /** Request headers this handler needs (e.g. a provider's signature header). Default: none reach it. */
       headers?: readonly string[];
+      /** This route reads (and may set) FLOW_COOKIE. Default: it never sees it. */
+      flowCookie?: true;
       handler: (a: PublicHandlerArgs) => Promise<HandlerResult>;
     }
   | {
@@ -310,6 +323,8 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
   // Raw files (uploads) arrive as bytes. Only operations whose contract lists the type accept them;
   // any other operation refuses a non-JSON body in validateRequest.
   app.addContentTypeParser(['application/pdf', 'text/plain', 'text/markdown'], { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
+  // A company directory (SCIM, RFC 7644) sends JSON as application/scim+json: read exactly like application/json.
+  app.addContentTypeParser('application/scim+json', { parseAs: 'string' }, app.getDefaultJsonParser('error', 'error'));
 
   const staticReplies = new WeakSet<FastifyReply>();
   app.addHook('onSend', async (req, reply) => {
@@ -426,6 +441,11 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
     }
     if (result.setSessionCookie !== undefined) {
       reply.setCookie(SESSION_COOKIE, result.setSessionCookie, { httpOnly: true, secure: true, sameSite: 'strict', path: '/' });
+    }
+    if (result.setFlowCookie !== undefined) {
+      if (!op.isPublic) throw new Error(`${op.operationId}: only a public route may set the flow cookie`);
+      if (result.setFlowCookie === null) reply.clearCookie(FLOW_COOKIE, { httpOnly: true, secure: true, sameSite: 'strict', path: '/' });
+      else reply.setCookie(FLOW_COOKIE, result.setFlowCookie, { httpOnly: true, secure: true, sameSite: 'strict', path: '/', maxAge: FLOW_COOKIE_SECONDS });
     }
     if (result.clearSessionCookie === true) {
       reply.clearCookie(SESSION_COOKIE, { httpOnly: true, secure: true, sameSite: 'strict', path: '/' });
@@ -704,7 +724,10 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
               let result: HandlerResult;
               if (def.kind === 'public') {
                 try {
-                  result = await def.handler({ ctx, headers: declaredHeaders(req.headers, publicHeaders), body: input.body, params: input.params, query: input.query });
+                  result = await def.handler({
+                    ctx, headers: declaredHeaders(req.headers, publicHeaders), body: input.body, params: input.params, query: input.query,
+                    ...(def.flowCookie === true ? { flowCookie: req.cookies[FLOW_COOKIE] } : {}),
+                  });
                 } catch (err) {
                   // A refusal a public handler THROWS on purpose (sign-in records the failure, commits, then throws a
                   // Problem) has written its facts, so what it queued is sent. Any other error means its transaction

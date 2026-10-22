@@ -56,6 +56,8 @@ export const problems = {
       headers: { 'retry-after': String(Math.max(1, Math.ceil(retryAfterSeconds))) },
     }),
   notReady: () => new ProblemError(503, 'not-ready', 'Service is not ready'),
+  /** The company's own encryption key (bring-your-own-key, D35) cannot be used: switched off at its key service, or unreachable. */
+  companyKeyUnavailable: () => new ProblemError(503, 'company-key-unavailable', "The company's own encryption key cannot be used right now"),
 };
 
 export function problemBody(error: ProblemError, requestId: string): Record<string, unknown> {

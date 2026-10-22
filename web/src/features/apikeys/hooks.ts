@@ -28,7 +28,11 @@ export const PERMISSION_TEXT: Readonly<Record<ApiKeyPermission, string>> = {
   'topic:read': 'Read topics and job roles',
   'gap:read': 'Read the gap report',
   'source:read': 'Read the list of documents',
+  'person:scim': 'Company directory (SCIM): add people and record that they left. A directory key can do nothing else.',
 };
+
+/** The directory key's one permission (D34): it is never combined with anything else. */
+export const DIRECTORY_PERMISSION: ApiKeyPermission = 'person:scim';
 
 export const STATUS_TEXT: Readonly<Record<ApiKey['status'], { tone: BadgeTone; text: string }>> = {
   active: { tone: 'success', text: 'Working' },
@@ -82,6 +86,7 @@ export function parseKeyForm(form: KeyForm, options: ApiKeyOptions): ParsedForm 
   const allowed = new Set(grantable.map((g) => g.permission));
   const scope = [...form.scope].filter((p) => allowed.has(p)).sort();
   if (scope.length === 0) problems.scope = 'Choose at least one thing the key may do.';
+  else if (scope.includes(DIRECTORY_PERMISSION) && scope.length > 1) problems.scope = 'A directory key can do nothing else: make it on its own.';
   const level = /^[0-3]$/.test(form.level) ? Number(form.level) : -1;
   if (level < 0) problems.level = 'Choose a level.';
   else if (level > highestLevel(new Set(scope), grantable)) problems.level = 'The key cannot reach a level above your own.';

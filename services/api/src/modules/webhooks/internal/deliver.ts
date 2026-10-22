@@ -121,9 +121,13 @@ export async function runCompany(deps: DeliveryDeps, tenantId: string, now: () =
   const fanned = await deps.withTx((tx) => fanOut(tx, tenantId, now()));
   result.published = fanned.published;
   result.queued = fanned.queued;
+  // once per run. With the company's own key (D35) out of reach nothing is claimed: the deliveries wait for the next
+  // run instead of using up their attempts - an outage at the company's key service must not lose its events
+  const sealer = await deps.withTx((tx) => deps.store.sealerFor(tx, tenantId));
+  if (sealer.unavailable === true) return result;
   const claimed = await deps.withTx((tx) => claim(tx, tenantId, now(), WEBHOOK_LIMITS.perCompanyPerRun));
   for (const d of claimed) {
-    const secret = deps.store.revealSecret(tenantId, d.endpoint_id, d.secret_enc, d.secret_key_id);
+    const secret = deps.store.revealSecret(sealer, tenantId, d.endpoint_id, d.secret_enc, d.secret_key_id);
     const body = JSON.stringify(d.body);
     const outcome = secret === null
       ? { ok: false as const, error: 'secret_unreadable' as const }

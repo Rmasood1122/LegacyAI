@@ -279,8 +279,10 @@ describe('what a request with a key can do', () => {
     expect(options.status).toBe(200);
     expect(options.body.limits).toEqual({ max_expires_in_days: 366, requests_per_minute: 120, default_asks_per_hour: 30, max_asks_per_hour: 600 });
     const grantable = options.body.grantable as Array<{ permission: string; max_sensitivity: number }>;
-    expect(grantable.map((g) => g.permission).sort()).toEqual(['gap:read', 'knowledge:ask', 'knowledge:read', 'source:read', 'topic:read']);
-    const made = await makeKey(tenant, { scope: grantable.map((g) => g.permission), max_sensitivity: Math.min(...grantable.map((g) => g.max_sensitivity)), asks_per_hour: 600 });
+    expect(grantable.map((g) => g.permission).sort()).toEqual(['gap:read', 'knowledge:ask', 'knowledge:read', 'person:scim', 'source:read', 'topic:read']);
+    // every READING permission in one key (the directory's person:scim can only be a key of its own, D34)
+    const reading = grantable.filter((g) => g.permission !== 'person:scim');
+    const made = await makeKey(tenant, { scope: reading.map((g) => g.permission), max_sensitivity: Math.min(...reading.map((g) => g.max_sensitivity)), asks_per_hour: 600 });
     let closed = 0;
     let open = 0;
     let publicOps = 0;
@@ -301,7 +303,7 @@ describe('what a request with a key can do', () => {
         closed += 1;
       }
     }
-    expect(open).toBe(10);
+    expect(open).toBe(17);   // the ten reads and asking, and the seven SCIM operations (which then refuse this key: not a directory key)
     expect(open + closed + publicOps).toBe(t.app.http.contract.operations.size);
     // and the stronger statement: the policy was never even asked, with this key, about anything but the five permissions
     const asked = new Set((await su.query('SELECT action, details FROM audit_log WHERE tenant_id = $1', [tenant.tenantId])).rows
@@ -309,7 +311,13 @@ describe('what a request with a key can do', () => {
       // rows ABOUT the key (its creation by the Owner, records of its use) also name it; they are not questions the key asked
       .filter((action) => !action.startsWith('api_key:')));
     expect(asked.size).toBeGreaterThan(0);
-    for (const action of asked) expect(['gap:read', 'knowledge:ask', 'knowledge:read', 'source:read', 'topic:read']).toContain(action);
+    for (const action of asked) expect(['gap:read', 'knowledge:ask', 'knowledge:read', 'source:read', 'topic:read', 'person:scim']).toContain(action);
+    // ... and every question about person:scim was refused: this key is not the directory's (a person that does not
+    // exist is "not found" before the policy is asked, for any caller)
+    const scim = (await su.query(`SELECT decision, reason_code, details FROM audit_log WHERE tenant_id = $1 AND action = 'person:scim'`, [tenant.tenantId])).rows
+      .filter((r) => detailsOf(r).api_key_id === made.id);
+    expect(scim.some((r) => r.reason_code === 'DENY_API_KEY_SCOPE')).toBe(true);
+    for (const r of scim) expect([['deny', 'DENY_API_KEY_SCOPE'], ['deny', 'DENY_RESOURCE_NOT_FOUND']]).toContainEqual([r.decision, r.reason_code]);
   });
 });
 

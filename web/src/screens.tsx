@@ -9,6 +9,7 @@ import { AskScreen } from './features/ask/AskScreen.tsx';
 import { QuestionsScreen } from './features/ask/QuestionsScreen.tsx';
 import { ApiKeysScreen } from './features/apikeys/ApiKeysScreen.tsx';
 import { WebhooksScreen } from './features/webhooks/WebhooksScreen.tsx';
+import { SsoScreen } from './features/sso/SsoScreen.tsx';
 import { BillingScreen } from './features/billing/BillingScreen.tsx';
 import { ConsentScreen } from './features/consent/ConsentScreen.tsx';
 import { DocumentDetailScreen } from './features/documents/DocumentDetailScreen.tsx';
@@ -83,6 +84,7 @@ const COMPONENTS: Readonly<Record<ScreenKey, ComponentType>> = {
   billing: BillingScreen,
   apiKeys: ApiKeysScreen,
   webhooks: WebhooksScreen,
+  sso: SsoScreen,
   audit: AuditScreen,
   operator: OperatorScreen,
 };

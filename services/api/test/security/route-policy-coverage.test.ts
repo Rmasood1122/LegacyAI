@@ -94,10 +94,10 @@ describe('a route cannot exist without policy metadata', () => {
 });
 
 describe('the list of routes that skip the session check is short and pinned', () => {
-  it('public = exactly these seven (six without any data, and the signed messages of the payment provider); there are no service-to-service routes on the public API', () => {
+  it('public = exactly these nine (six without any data, the signed messages of the payment provider, and the two steps of a sign-in at a company identity provider); there are no service-to-service routes on the public API', () => {
     const routes = t.app.http.registeredRoutes();
     expect(routes.filter((r) => r.kind === 'public').map((r) => r.operationId).sort()).toEqual(
-      ['enrollmentBegin', 'enrollmentComplete', 'getHealth', 'getReady', 'loginBegin', 'loginVerify', 'receivePaymentEvent']);
+      ['enrollmentBegin', 'enrollmentComplete', 'getHealth', 'getReady', 'loginBegin', 'loginVerify', 'receivePaymentEvent', 'ssoFinish', 'ssoStart']);
     expect(routes.every((r) => r.kind === 'public' || r.kind === 'session' || r.kind === 'gateway')).toBe(true);
     for (const r of routes.filter((x) => x.kind === 'public')) expect(r.publicReason!.length).toBeGreaterThan(20);
   });
@@ -107,15 +107,15 @@ describe('the list of routes that skip the session check is short and pinned', (
     const known = new Set((await su.query('SELECT permission_key FROM permissions')).rows.map((r) => r.permission_key as string));
     await su.end();
     const session = t.app.http.registeredRoutes().filter((r) => r.kind === 'session' || r.kind === 'gateway');
-    expect(session).toHaveLength(170);   // + the eight webhook operations
+    expect(session).toHaveLength(182);   // + the eight webhook operations, + the three SSO connection operations, + the seven SCIM operations, + the two company-key operations
     for (const r of session) expect(known.has(r.permission!), `${r.operationId} uses unknown permission ${r.permission}`).toBe(true);
   });
 
-  it('routes registered in the server == operations in openapi.yaml (177, no more, no fewer)', () => {
+  it('routes registered in the server == operations in openapi.yaml (191, no more, no fewer)', () => {
     const registered = t.app.http.registeredRoutes().map((r) => `${r.method} ${r.path}`).sort();
     const contract = [...t.app.http.contract.operations.values()].map((o) => `${o.method} ${o.path}`).sort();
     expect(registered).toEqual(contract);
-    expect(registered).toHaveLength(177);
+    expect(registered).toHaveLength(191);
     // and Fastify itself knows no route beyond those (HEAD/OPTIONS helpers aside)
     const printed = t.app.http.app.printRoutes({ commonPrefix: false });
     expect(printed).not.toMatch(/rogue/);
@@ -249,7 +249,8 @@ describe('a read of a whole collection must say how it is narrowed to what the c
       verifyAuditChain: 'unfiltered', listRedactionAllowlist: 'unfiltered', getKnowledgeSettings: 'unfiltered', getAiBudget: 'unfiltered',
       getPlatformStorage: 'unfiltered', getQualitySummary: 'unfiltered', listAnswerFeedback: 'unfiltered',
       getActivity: 'unfiltered', listInvoices: 'unfiltered', listApiKeys: 'unfiltered', getApiKeyOptions: 'unfiltered',
-      listWebhookEndpoints: 'unfiltered', getWebhookOptions: 'unfiltered', listWebhookDeliveries: 'unfiltered',
+      listWebhookEndpoints: 'unfiltered', getWebhookOptions: 'unfiltered', listWebhookDeliveries: 'unfiltered', getSsoConnection: 'unfiltered',
+      scimServiceProviderConfig: 'unfiltered', scimListUsers: 'unfiltered',
     });
     for (const r of t.app.http.registeredRoutes()) {
       if (r.listFilter !== null && typeof r.listFilter !== 'string') expect(r.listFilter.unfiltered.length, r.operationId).toBeGreaterThan(20);
@@ -298,7 +299,7 @@ describe('a read of a whole collection must say how it is narrowed to what the c
 });
 
 describe('real app: a card with almost no permissions cannot get a 2xx from anything it is not granted', () => {
-  it('walks all 170 protected operations as a Successor', async () => {
+  it('walks all 182 protected operations as a Successor', async () => {
     const su = await superuser();
     const granted = new Set((await su.query(`SELECT permission_key FROM role_permissions WHERE role_key = 'successor'`)).rows.map((r) => r.permission_key as string));
     await su.end();
@@ -337,6 +338,11 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
       // Phase 4, webhooks
       createWebhookEndpoint: { name: 'x', url: 'https://hooks.example.com/x', topics: ['knowledge.item_released'], max_sensitivity: 0 },
       updateWebhookEndpoint: { enabled: false },
+      // Phase 4, SSO
+      putSsoConnection: { name: 'x', issuer: 'https://idp.example.com', client_id: 'x', client_secret: 'x' },
+      // Phase 4, SCIM
+      setCompanyEncryptionKey: { key_ref: null },
+      scimCreateUser: { userName: 'x' }, scimReplaceUser: { userName: 'x' }, scimPatchUser: { Operations: [{ op: 'replace', path: 'active', value: false }] },
       recordManualPayment: { invoice_id: randomUUID(), amount: { amount_minor: 1500, currency: 'USD' }, reference: 'TRANSFER-000001' },
       createScenario: scenarioBody, updateScenario: scenarioBody, proposeScenarioRubric: { item_ids: [randomUUID()] }, overrideScenarioAnswer: { score: 1 },
     };
@@ -355,7 +361,8 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
       const res = await successor.client.request(op.method, url, upload ? (Buffer.from('x') as unknown as object) : bodies[op.operationId],
         { idem: op.idempotent ? `walk-${randomUUID()}` : false, headers: upload ? { 'content-type': 'text/plain' } : {} });
       expect([403, 404], `${op.operationId} answered ${res.status}: ${res.raw}`).toContain(res.status);
-      if (res.status === 404 && !phase2Target) expect(op.operationId).toBe('getExport'); // the only Phase 1 one whose target does not exist
+      // the only Phase 1 one whose target does not exist; and SCIM: a person the directory does not manage is "not found" to whoever asks
+      if (res.status === 404 && !phase2Target && !op.path.startsWith('/v1/scim/')) expect(op.operationId).toBe('getExport');
       denied += 1;
     }
     // Phase 1: 40 protected operations minus the 12 the Successor's permissions reach; Phase 2: 78 minus the 21 its permissions reach
@@ -371,7 +378,10 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
     // Phase 4 (billing): nothing of it - the subscription and invoices are the Owner's, the rest the platform operator's.
     // Phase 4 (API keys): nothing of it - making, listing and revoking keys, and asking what a key could carry, is the Owner's.
     // Phase 4 (webhooks): nothing of it - the eight webhook operations are the Owner's.
-    expect(denied).toBe(28 + 57 + 2 + 6 + 2 + 9 + 8 + 4 + 8);
+    // Phase 4 (SSO): nothing of it - the company's connection is the Owner's.
+    // Phase 4 (SCIM): nothing of it - only a directory key can use person:scim.
+    // Phase 4 (bring-your-own-key): nothing of it - a company's key is the platform operator's to set.
+    expect(denied).toBe(28 + 57 + 2 + 6 + 2 + 9 + 8 + 4 + 8 + 3 + 7 + 2);
   });
 });
 

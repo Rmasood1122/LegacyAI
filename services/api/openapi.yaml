@@ -36,6 +36,10 @@ tags:
   - name: billing
   - name: api-keys
     description: API keys for machines. These operations never accept a key themselves.
+  - name: sso
+    description: "The company's identity provider (OpenID Connect) as a strong factor. Company Owner only; these operations never accept a key."
+  - name: scim
+    description: "SCIM 2.0 for the company's directory: provisioning people. Only with a directory key (an API key carrying person:scim alone); a signed-in card is refused. Errors are problem details (RFC 9457), not SCIM error messages; requests may be application/json or application/scim+json, answers are application/json."
   - name: webhooks
     description: Outgoing webhooks - signed messages to a company's https endpoints when its knowledge changes. Company Owner only; these operations never accept a key.
 paths:
@@ -152,6 +156,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/CompanyKeyUnavailable"
         "429":
           $ref: "#/components/responses/TooManyRequests"
   /v1/auth/enrollment/complete:
@@ -7386,6 +7392,8 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "503":
+          $ref: "#/components/responses/CompanyKeyUnavailable"
         "429":
           $ref: "#/components/responses/TooManyRequests"
   /v1/webhooks/options:
@@ -7518,6 +7526,8 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "503":
+          $ref: "#/components/responses/CompanyKeyUnavailable"
         "429":
           $ref: "#/components/responses/TooManyRequests"
   /v1/webhooks/{webhook_id}/test:
@@ -7597,6 +7607,577 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/auth/sso/start:
+    post:
+      operationId: ssoStart
+      summary: "Sign in or set up with the company's identity provider: returns the provider's sign-in address. When signing in, the person names their company (its short name); the provider is chosen by the company, never by the card. Sets an HttpOnly flow cookie that ssoFinish requires (the sign-in can only be finished in the browser that started it). One answer for every refusal."
+      tags:
+        - auth
+      x-public: true
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - txn
+              properties:
+                txn:
+                  description: The login_txn of a sign-in, or the enrollment_txn of a set-up with factor_type sso.
+                  type: string
+                  minLength: 20
+                  maxLength: 200
+                company:
+                  description: The company's short name. Required when signing in.
+                  type: string
+                  pattern: "^[a-z0-9-]{3,40}$"
+      responses:
+        "200":
+          description: Go to this address.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - authorization_url
+                properties:
+                  authorization_url:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/auth/sso/finish:
+    post:
+      operationId: ssoFinish
+      summary: "Back from the identity provider (the web application passes on what it received at /sso/return/{tenant_id}: the code, the state and - if the provider sent it - iss). Only the browser that called ssoStart can finish (it holds the flow cookie set then), and only a code that came back to the address of the flow's company. Returns the step to continue with: a login_txn to sign in with factor sso and the 3-digit code, or an enrollment_txn to complete the set-up. Single use; one answer for every failure."
+      tags:
+        - auth
+      x-public: true
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - state
+                - code
+                - tenant_id
+              properties:
+                state:
+                  type: string
+                  minLength: 20
+                  maxLength: 200
+                code:
+                  type: string
+                  minLength: 1
+                  maxLength: 2048
+                tenant_id:
+                  description: "The company id in the return address the provider sent the browser to (/sso/return/{tenant_id})."
+                  type: string
+                  format: uuid
+                iss:
+                  description: "The provider's `iss` parameter on the return address (RFC 9207), when it sends one."
+                  type: string
+                  minLength: 1
+                  maxLength: 2048
+      responses:
+        "200":
+          description: Continue with this step.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - purpose
+                properties:
+                  purpose:
+                    type: string
+                    enum:
+                      - login
+                      - enroll
+                  login_txn:
+                    type: string
+                  enrollment_txn:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/sso/connection:
+    get:
+      operationId: getSsoConnection
+      summary: "The company's identity-provider connection (null if none) and the redirect address to register at the provider. Never the client secret."
+      tags:
+        - sso
+      x-permission: sso:read
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - connection
+                  - redirect_uri
+                properties:
+                  connection:
+                    oneOf:
+                      - $ref: "#/components/schemas/SsoConnection"
+                      - type: "null"
+                  redirect_uri:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    put:
+      operationId: putSsoConnection
+      summary: "Set up the connection, or change its name, client id, client secret or switch. The provider (issuer) of a connection never changes: remove it first. People still need the factor allowed in the company settings (allowed_factor_types) and must link their sign-in during their card's set-up."
+      tags:
+        - sso
+      x-permission: sso:manage
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SsoConnectionInput"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SsoConnection"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: "Conflict. `sso-issuer-changed`: another provider needs a new connection (remove this one first)."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "503":
+          $ref: "#/components/responses/CompanyKeyUnavailable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/sso/connection/remove:
+    post:
+      operationId: removeSsoConnection
+      summary: "Remove the connection for good. Every SSO factor linked through it is revoked, the sessions opened with them end, and (as for any change of a card's sign-in) the API keys those cards made end too."
+      tags:
+        - sso
+      x-permission: sso:manage
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - removed
+                  - factors_revoked
+                properties:
+                  removed:
+                    type: boolean
+                  factors_revoked:
+                    type: integer
+                    minimum: 0
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/scim/v2/ServiceProviderConfig:
+    get:
+      operationId: scimServiceProviderConfig
+      summary: "SCIM: what this server supports (RFC 7643 section 5). Directory key only."
+      tags:
+        - scim
+      x-permission: person:scim
+      x-api-key: true
+      security:
+        - apiKey: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimServiceProviderConfig"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/scim/v2/Users:
+    get:
+      operationId: scimListUsers
+      summary: "SCIM: the people the directory manages (never an Owner), optionally found by userName or externalId (filter userName eq \"...\"). Directory key only."
+      tags:
+        - scim
+      x-permission: person:scim
+      x-api-key: true
+      security:
+        - apiKey: []
+      parameters:
+        - name: attributes
+          in: query
+          required: false
+          description: "Accepted and ignored: every answer carries the few attributes stored here."
+          schema:
+            type: string
+            maxLength: 1000
+        - name: excludedAttributes
+          in: query
+          required: false
+          description: "Accepted and ignored."
+          schema:
+            type: string
+            maxLength: 1000
+        - name: filter
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 600
+        - name: startIndex
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000000
+        - name: count
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 200
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    post:
+      operationId: scimCreateUser
+      summary: "SCIM: the directory creates a person (no card: an administrator issues one). Directory key only."
+      tags:
+        - scim
+      x-permission: person:scim
+      x-api-key: true
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScimUserInput"
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimUserInput"
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: "Conflict. `scim-uniqueness`: another person already has this userName, externalId or e-mail address."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/scim/v2/Users/{person_id}:
+    get:
+      operationId: scimGetUser
+      summary: "SCIM: one person the directory manages. Directory key only."
+      tags:
+        - scim
+      x-permission: person:scim
+      x-api-key: true
+      security:
+        - apiKey: []
+      parameters:
+        - name: person_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    put:
+      operationId: scimReplaceUser
+      summary: "SCIM: the directory replaces what it manages of a person. active false = the person has left: their cards are revoked. Directory key only."
+      tags:
+        - scim
+      x-permission: person:scim
+      x-api-key: true
+      security:
+        - apiKey: []
+      parameters:
+        - name: person_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScimUserInput"
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimUserInput"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "Conflict. `scim-uniqueness`: another person already has this userName, externalId or e-mail address."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    patch:
+      operationId: scimPatchUser
+      summary: "SCIM: the directory changes some attributes (PatchOp: active, displayName, name, userName, externalId, emails). active false = the person has left: their cards are revoked. Directory key only."
+      tags:
+        - scim
+      x-permission: person:scim
+      x-api-key: true
+      security:
+        - apiKey: []
+      parameters:
+        - name: person_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScimPatchRequest"
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimPatchRequest"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "Conflict. `scim-uniqueness`: another person already has this userName, externalId or e-mail address."
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    delete:
+      operationId: scimDeleteUser
+      summary: "SCIM: the person has left and leaves the directory: their cards are revoked, their history stays, and the directory gets 404 for them from now on. Directory key only."
+      tags:
+        - scim
+      x-permission: person:scim
+      x-api-key: true
+      security:
+        - apiKey: []
+      parameters:
+        - name: person_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Done
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+  /v1/tenants/{tenant_id}/encryption-key:
+    get:
+      operationId: getCompanyEncryptionKey
+      summary: "Platform operator only: whether a company uses its own encryption key (bring-your-own-key), which reference and which version. Never the key, never the wrapped data key."
+      tags:
+        - tenants
+      x-permission: tenant:encryption_key
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyEncryptionKey"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    put:
+      operationId: setCompanyEncryptionKey
+      summary: "Platform operator only: the company brings its own key (a reference at the configured key service), changes to another, or goes back to none (null)."
+      description: >-
+        A new data key is made for the company, wrapped with the company's key and unwrapped again at once; a key that
+        does not work is refused (422) before anything is sealed with it. From then on the secrets the API keeps for the
+        company (authenticator-app seeds, webhook signing secrets, SSO client secrets) are sealed with that data key.
+        Secrets sealed earlier keep opening with the key they were sealed with. When the company switches its key off
+        at its key service, those secrets cannot be opened (sign-ins with an authenticator app, webhook signatures and
+        SSO sign-ins of that company stop) and nothing new is sealed (503 `company-key-unavailable`). Documents and
+        knowledge are not covered: see docs/phase4/08-bring-your-own-key.md.
+      tags:
+        - tenants
+      x-permission: tenant:encryption_key
+      security:
+        - sessionCookie: []
+      x-idempotent: true
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyEncryptionKeyRequest"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyEncryptionKey"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
         "429":
           $ref: "#/components/responses/TooManyRequests"
 components:
@@ -7917,6 +8498,12 @@ components:
             $ref: "#/components/schemas/Problem"
     BadGateway:
       description: "The knowledge service did not answer. Nothing was changed by this request."
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    CompanyKeyUnavailable:
+      description: "The company's own encryption key cannot be used right now (switched off at its key service, or the service cannot be reached): nothing new is sealed (`company-key-unavailable`)."
       content:
         application/problem+json:
           schema:
@@ -10319,6 +10906,15 @@ components:
                 code:
                   type: string
                   pattern: ^[0-9]{6}$
+            - type: object
+              additionalProperties: false
+              description: "The company's identity provider signed this person in during this step (POST /v1/auth/sso/start, then /finish, which returned this login_txn). Still needs the card's 3-digit code."
+              required:
+                - type
+              properties:
+                type:
+                  type: string
+                  const: sso
     Session:
       type: object
       additionalProperties: false
@@ -10387,9 +10983,11 @@ components:
           maxLength: 200
         factor_type:
           type: string
+          description: "`sso`: the company's identity provider, when the company switched it on (its Owner set up a connection and allowed the factor)."
           enum:
             - passkey
             - totp
+            - sso
         label:
           type: string
           maxLength: 80
@@ -10407,6 +11005,7 @@ components:
           enum:
             - passkey
             - totp
+            - sso
         webauthn_options: *a2
         totp:
           type: object
@@ -10449,6 +11048,7 @@ components:
           enum:
             - passkey
             - totp
+            - sso
         label:
           type: string
         created_at: *a5
@@ -11096,6 +11696,7 @@ components:
             enum:
               - passkey
               - totp
+              - sso
     UpdateTenantSettingsRequest:
       type: object
       additionalProperties: false
@@ -11141,6 +11742,7 @@ components:
             enum:
               - passkey
               - totp
+              - sso
       minProperties: 1
     TenantUsage:
       type: object
@@ -11425,8 +12027,231 @@ components:
           minimum: 1
           maximum: 120
           description: How recently, in minutes, another session of the card must have been used from a different address for the rule to fire.
+    ScimUser:
+      description: "A person as the directory sees it (SCIM core User, the attributes stored here)."
+      type: object
+      additionalProperties: false
+      required:
+        - schemas
+        - id
+        - userName
+        - displayName
+        - emails
+        - active
+        - meta
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+        id:
+          type: string
+          format: uuid
+        externalId:
+          type: string
+        userName:
+          type: string
+        displayName:
+          type: string
+        emails:
+          type: array
+          maxItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - value
+              - primary
+            properties:
+              value:
+                type: string
+              primary:
+                type: boolean
+        active:
+          type: boolean
+        meta:
+          type: object
+          additionalProperties: false
+          required:
+            - resourceType
+            - created
+            - lastModified
+            - location
+          properties:
+            resourceType:
+              type: string
+              enum:
+                - User
+            created:
+              type: string
+              format: date-time
+            lastModified:
+              type: string
+              format: date-time
+            location:
+              type: string
+    ScimUserInput:
+      description: "A SCIM User as a directory sends it. userName is required; displayName, name, emails, active and externalId are stored; every other attribute is accepted and ignored."
+      type: object
+      additionalProperties: true
+      maxProperties: 60
+      required:
+        - userName
+      properties:
+        schemas:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            maxLength: 200
+        userName:
+          type: string
+          minLength: 1
+          maxLength: 256
+        externalId:
+          type:
+            - "string"
+            - "null"
+          maxLength: 256
+        displayName:
+          type: string
+          maxLength: 1000
+        name:
+          type: object
+        emails:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+        active:
+          description: "true or false; the strings \"True\" and \"False\" are accepted too (one large directory sends those)."
+          type:
+            - "boolean"
+            - "string"
+    ScimPatchRequest:
+      type: object
+      additionalProperties: true
+      required:
+        - Operations
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+            maxLength: 200
+        Operations:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - op
+            properties:
+              op:
+                type: string
+                maxLength: 20
+              path:
+                type: string
+                maxLength: 200
+              value: {}
+    ScimListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - schemas
+        - totalResults
+        - startIndex
+        - itemsPerPage
+        - Resources
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+        totalResults:
+          type: integer
+        startIndex:
+          type: integer
+        itemsPerPage:
+          type: integer
+        Resources:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScimUser"
+    ScimServiceProviderConfig:
+      type: object
+      additionalProperties: true
+      required:
+        - schemas
+        - patch
+        - bulk
+        - filter
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+        patch:
+          type: object
+        bulk:
+          type: object
+        filter:
+          type: object
+    CompanyEncryptionKey:
+      type: object
+      additionalProperties: false
+      required:
+        - tenant_id
+        - key_service
+        - key_ref
+        - version
+        - since
+        - earlier_versions
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+        key_service:
+          description: "The key service this installation is configured with: none, or local (a stand-in for tests and development)."
+          type: string
+          enum:
+            - none
+            - local
+        key_ref:
+          description: "Where the company's key is, at the key service. Null = the company uses the platform's key."
+          type:
+            - "string"
+            - "null"
+        version:
+          description: "The live version of the company's data key (each change of key makes a new one)."
+          type:
+            - "integer"
+            - "null"
+        since:
+          type:
+            - "string"
+            - "null"
+          format: date-time
+        earlier_versions:
+          description: "Retired versions, kept because secrets sealed with them still open with them."
+          type: integer
+    CompanyEncryptionKeyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - key_ref
+      properties:
+        key_ref:
+          type:
+            - "string"
+            - "null"
+          minLength: 1
+          maxLength: 512
+          pattern: "^[^\\s]+$"
     ApiKeyPermission:
-      description: "The only permissions an API key may carry: read and ask. A key changes nothing."
+      description: "The only permissions an API key may carry: read and ask (a key changes nothing) - or, for a directory key, person:scim alone (provisioning people from the company's directory, D34)."
       type: string
       enum:
         - "knowledge:read"
@@ -11434,6 +12259,7 @@ components:
         - "topic:read"
         - "gap:read"
         - "source:read"
+        - "person:scim"
     SensitivityLevel:
       description: "How closely held something is: 0 = public, 1 = internal (the default for new documents), 2 = confidential, 3 = restricted."
       type: integer
@@ -12983,3 +13809,77 @@ components:
               type: integer
             pause_after_failures:
               type: integer
+    SsoConnection:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - protocol
+        - issuer
+        - client_id
+        - enabled
+        - has_client_secret
+        - redirect_uri
+        - created_by_card_id
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        protocol:
+          type: string
+          const: oidc
+        issuer:
+          type: string
+        client_id:
+          type: string
+        enabled:
+          type: boolean
+        has_client_secret:
+          type: boolean
+        redirect_uri:
+          description: Register exactly this address at the provider.
+          type: string
+        created_by_card_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    SsoConnectionInput:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - issuer
+        - client_id
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: "^[^\\u0000-\\u001f\\u007f]+$"
+        issuer:
+          description: The provider's issuer (OpenID Connect), exactly as its discovery document states it. https only.
+          type: string
+          minLength: 9
+          maxLength: 2048
+          pattern: "^https://"
+        client_id:
+          type: string
+          minLength: 1
+          maxLength: 255
+        client_secret:
+          description: Required when the connection is made; left out = keep the stored one. Stored encrypted, never shown again.
+          type: string
+          minLength: 1
+          maxLength: 1024
+        enabled:
+          type: boolean

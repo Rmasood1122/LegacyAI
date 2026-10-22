@@ -51,7 +51,7 @@ async function main(): Promise<void> {
   const webDist = process.env.WEB_DIST_DIR;
   const aiUrl = process.env.AI_SERVICE_URL_REAL;
   if (!webDist || !aiUrl) throw new Error('WEB_DIST_DIR and AI_SERVICE_URL_REAL are required');
-  const t = await startApp({}, { AI_SERVICE_URL: aiUrl, WEB_DIST_DIR: webDist, ALLOWED_ORIGINS: `${TEST_ORIGIN},${WEB_ORIGIN}` });
+  const t = await startApp({}, { AI_SERVICE_URL: aiUrl, WEB_DIST_DIR: webDist, ALLOWED_ORIGINS: `${TEST_ORIGIN},${WEB_ORIGIN}`, SSO_REDIRECT_URI: `${WEB_ORIGIN}/sso/return` });
 
   // One synthetic company. The owner signs in with an authenticator app (browser tests type the code).
   const operator = await platformOperator(t);

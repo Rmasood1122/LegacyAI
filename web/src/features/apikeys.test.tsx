@@ -25,8 +25,15 @@ describe('the form, as a function', () => {
   const EMPTY = emptyForm(LIMITS);
   const form = (over: Partial<typeof EMPTY> = {}) => ({ ...EMPTY, name: 'Search', scope: new Set(['knowledge:read'] as const), ...over });
 
-  it('a key can be given reading and asking only: adding documents is not among the choices', () => {
-    expect(Object.keys(PERMISSION_TEXT).sort()).toEqual(['gap:read', 'knowledge:ask', 'knowledge:read', 'source:read', 'topic:read']);
+  it('a key can be given reading and asking only - or be a directory key: adding documents is not among the choices', () => {
+    expect(Object.keys(PERMISSION_TEXT).sort()).toEqual(['gap:read', 'knowledge:ask', 'knowledge:read', 'person:scim', 'source:read', 'topic:read']);
+  });
+
+  it('a directory key is made on its own: together with anything else the form says so and sends nothing', () => {
+    const owner: ApiKeyOptions = { grantable: [...OPTIONS.grantable, { permission: 'person:scim', max_sensitivity: 3 }], limits: LIMITS };
+    expect(parseKeyForm(form({ scope: new Set(['person:scim'] as const) }), owner)).toMatchObject({ ok: true, body: { scope: ['person:scim'] } });
+    expect(parseKeyForm(form({ scope: new Set(['person:scim', 'knowledge:read'] as const) }), owner))
+      .toMatchObject({ ok: false, problems: { scope: 'A directory key can do nothing else: make it on its own.' } });
   });
 
   it('a key may reach no level above the lowest of its maker\'s levels for what it names', () => {
@@ -107,6 +114,22 @@ describe('the API keys screen', () => {
     expect(screen.queryByTestId('shown-once')).toBeNull();
     expect(document.body.textContent).not.toContain(SHOWN_ONCE);
     expect(await screen.findByRole('button', { name: 'Make the key' })).toBeTruthy();
+  });
+
+  it('choosing the directory key clears the other choices, and choosing anything else clears it', async () => {
+    const user = userEvent.setup();
+    const api = new FakeApi({
+      getApiKeyOptions: () => ({ grantable: [...OPTIONS.grantable, { permission: 'person:scim' as const, max_sensitivity: 3 }], limits: LIMITS }),
+      listApiKeys: () => list([]),
+    });
+    renderScreen(<ApiKeysScreen />, { api, session: as(...OWNER) });
+    const read = await screen.findByRole('checkbox', { name: 'Read knowledge items and the knowledge map' });
+    const scim = screen.getByRole('checkbox', { name: PERMISSION_TEXT['person:scim'] });
+    await user.click(read);
+    await user.click(scim);
+    expect([(read as HTMLInputElement).checked, (scim as HTMLInputElement).checked]).toEqual([false, true]);
+    await user.click(read);
+    expect([(read as HTMLInputElement).checked, (scim as HTMLInputElement).checked]).toEqual([true, false]);
   });
 
   it('a repeated request does not show the key again, and says so', async () => {

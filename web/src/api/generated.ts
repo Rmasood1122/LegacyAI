@@ -715,6 +715,8 @@ export type LoginVerifyRequest = {
   } | {
     type: "totp";
     code: string;
+  } | {
+    type: "sso";
   };
 };
 
@@ -740,13 +742,13 @@ export interface EnrollmentBeginRequest {
   card_number: string;
   sc: string;
   enrollment_token: string;
-  factor_type: "passkey" | "totp";
+  factor_type: "passkey" | "totp" | "sso";
   label?: string;
 }
 
 export interface EnrollmentBeginResponse {
   enrollment_txn: string;
-  factor_type: "passkey" | "totp";
+  factor_type: "passkey" | "totp" | "sso";
   webauthn_options?: {
     [key: string]: unknown;
   };
@@ -766,7 +768,7 @@ export interface EnrollmentCompleteRequest {
 
 export interface Credential {
   id: string;
-  type: "passkey" | "totp";
+  type: "passkey" | "totp" | "sso";
   label: string;
   created_at: string;
   last_used_at: string | null;
@@ -985,7 +987,7 @@ export interface TenantSettings {
   session_absolute_hours: number;
   enabled_roles: Array<"company_owner" | "admin" | "department_manager" | "auditor" | "reviewer" | "expert" | "successor" | "contractor">;
   pilot_reviewer_grant: boolean;
-  allowed_factor_types: Array<"passkey" | "totp">;
+  allowed_factor_types: Array<"passkey" | "totp" | "sso">;
 }
 
 export interface UpdateTenantSettingsRequest {
@@ -997,7 +999,7 @@ export interface UpdateTenantSettingsRequest {
   session_absolute_hours?: number;
   enabled_roles?: Array<"company_owner" | "admin" | "department_manager" | "auditor" | "reviewer" | "expert" | "successor" | "contractor">;
   pilot_reviewer_grant?: boolean;
-  allowed_factor_types?: Array<"passkey" | "totp">;
+  allowed_factor_types?: Array<"passkey" | "totp" | "sso">;
 }
 
 export interface TenantUsage {
@@ -1086,7 +1088,76 @@ export interface UpdateAnomalySettingsRequest {
   second_address_window_minutes?: number;
 }
 
-export type ApiKeyPermission = "knowledge:read" | "knowledge:ask" | "topic:read" | "gap:read" | "source:read";
+export interface ScimUser {
+  schemas: string[];
+  id: string;
+  externalId?: string;
+  userName: string;
+  displayName: string;
+  emails: {
+    value: string;
+    primary: boolean;
+  }[];
+  active: boolean;
+  meta: {
+    resourceType: "User";
+    created: string;
+    lastModified: string;
+    location: string;
+  };
+}
+
+export interface ScimUserInput {
+  schemas?: string[];
+  userName: string;
+  externalId?: string | null;
+  displayName?: string;
+  name?: Record<string, unknown>;
+  emails?: Record<string, unknown>[];
+  active?: boolean | string;
+  [key: string]: unknown;
+}
+
+export interface ScimPatchRequest {
+  schemas?: string[];
+  Operations: {
+    op: string;
+    path?: string;
+    value?: Record<string, unknown>;
+  }[];
+  [key: string]: unknown;
+}
+
+export interface ScimListResponse {
+  schemas: string[];
+  totalResults: number;
+  startIndex: number;
+  itemsPerPage: number;
+  Resources: ScimUser[];
+}
+
+export interface ScimServiceProviderConfig {
+  schemas: string[];
+  patch: Record<string, unknown>;
+  bulk: Record<string, unknown>;
+  filter: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface CompanyEncryptionKey {
+  tenant_id: string;
+  key_service: "none" | "local";
+  key_ref: string | null;
+  version: number | null;
+  since: string | null;
+  earlier_versions: number;
+}
+
+export interface CompanyEncryptionKeyRequest {
+  key_ref: string | null;
+}
+
+export type ApiKeyPermission = "knowledge:read" | "knowledge:ask" | "topic:read" | "gap:read" | "source:read" | "person:scim";
 
 export type SensitivityLevel = number;
 
@@ -1506,6 +1577,28 @@ export interface WebhookOptions {
   };
 }
 
+export interface SsoConnection {
+  id: string;
+  name: string;
+  protocol: "oidc";
+  issuer: string;
+  client_id: string;
+  enabled: boolean;
+  has_client_secret: boolean;
+  redirect_uri: string;
+  created_by_card_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SsoConnectionInput {
+  name: string;
+  issuer: string;
+  client_id: string;
+  client_secret?: string;
+  enabled?: boolean;
+}
+
 export const operations = {
   getHealth: { method: "GET", path: "/v1/health", status: 200, idempotent: false, public: true, permission: null, contentTypes: [] },
   getReady: { method: "GET", path: "/v1/ready", status: 200, idempotent: false, public: true, permission: null, contentTypes: [] },
@@ -1684,6 +1777,20 @@ export const operations = {
   rotateWebhookSecret: { method: "POST", path: "/v1/webhooks/{webhook_id}/rotate-secret", status: 200, idempotent: true, public: false, permission: "webhook:manage", contentTypes: [] },
   sendWebhookTest: { method: "POST", path: "/v1/webhooks/{webhook_id}/test", status: 202, idempotent: true, public: false, permission: "webhook:manage", contentTypes: [] },
   listWebhookDeliveries: { method: "GET", path: "/v1/webhooks/{webhook_id}/deliveries", status: 200, idempotent: false, public: false, permission: "webhook:read", contentTypes: [] },
+  ssoStart: { method: "POST", path: "/v1/auth/sso/start", status: 200, idempotent: false, public: true, permission: null, contentTypes: ["application/json"] },
+  ssoFinish: { method: "POST", path: "/v1/auth/sso/finish", status: 200, idempotent: false, public: true, permission: null, contentTypes: ["application/json"] },
+  getSsoConnection: { method: "GET", path: "/v1/sso/connection", status: 200, idempotent: false, public: false, permission: "sso:read", contentTypes: [] },
+  putSsoConnection: { method: "PUT", path: "/v1/sso/connection", status: 200, idempotent: true, public: false, permission: "sso:manage", contentTypes: ["application/json"] },
+  removeSsoConnection: { method: "POST", path: "/v1/sso/connection/remove", status: 200, idempotent: true, public: false, permission: "sso:manage", contentTypes: [] },
+  scimServiceProviderConfig: { method: "GET", path: "/v1/scim/v2/ServiceProviderConfig", status: 200, idempotent: false, public: false, permission: "person:scim", contentTypes: [] },
+  scimListUsers: { method: "GET", path: "/v1/scim/v2/Users", status: 200, idempotent: false, public: false, permission: "person:scim", contentTypes: [] },
+  scimCreateUser: { method: "POST", path: "/v1/scim/v2/Users", status: 201, idempotent: false, public: false, permission: "person:scim", contentTypes: ["application/json","application/scim+json"] },
+  scimGetUser: { method: "GET", path: "/v1/scim/v2/Users/{person_id}", status: 200, idempotent: false, public: false, permission: "person:scim", contentTypes: [] },
+  scimReplaceUser: { method: "PUT", path: "/v1/scim/v2/Users/{person_id}", status: 200, idempotent: false, public: false, permission: "person:scim", contentTypes: ["application/json","application/scim+json"] },
+  scimPatchUser: { method: "PATCH", path: "/v1/scim/v2/Users/{person_id}", status: 200, idempotent: false, public: false, permission: "person:scim", contentTypes: ["application/json","application/scim+json"] },
+  scimDeleteUser: { method: "DELETE", path: "/v1/scim/v2/Users/{person_id}", status: 204, idempotent: false, public: false, permission: "person:scim", contentTypes: [] },
+  getCompanyEncryptionKey: { method: "GET", path: "/v1/tenants/{tenant_id}/encryption-key", status: 200, idempotent: false, public: false, permission: "tenant:encryption_key", contentTypes: [] },
+  setCompanyEncryptionKey: { method: "PUT", path: "/v1/tenants/{tenant_id}/encryption-key", status: 200, idempotent: true, public: false, permission: "tenant:encryption_key", contentTypes: ["application/json"] },
 } as const;
 
 export type OperationId = keyof typeof operations;
@@ -3000,5 +3107,109 @@ export interface OperationTypes {
       items: WebhookDelivery[];
       next_cursor: string | null;
     };
+  };
+  ssoStart: {
+    path: undefined;
+    query: undefined;
+    body: {
+      txn: string;
+      company?: string;
+    };
+    response: {
+      authorization_url: string;
+    };
+  };
+  ssoFinish: {
+    path: undefined;
+    query: undefined;
+    body: {
+      state: string;
+      code: string;
+      tenant_id: string;
+      iss?: string;
+    };
+    response: {
+      purpose: "login" | "enroll";
+      login_txn?: string;
+      enrollment_txn?: string;
+    };
+  };
+  getSsoConnection: {
+    path: undefined;
+    query: undefined;
+    body: undefined;
+    response: {
+      connection: SsoConnection | null;
+      redirect_uri: string;
+    };
+  };
+  putSsoConnection: {
+    path: undefined;
+    query: undefined;
+    body: SsoConnectionInput;
+    response: SsoConnection;
+  };
+  removeSsoConnection: {
+    path: undefined;
+    query: undefined;
+    body: undefined;
+    response: {
+      removed: boolean;
+      factors_revoked: number;
+    };
+  };
+  scimServiceProviderConfig: {
+    path: undefined;
+    query: undefined;
+    body: undefined;
+    response: ScimServiceProviderConfig;
+  };
+  scimListUsers: {
+    path: undefined;
+    query: { attributes?: string; excludedAttributes?: string; filter?: string; startIndex?: number; count?: number };
+    body: undefined;
+    response: ScimListResponse;
+  };
+  scimCreateUser: {
+    path: undefined;
+    query: undefined;
+    body: ScimUserInput;
+    response: ScimUser;
+  };
+  scimGetUser: {
+    path: { person_id: string };
+    query: undefined;
+    body: undefined;
+    response: ScimUser;
+  };
+  scimReplaceUser: {
+    path: { person_id: string };
+    query: undefined;
+    body: ScimUserInput;
+    response: ScimUser;
+  };
+  scimPatchUser: {
+    path: { person_id: string };
+    query: undefined;
+    body: ScimPatchRequest;
+    response: ScimUser;
+  };
+  scimDeleteUser: {
+    path: { person_id: string };
+    query: undefined;
+    body: undefined;
+    response: undefined;
+  };
+  getCompanyEncryptionKey: {
+    path: { tenant_id: string };
+    query: undefined;
+    body: undefined;
+    response: CompanyEncryptionKey;
+  };
+  setCompanyEncryptionKey: {
+    path: { tenant_id: string };
+    query: undefined;
+    body: CompanyEncryptionKeyRequest;
+    response: CompanyEncryptionKey;
   };
 }

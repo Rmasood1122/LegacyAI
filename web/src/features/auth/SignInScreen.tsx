@@ -1,18 +1,22 @@
-// Sign in: card number, then the 3-digit code together with a passkey or an authenticator-app code.
-// The card number and the 3-digit code alone never sign anyone in; the API enforces that.
+// Sign in: card number, then the 3-digit code together with a passkey, an authenticator-app code - or a sign-in at the
+// company's identity provider (SSO): the person names their company, signs in there and comes back to /sso/return,
+// where the 3-digit code is asked for (SsoReturnScreen). The card number and the 3-digit code alone never sign anyone
+// in; the API enforces that.
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import type { LoginBeginResponse } from '../../api/generated.ts';
 import { cardNumberFromFragment } from '../../navigation/cardLink.ts';
 import { useSession } from '../../session/session.tsx';
 import { Banner, Button, Card, ErrorNote, TextField } from '../../ui/index.tsx';
-import { keepDigits, useLoginBegin, useLoginVerify } from './hooks.ts';
+import { goToProvider, keepDigits, useLoginBegin, useLoginVerify, useSsoStart, type GoTo } from './hooks.ts';
 import { browserPasskeys, passkeyProblem, type Passkeys } from './passkeys.ts';
 
-export function SignInScreen({ passkeys = browserPasskeys }: { passkeys?: Passkeys }) {
+export function SignInScreen({ passkeys = browserPasskeys, goTo = goToProvider }: { passkeys?: Passkeys; goTo?: GoTo }) {
   const { signedIn } = useSession();
   const begin = useLoginBegin();
   const verify = useLoginVerify();
+  const ssoStart = useSsoStart();
+  const [company, setCompany] = useState('');
   // A card's QR code opens this screen with "#card=<number>": the number is filled in, nothing else changes
   // (the 3-digit code and the second factor are asked for as always). The fragment is removed from the address
   // bar at once, so the number is not left in the history entry or copied along with the address.
@@ -88,6 +92,15 @@ export function SignInScreen({ passkeys = browserPasskeys }: { passkeys?: Passke
           {canUsePasskey && (
             <p><Button variant="primary" onClick={() => void withPasskey()} busy={verify.isPending} disabled={!scReady}>Use a passkey</Button></p>
           )}
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            if (started !== null) ssoStart.mutate({ body: { txn: started.login_txn, company: company.trim().toLowerCase() } }, { onSuccess: (r) => goTo(r.authorization_url) });
+          }} noValidate>
+            <TextField label="Your company's short name" hint="To sign in with your company's account (if your company set it up). You type the 3-digit code when you come back."
+              autoComplete="organization" value={company} onChange={(e) => setCompany(e.target.value)} />
+            {ssoStart.error !== null && <Banner tone="warning">Signing in with this company's account is not possible. Check the name, or use a passkey or an app code.</Banner>}
+            <Button type="submit" busy={ssoStart.isPending} disabled={!/^[a-z0-9-]{3,40}$/.test(company.trim().toLowerCase())}>Sign in with my company's account</Button>
+          </form>
           <form onSubmit={withCode} noValidate>
             <TextField label="Code from your authenticator app" hint="6 digits. Each code works once." inputMode="numeric" autoComplete="one-time-code"
               value={code} onChange={(e) => setCode(keepDigits(e.target.value, 6))} />

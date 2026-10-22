@@ -27,7 +27,7 @@ export interface TenantSettings {
   session_absolute_hours: number;
   enabled_roles: RoleKey[];
   pilot_reviewer_grant: boolean;
-  allowed_factor_types: Array<'passkey' | 'totp'>;
+  allowed_factor_types: Array<'passkey' | 'totp' | 'sso'>;
 }
 
 const TENANT_COLUMNS = 'id, name, slug, status, is_platform, plan_code, region, created_at';

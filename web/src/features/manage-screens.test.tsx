@@ -10,6 +10,7 @@ import { ConsentAdminScreen } from './admin/ConsentAdminScreen.tsx';
 import { SettingsScreen } from './admin/SettingsScreen.tsx';
 import { DocumentsScreen } from './documents/DocumentsScreen.tsx';
 import { OperatorScreen } from './operator/OperatorScreen.tsx';
+import { nfcMessageFor, type NfcWriter } from '../navigation/nfc.ts';
 import { CardScreen } from './people/CardScreen.tsx';
 import { CardsScreen } from './people/CardsScreen.tsx';
 import { PeopleScreen } from './people/PeopleScreen.tsx';
@@ -101,6 +102,29 @@ describe('cards', () => {
     await user.click(screen.getByRole('button', { name: 'Yes, revoke this card for good' }));
     await waitFor(() => expect(api.callsTo('revokeCard')).toHaveLength(1));
     expect(screen.queryByText('Roles')).toBeNull();                                  // no permission to read roles
+  });
+
+  it('one card: an NFC tag gets the same address as the QR code - the card number only (prepared: no real tag was used)', async () => {
+    const user = userEvent.setup();
+    const written: unknown[] = [];
+    const nfc: NfcWriter = { supported: () => true, write: async (m) => { written.push(m); } };
+    renderScreen(<CardScreen nfc={nfc} />, { api: new FakeApi({ getCard: () => card() }), session: as('getCard'), at: `/cards/${ID(30)}`, route: '/cards/:cardId' });
+    await user.click(await screen.findByRole('button', { name: 'Write to an NFC tag' }));
+    expect(await screen.findByText('The tag is written')).toBeTruthy();
+    expect(written).toEqual([nfcMessageFor(window.location.origin, card().card_number)]);
+    expect(JSON.stringify(written)).toMatch(/#card=LGY-/);
+  });
+
+  it('one card: a browser without Web NFC says where a tag can be written, and offers no button', async () => {
+    const nfc: NfcWriter = { supported: () => false, write: vi.fn() };
+    renderScreen(<CardScreen nfc={nfc} />, { api: new FakeApi({ getCard: () => card() }), session: as('getCard'), at: `/cards/${ID(30)}`, route: '/cards/:cardId' });
+    expect(await screen.findByText(/open this screen in Chrome on an Android phone/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Write to an NFC tag' })).toBeNull();
+  });
+
+  it('nfcMessageFor: one URL record, and nothing for what is not a card number', () => {
+    expect(nfcMessageFor('https://app.example.test', 'LGY-1234-5678-9012-3456')).toEqual({ records: [{ recordType: 'url', data: 'https://app.example.test/#card=LGY-1234-5678-9012-3456' }] });
+    expect(nfcMessageFor('https://app.example.test', 'LGY-1234')).toBeNull();
   });
 
   it('one card: "Print this card" prints the card only - its number, validity, QR code and the company - not roles or history', async () => {

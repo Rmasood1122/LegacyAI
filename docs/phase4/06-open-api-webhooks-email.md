@@ -4,7 +4,7 @@ Status on 2026-10-06:
 
 | Part | What | State |
 |---|---|---|
-| A | API keys for machines (read and ask only) | Built; CI green on 2026-10-04 (run 37225661324), database and browser tests included. |
+| A | API keys for machines (read and ask only; since D34 also the directory key for SCIM, see `07-sso-scim.md`) | Built; CI green on 2026-10-04 (run 37225661324), database and browser tests included. |
 | B | Outgoing webhooks, one example receiver | Built; CI green on 2026-10-20 (run 39383861491), database and browser tests included. See Part B. |
 | C | E-mail delivery of notices | Built against a stand-in sender; CI green in the same run. **No real e-mail service is connected** (the founder chooses one). See Part C. |
 
