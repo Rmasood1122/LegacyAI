@@ -15,4 +15,6 @@ regexes = [
   '''test-internal-service-token-0123456789''',
   # A public AI model name, flagged only because a test passes it next to a variable called FAKE_KEY.
   '''claude-haiku-4-5-20251001''',
+  # A made-up key of the wrong form, which test/unit/mail-resend.test.ts checks is refused as a Resend key.
+  '''sk_live_123456789''',
 ]
