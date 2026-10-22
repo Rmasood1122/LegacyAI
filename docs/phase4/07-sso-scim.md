@@ -161,13 +161,15 @@ history (append-only) refers to them and the rollback will not rewrite history.
 - **Not tested:** a real provider (Microsoft Entra ID, Google Workspace, Okta, ...); a whole sign-in in a real browser
   (the browser would have to reach the provider); SAML (not built).
 
-### For the founder to confirm
+### Confirmed by the founder (2026-10-22: the recommended defaults)
 
-1. Which providers your customers use first (OpenID Connect covers the common ones; SAML is not built).
-2. Owner only for the connection?
-3. That a person names their company's short name when signing in with SSO (the price of not revealing which card
-   numbers exist).
-4. That removing the connection also ends the API keys made by the people who used it (the D30 rule).
+1. Owner only for the connection.
+2. A person names their company's short name when signing in with SSO (the price of not revealing which card numbers
+   exist).
+3. Removing the connection also ends the API keys made by the people who used it (the D30 rule).
+
+Still open, because it needs a customer: which providers the customers use first (OpenID Connect covers the common
+ones; SAML is not built).
 
 ## Part B — SCIM (people from the company's directory)
 
@@ -285,9 +287,10 @@ keys stay as rows, but without the permission they can do nothing (`DENY_UNKNOWN
 - **Not tested:** a real directory (Entra ID, Okta, Google). Each has its own habits, and the first customer's
   directory has to be tried against a test company before it is switched on.
 
-### For the founder to confirm
+### Confirmed by the founder (2026-10-22: the recommended defaults)
 
-1. That Owners are outside the directory's reach: an Owner who leaves is recorded by hand.
-2. That the directory never gives roles or issues cards: an administrator still does.
-3. That a person the directory removes keeps their history as a departed person.
-4. Which directory the first customer uses, so it can be tried first.
+1. Owners are outside the directory's reach: an Owner who leaves is recorded by hand.
+2. The directory never gives roles or issues cards: an administrator still does.
+3. A person the directory removes keeps their history as a departed person.
+
+Still open, because it needs a customer: which directory the first customer uses, so it can be tried first.
