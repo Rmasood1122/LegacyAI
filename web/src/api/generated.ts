@@ -1419,6 +1419,7 @@ export interface Subscription {
     code: string;
     name: string;
     price_per_seat: Money;
+    price_per_seat_per_year: Money;
     placeholder: boolean;
   };
   seats_requested: number | null;

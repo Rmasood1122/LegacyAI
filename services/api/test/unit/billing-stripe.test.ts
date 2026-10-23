@@ -12,7 +12,7 @@ import path from 'node:path';
 import { Writable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
-  CATALOGUE_IS_PLACEHOLDER, checkoutFields, createBilling, eventOfStripe, formEncode, STRIPE_API, STRIPE_API_VERSION, STRIPE_EVENT_TYPES, StripePaymentProvider, stripeSignatureValid,
+  CATALOGUE_IS_PLACEHOLDER, checkoutFields, createBilling, eventOfStripe, formEncode, liveMoneyProblem, STRIPE_API, STRIPE_API_VERSION, STRIPE_EVENT_TYPES, StripePaymentProvider, stripeSignatureValid,
 } from '../../src/modules/billing/index.ts';
 import { ConfigError, createLogger, loadConfig, Secret, type Database, type Notifier, type RateLimiter } from '../../src/modules/platform/index.ts';
 import { testEnv, TEST_ORIGIN } from '../helpers/env.ts';
@@ -256,15 +256,22 @@ describe('StripePaymentProvider against a stand-in for Stripe', () => {
 });
 
 describe('no real money at an invented price', () => {
+  const stripeWith = (key: string): StripePaymentProvider =>
+    new StripePaymentProvider({ secretKey: new Secret(key), webhookSecret: new Secret(WEBHOOK), returnUrl: 'https://app.example.test/billing', log: createLogger('silent') });
   const build = (key: string) => () => createBilling({
-    config: loadConfig(testEnv()), db: {} as Database, notifier: {} as Notifier, rateLimiter: {} as RateLimiter, log: createLogger('silent'),
-    provider: new StripePaymentProvider({ secretKey: new Secret(key), webhookSecret: new Secret(WEBHOOK), returnUrl: 'https://app.example.test/billing', log: createLogger('silent') }),
+    config: loadConfig(testEnv()), db: {} as Database, notifier: {} as Notifier, rateLimiter: {} as RateLimiter, log: createLogger('silent'), provider: stripeWith(key),
   });
 
-  it('while the catalogue is a placeholder, a live Stripe key stops the service at start-up; a test-mode key (no money) is allowed', () => {
-    expect(CATALOGUE_IS_PLACEHOLDER).toBe(true);
-    expect(build(LIVE_KEY)).toThrow(/prices are still placeholders/);
-    expect(build(liveShaped('sk', '0003'))).toThrow(/prices are still placeholders/);
+  it('with a placeholder catalogue a live Stripe key is refused; a test-mode key (no money) is not', () => {
+    expect(liveMoneyProblem(stripeWith(LIVE_KEY), true)).toMatch(/prices are still placeholders/);
+    expect(liveMoneyProblem(stripeWith(liveShaped('sk', '0003')), true)).toMatch(/prices are still placeholders/);
+    expect(liveMoneyProblem(stripeWith(TEST_KEY), true)).toBeNull();
+    expect(liveMoneyProblem(stripeWith(LIVE_KEY), false)).toBeNull();
+  });
+
+  it('the catalogue holds the selected prices (D38), so the service starts with a live key as well as a test one', () => {
+    expect(CATALOGUE_IS_PLACEHOLDER).toBe(false);
+    expect(build(LIVE_KEY)).not.toThrow();
     expect(build(TEST_KEY)).not.toThrow();
   });
 });

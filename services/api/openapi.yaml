@@ -6947,7 +6947,7 @@ paths:
         `renewal_due`, `grace_until`, `read_only` and `export_only` mean exactly what they mean in the session
         (getSession); `phase` is the same in one word: `normal` (too early to renew), `renewal_open` (from
         `renewal_due`), `grace` (after `expires_at`: read-only) and `lapsed` (after `grace_until`: export only).
-        Plan names and prices are placeholders until the founder sets them (`plan.placeholder` is true). Amounts
+        Prices are per seat and year, charged for the term's length (`plan.price_per_seat`; decision D38). Amounts
         are whole numbers in the smallest unit of the currency. No tax is added or shown. The path is
         `/v1/billing/...` and not `/v1/tenants/current/...` on purpose: billing is its own area with its own rights.
       tags:
@@ -13263,14 +13263,17 @@ components:
             - type: "null"
             - type: object
               additionalProperties: false
-              required: [code, name, price_per_seat, placeholder]
+              required: [code, name, price_per_seat, price_per_seat_per_year, placeholder]
               properties:
                 code:
                   type: string
                 name:
                   type: string
                 price_per_seat:
-                  description: Per seat and per term.
+                  description: Per seat for this company's term (the yearly price times the term's days / 365, rounded to the cent).
+                  $ref: "#/components/schemas/Money"
+                price_per_seat_per_year:
+                  description: The plan's price per seat for a year.
                   $ref: "#/components/schemas/Money"
                 placeholder:
                   description: True while names and prices are invented placeholders, not the founder's decision.

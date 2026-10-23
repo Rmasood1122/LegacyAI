@@ -14,7 +14,8 @@ import {
 
 const DAY = 86_400_000;
 const KEY = Buffer.from(testEnv().PAYMENT_EVENT_KEY as string, 'base64');
-const PRICE = 1500;   // the placeholder price of the "pilot" plan, per seat and term
+// the "pilot" plan (Team, D38): USD 150 per seat and year; for a term of 90 days (the default) 15000 x 90 / 365 = 3698.63
+const PRICE = 3699;
 
 let stub: AiStub;
 let t: TestApp;
@@ -68,11 +69,11 @@ describe('the renewal center', () => {
     learner = await addMember(t, tenant.owner, [{ role_key: 'successor' }]);
   });
 
-  it('a company billing never touched: placeholder plan, no seat limit in the first term, too early to renew; only the Owner sees it', async () => {
+  it('a company billing never touched: the Team plan, no seat limit in the first term, too early to renew; only the Owner sees it', async () => {
     const res = await tenant.owner.get('/v1/billing/subscription');
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
-      plan: { code: 'pilot', price_per_seat: usd(PRICE), placeholder: true }, seats_requested: null, seat_limit: null, seats_unlimited: false,
+      plan: { code: 'pilot', name: 'Team', price_per_seat: usd(PRICE), price_per_seat_per_year: usd(15_000), placeholder: false }, seats_requested: null, seat_limit: null, seats_unlimited: false,
       seats_used: 2, seat_state: 'not_limited', auto_renew: false, term_days: 90, phase: 'normal', read_only: false, export_only: false,
       next_term: { seats: 2, amount: usd(2 * PRICE) }, due_now: null, open_invoice: null, can_renew_now: false,
       payments_available: true, payments_needing_attention: 0, if_nothing_is_done: 'read_only_then_export_only',

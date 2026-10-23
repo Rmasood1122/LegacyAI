@@ -21,7 +21,7 @@
 import { ProblemError, problems } from '../../../shared/errors.ts';
 import type { RequestContext } from '../../../shared/policy-types.ts';
 import { PLATFORM_TENANT_ID, writeAudit, type Notifier, type Tx } from '../../platform/index.ts';
-import { CATALOGUE_IS_PLACEHOLDER, planOf, priceFor, sameMoney, type Money, type Plan } from './catalogue.ts';
+import { CATALOGUE_IS_PLACEHOLDER, planOf, priceFor, sameMoney, seatPriceForTerm, type Money, type Plan } from './catalogue.ts';
 import type { PaymentEvent, PaymentProvider } from './provider.ts';
 
 const DAY_MS = 86_400_000;
@@ -173,10 +173,10 @@ export function dueNow(plan: Plan | null, seats: SeatFacts, term: CompanyTerm, n
   if (plan === null) return null;
   if (termPhase(term, now) !== 'normal') {
     const n = renewalSeats(seats, term.personCards);
-    return { kind: 'renewal', seats: n, amount: priceFor(plan, n) };
+    return { kind: 'renewal', seats: n, amount: priceFor(plan, n, term.termDays) };
   }
   const added = seatsToAdd(seats);
-  return added > 0 ? { kind: 'seats', seats: added, amount: priceFor(plan, added) } : null;
+  return added > 0 ? { kind: 'seats', seats: added, amount: priceFor(plan, added, term.termDays) } : null;
 }
 
 export const MAX_AUTO_RENEW_ATTEMPTS = 3;
@@ -351,11 +351,15 @@ export class Billing {
     const open = await this.#openInvoice(tx, tenantId);
     const due = dueNow(plan, seats, term, now);
     const limit = enforcedLimit(seats);
-    const next = plan === null ? null : priceFor(plan, renewalSeats(seats, term.personCards));
+    const next = plan === null ? null : priceFor(plan, renewalSeats(seats, term.personCards), term.termDays);
     const unapplied = await tx.query<{ n: number }>(
       `SELECT count(*)::int AS n FROM invoices WHERE tenant_id = $1 AND status IN ('paid', 'paid_late') AND applied_at IS NULL`, [tenantId]);
     return {
-      plan: plan === null ? null : { code: plan.code, name: plan.name, price_per_seat: apiMoney({ amountMinor: plan.pricePerSeatMinor, currency: plan.currency }), placeholder: CATALOGUE_IS_PLACEHOLDER },
+      plan: plan === null ? null : {
+        code: plan.code, name: plan.name, placeholder: CATALOGUE_IS_PLACEHOLDER,
+        price_per_seat: apiMoney({ amountMinor: seatPriceForTerm(plan, term.termDays), currency: plan.currency }),
+        price_per_seat_per_year: apiMoney({ amountMinor: plan.pricePerSeatPerYearMinor, currency: plan.currency }),
+      },
       seats_requested: row.seats,
       seat_limit: limit,
       seats_unlimited: row.unlimited,
