@@ -7155,6 +7155,9 @@ paths:
         amount or currency than was due, a payment for an invoice that was already closed, declined or paid, or a
         payment that could not take effect - in every such case the platform operator and the company's Owner are
         told, and the money is never applied silently). "paid" for an open invoice takes effect exactly once.
+        With Stripe (decision D37) the body is a Stripe event and its signature is the Stripe-Signature header over
+        the exact bytes of the body (HMAC-SHA256, within five minutes); a verified event about nothing this product
+        acts on is answered `ignored`. Bodies up to 64 KB.
       tags:
         - billing
       x-public: true
@@ -7164,7 +7167,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/PaymentEventRequest"
+              oneOf:
+                - $ref: "#/components/schemas/PaymentEventRequest"
+                - $ref: "#/components/schemas/StripeEventRequest"
       responses:
         "200":
           description: The message was accepted (see `status`).
@@ -7182,6 +7187,7 @@ paths:
                       - applied
                       - duplicate
                       - recorded
+                      - ignored
         "400":
           $ref: "#/components/responses/BadRequest"
         "403":
@@ -13249,7 +13255,7 @@ components:
     Subscription:
       type: object
       additionalProperties: false
-      required: [plan, seats_requested, seat_limit, seats_unlimited, seats_used, seat_state, auto_renew, term_days, expires_at, renewal_due, grace_until, read_only, export_only, phase, next_term, due_now, open_invoice, can_renew_now, payments_available, payments_needing_attention, if_nothing_is_done]
+      required: [plan, seats_requested, seat_limit, seats_unlimited, seats_used, seat_state, auto_renew, term_days, expires_at, renewal_due, grace_until, read_only, export_only, phase, next_term, due_now, open_invoice, can_renew_now, payments_available, payment_page, payments_needing_attention, if_nothing_is_done]
       properties:
         plan:
           description: Null when the company's plan has no entry in the price catalogue.
@@ -13356,6 +13362,11 @@ components:
         payments_available:
           description: False when no payment provider is connected; an invoice is then settled by the platform operator.
           type: boolean
+        payment_page:
+          description: >-
+            True when the Owner pays on the payment provider's own page (Stripe Checkout): starting the renewal again
+            for a waiting invoice gives that page (`payment_url`). Automatic renewal is then not offered.
+          type: boolean
         payments_needing_attention:
           description: Payments on record that did not take effect (arrived late, or could not be applied). The platform operator resolves them.
           type: integer
@@ -13446,7 +13457,7 @@ components:
     RenewalStarted:
       type: object
       additionalProperties: false
-      required: [invoice, already_open, collected_by]
+      required: [invoice, already_open, collected_by, payment_url]
       properties:
         invoice:
           $ref: "#/components/schemas/Invoice"
@@ -13457,6 +13468,34 @@ components:
           description: "`provider`: the payment provider was asked to collect it. `operator`: no provider is connected; the platform operator records the payment."
           type: string
           enum: [provider, operator]
+        payment_url:
+          description: >-
+            Where the Owner pays, on the payment provider's own page (Stripe Checkout), or null when there is no such
+            page (no provider, an amount of 0, a provider that collects by itself). Asking again for the same open
+            invoice gives the same page while it is valid. Nothing is paid until the provider's signed message arrives.
+          type: [string, "null"]
+          format: uri
+          maxLength: 2048
+    StripeEventRequest:
+      description: >-
+        A Stripe event (https://docs.stripe.com/api/events/object). Only its outer shape is checked here; nothing in it
+        is read before the Stripe-Signature header is verified against the exact bytes of the body.
+      type: object
+      additionalProperties: true
+      required: [id, object, type, data]
+      properties:
+        id:
+          type: string
+          pattern: "^evt_[A-Za-z0-9]{4,96}$"
+        object:
+          type: string
+          enum: [event]
+        type:
+          type: string
+          maxLength: 100
+        data:
+          type: object
+          additionalProperties: true
     PaymentEventRequest:
       description: The message format of the stand-in provider. A real provider's own format is translated to the same facts inside the API.
       type: object

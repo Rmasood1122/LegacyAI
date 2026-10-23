@@ -234,6 +234,7 @@ CONSEQUENCES:
 - Chosen (founder, from three options): ignore exactly these eight IDs in the CI audit, with the reason next to them; any other advisory still fails. Rejected: forcing pillow 13 against fastembed's declared limit and D2; leaving CI red.
 - pypdf moved 6.19.0 -> 6.20.1 for its four advisories (same major version; D2 does not apply).
 - 2026-10-22 (founder's choice, same reasoning): 16 more pillow advisories, again fixed only in 13.0.0, accepted by ID: CVE-2026-112402, CVE-2026-112900, CVE-2026-112893, CVE-2026-112392, CVE-2026-112891, CVE-2026-112405, CVE-2026-112390, CVE-2026-112401, CVE-2026-112901, CVE-2026-112391, CVE-2026-112894, CVE-2026-112406, CVE-2026-112399, CVE-2026-112892, CVE-2026-112393, CVE-2026-112396. pypdf 6.20.1 -> 6.21.1 for CVE-2026-113786 (same major version).
+- 2026-10-23 (same rule as the founder's two earlier choices, applied by Claude; the founder can reverse it): 11 more pillow advisories, again fixed only in 13.0.0, accepted by ID: CVE-2026-96636, CVE-2026-96637, CVE-2026-96638, CVE-2026-96639, CVE-2026-96640, CVE-2026-96641, CVE-2026-96642, CVE-2026-96643, CVE-2026-96644, CVE-2026-96778, GHSA-78g4-xqwv-q3g8. fastembed 0.9.0 still requires pillow<13 (PyPI, read 2026-10-23).
 - Re-check when fastembed allows pillow 13 and pillow 13 is 60 days old (2026-12-15). Details: docs/DEPENDENCIES.md 9.1.
 
 **D33 — SSO: the company's identity provider is a strong factor, chosen by the company the person names, linked by the provider's subject (2026-10-21).**
@@ -282,3 +283,20 @@ CONSEQUENCES:
 - A set-up problem on our side (key, unverified domain) is retried, not dropped, and logged with Resend's error name only. A message Resend refuses as invalid is not retried.
 - Start-up refuses a missing or malformed key, the placeholder key in production, and a `localhost` sender line.
 - Tested against a local stand-in for Resend only. **No real e-mail has been sent.** The founder's part: account, sending domain (SPF, DKIM, DMARC), a sending-only key.
+
+**D37 — Payments: Stripe Checkout, called directly; a person pays each term on Stripe's page (2026-10-23).**
+- The founder chose Stripe (2026-10-22). Details: `docs/phase4/05-billing.md`, "Stripe".
+- **Checkout Sessions** (Stripe's own payment page), one per invoice, with the invoice id as the idempotency key. No card data ever reaches this service. Rejected for now: Stripe Billing subscriptions (0.7% of billing volume on top of card fees, and Stripe would then own the renewal rules that D29 puts here) and saving cards for unattended charges (a second step; needs a Stripe customer per company).
+- **No library.** Two short pieces: a form-encoded POST through the platform's guarded HTTPS client, and the signature check. The server now keeps the exact bytes of a JSON body for a route that declares it.
+- API version pinned to `2026-07-29.dahlia` (the newest that passes the 60-day rule on 2026-10-23).
+- Verified events about anything else are answered 200 `ignored`, so Stripe stops resending; unverified ones keep the same 403.
+- Automatic renewal is not offered with Stripe; the screen says so.
+- While the catalogue's prices are placeholders, a live Stripe key stops the API at start-up (test-mode keys work).
+- Tested against a local stand-in for Stripe only. **No Stripe account, no key, no money.**
+
+**Prices — selected at the founder's request ("search and select best fit", 2026-10-22); not yet in the catalogue (2026-10-23).**
+- Comparable tools' published prices, read 2026-10-23 (per user per month): Tettra $8 (10-user minimum); Slite $10 / $20; Notion $10 / $20 (Business includes AI; whether these are annual prices was not clear); Confluence $5.78 / $11.16 (monthly billing); Scribe $23-25. Guru, Glean, Bloomfire, Document360 and Trainual publish no prices. One retiree-handover tool (SkillPass) charges $15-39 per handover. Sources and gaps: `docs/phase4/05-billing.md`, "Prices".
+- **Selected:** Pilot - free, up to 5 person cards, one term of 60 days. **Team - $150 per seat per year** (about $12.50 a month; between Tettra and the $20 AI workspaces). **Business - $300 per seat per year**, from 25 seats, with SSO, SCIM and the company's own key; above about 250 seats, a quoted price.
+- Why not yet in the code: the catalogue prices a seat **per term**, and a term is the company card's validity (90 days by default, up to 366). A yearly price has to be turned into a price for the term's length, and the Business plan needs a new plan code in the database. That is the next billing change, with its own tests; until then the catalogue keeps its placeholders and the screen keeps saying so.
+- Stripe's fee on these prices: about 2.9% (domestic card) to 4.4% (international). Large Business invoices ($15,000+) may hit card limits; a bank-transfer option is worth considering (ASSUMPTION, not tested).
+

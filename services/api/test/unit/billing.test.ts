@@ -206,7 +206,7 @@ describe('the stand-ins', () => {
     const id = randomUUID();
     const fake = new FakePaymentProvider(KEY);
     expect(fake.canCollect).toBe(true);
-    expect(await fake.start({ invoiceId: id, tenantId: randomUUID(), amount: { amountMinor: 4500, currency: 'USD' } })).toEqual({ reference: `fake-${id}` });
+    expect(await fake.start({ invoiceId: id, tenantId: randomUUID(), amount: { amountMinor: 4500, currency: 'USD' } })).toEqual({ reference: `fake-${id}`, paymentUrl: null });
   });
 
   it('the fake provider accepts a message only with its own key - and none at all when it has no key', () => {
@@ -317,20 +317,20 @@ describe('a payment on record is finished or reported - never left without a tra
 describe('asking the provider to collect an invoice that is already stored', () => {
   const invoice = { id: randomUUID(), amount_minor: '4500', currency: 'USD' } as InvoiceRow;
   const withTx = <T>(fn: (tx: never) => Promise<T>): Promise<T> => fn(undefined as never);
-  const billingWith = (start: () => Promise<{ reference: string }>, recorded: string[]): Billing => ({
+  const billingWith = (start: () => Promise<{ reference: string; paymentUrl: string | null }>, recorded: string[]): Billing => ({
     provider: { canCollect: true, start },
     recordProviderReference: async (_tx: unknown, _t: string, _i: string, reference: string) => { recorded.push(reference); return invoice; },
   } as unknown as Billing);
 
   it('the provider answers: its reference is remembered', async () => {
     const recorded: string[] = [];
-    await collect(billingWith(async () => ({ reference: 'ref-1' }), recorded), invoice, 't', withTx);
+    await collect(billingWith(async () => ({ reference: 'ref-1', paymentUrl: null }), recorded), invoice, 't', withTx);
     expect(recorded).toEqual(['ref-1']);
   });
 
   it('the provider does not answer in time: 503, nothing is recorded, the invoice stays as it was', async () => {
     const recorded: string[] = [];
-    const never = new Promise<{ reference: string }>(() => undefined);
+    const never = new Promise<{ reference: string; paymentUrl: string | null }>(() => undefined);
     const err = await collect(billingWith(() => never, recorded), invoice, 't', withTx, 20).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ProblemError);
     expect((err as ProblemError).status).toBe(503);

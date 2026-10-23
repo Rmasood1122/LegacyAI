@@ -54,6 +54,11 @@ export type RenewPanel =
   | { kind: 'no_price' }                                                        // the plan has no price: the operator must act
   | { kind: 'nothing_due' };
 
+/** Only Stripe's own https payment page is ever linked (the API checks the same). Pure. */
+export function paymentPageOk(url: string): boolean {
+  return url.length <= 2048 && url.startsWith('https://checkout.stripe.com/');
+}
+
 export function renewPanelState(s: Subscription, started: RenewalStarted | undefined): RenewPanel {
   const byOperator = !s.payments_available;
   if (s.open_invoice !== null) return { kind: 'waiting', invoice: s.open_invoice, byOperator };

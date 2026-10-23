@@ -28,6 +28,12 @@ export interface Plan {
   currency: string;
 }
 
+/**
+ * True while the prices below are placeholders. The screen says so, and a live Stripe key is refused at start-up:
+ * real money is never taken at an invented price (decision D37). Set to false together with the real prices.
+ */
+export const CATALOGUE_IS_PLACEHOLDER = true;
+
 export const PLANS: readonly Plan[] = [
   { code: 'free', name: 'Free (placeholder)', pricePerSeatMinor: 0, currency: 'USD' },
   { code: 'pilot', name: 'Pilot (placeholder)', pricePerSeatMinor: 1500, currency: 'USD' },

@@ -37,25 +37,28 @@ const providerUnavailable = (): ProblemError => new ProblemError(503, 'payment-p
 /**
  * Asks the provider to collect an invoice that is ALREADY committed, with no database transaction open, and then
  * records the provider's reference in a transaction of its own. A provider that throws or does not answer leaves an
- * open invoice and no charge on record; asking again collects the same invoice.
+ * open invoice and no charge on record; asking again collects the same invoice. `paymentUrl`: where the Owner pays,
+ * for a provider with its own payment page.
  */
 export async function collect(
   billing: Billing, invoice: InvoiceRow, tenantId: string, withTx: <T>(fn: (tx: Tx) => Promise<T>) => Promise<T>, timeoutMs = PROVIDER_TIMEOUT_MS,
-): Promise<InvoiceRow> {
+): Promise<{ invoice: InvoiceRow; paymentUrl: string | null }> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(providerUnavailable()), timeoutMs);
   });
   let reference: string;
+  let paymentUrl: string | null;
   try {
     const started = billing.provider.start({ invoiceId: invoice.id, tenantId, amount: { amountMinor: Number(invoice.amount_minor), currency: invoice.currency } });
-    reference = (await Promise.race([started, timeout])).reference;
+    ({ reference, paymentUrl } = await Promise.race([started, timeout]));
   } catch (err) {
     throw err instanceof ProblemError ? err : providerFailed();
   } finally {
     clearTimeout(timer);
   }
-  return (await withTx((tx) => billing.recordProviderReference(tx, tenantId, invoice.id, reference))) ?? invoice;
+  // the first reference stays on the invoice; asking again for the same invoice gives the same one (idempotency)
+  return { invoice: (await withTx((tx) => billing.recordProviderReference(tx, tenantId, invoice.id, reference))) ?? invoice, paymentUrl };
 }
 
 /**
@@ -169,31 +172,44 @@ export function billingRoutes(deps: { db: Database; billing: Billing; rateLimite
       prepare: async ({ tx, subject, ctx }) => {
         const tenantId = subject.tenant_id;
         const issued = await billing.issueDue(tx, tenantId, await planCode(tx, tenantId), { cardId: subject.card_id, automatic: false }, ctx);
-        const answer = (invoice: InvoiceRow) => ({
+        const answer = (invoice: InvoiceRow, paymentUrl: string | null) => ({
           status: 200,
-          body: { invoice: toApiInvoice(invoice), already_open: issued.reused, collected_by: billing.provider.canCollect ? 'provider' : 'operator' },
+          body: {
+            invoice: toApiInvoice(invoice), already_open: issued.reused, collected_by: billing.provider.canCollect ? 'provider' : 'operator',
+            payment_url: paymentUrl,
+          },
         });
-        if (!issued.collect) return answer(issued.invoice);
-        return { call: async ({ withTx }) => answer(await collect(billing, issued.invoice, tenantId, withTx, deps.providerTimeoutMs)) };
+        if (!issued.collect) return answer(issued.invoice, null);
+        return {
+          call: async ({ withTx }) => {
+            const collected = await collect(billing, issued.invoice, tenantId, withTx, deps.providerTimeoutMs);
+            return answer(collected.invoice, collected.paymentUrl);
+          },
+        };
       },
     },
     {
       operationId: 'receivePaymentEvent',
       kind: 'public',
-      // No header is needed by the stand-in provider (its signature is a field of the message). A real provider's
-      // signature header would be named here; cookies and Authorization can never be.
-      headers: [],
+      // The stand-in provider signs a field of its message; Stripe signs the exact bytes, in this header. Cookies and
+      // Authorization can never be declared.
+      headers: ['stripe-signature'],
+      rawBody: true,
+      // a Stripe event carries the whole Checkout Session; well above the 16 KB of other public routes
+      bodyLimit: 64 * 1024,
       policy: {
         public: true,
         reason: 'The payment provider calls this without a session. Every message is checked against a signature made with a key only the provider and the API hold; without a valid signature nothing is read or changed.',
       },
-      handler: async ({ body, headers, ctx }) => {
+      handler: async ({ body, headers, rawBody, ctx }) => {
         const limit = await deps.rateLimiter.hit(`payment-event:${ctx.ip}`, 120, 60, ctx.now);
         if (!limit.allowed) throw problems.tooManyRequests(limit.retryAfterSeconds);
         // With no provider connected parseEvent refuses everything, whatever key is configured.
-        const event = billing.provider.parseEvent({ body, headers, rawBody: null }, ctx.now);
+        const event = billing.provider.parseEvent({ body, headers, rawBody }, ctx.now);
         // One answer for every message that is not accepted: a caller learns nothing about why.
         if (event === null) throw problems.forbidden();
+        // verified as the provider's, about nothing this product acts on: 200, so that the provider stops sending it
+        if (event === 'ignored') return { body: { status: 'ignored' } };
         // The company named in the message is trusted only now, after the signature was checked. A second limit per
         // company: the per-address one above depends on the proxy setting (TRUST_PROXY) being right.
         const perCompany = await deps.rateLimiter.hit(`payment-event-company:${event.tenantId}`, 60, 60, ctx.now);

@@ -17,4 +17,7 @@ regexes = [
   '''claude-haiku-4-5-20251001''',
   # A made-up key of the wrong form, which test/unit/mail-resend.test.ts checks is refused as a Resend key.
   '''sk_live_123456789''',
+  # Made-up Stripe keys for the Stripe tests (test/unit/billing-stripe.test.ts); the API refuses them in production.
+  '''(sk|rk|pk)_(test|live)_FAKE[A-Za-z0-9]*''',
+  '''whsec_FAKE[A-Za-z0-9]*''',
 ]

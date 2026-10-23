@@ -21,7 +21,7 @@
 import { ProblemError, problems } from '../../../shared/errors.ts';
 import type { RequestContext } from '../../../shared/policy-types.ts';
 import { PLATFORM_TENANT_ID, writeAudit, type Notifier, type Tx } from '../../platform/index.ts';
-import { planOf, priceFor, sameMoney, type Money, type Plan } from './catalogue.ts';
+import { CATALOGUE_IS_PLACEHOLDER, planOf, priceFor, sameMoney, type Money, type Plan } from './catalogue.ts';
 import type { PaymentEvent, PaymentProvider } from './provider.ts';
 
 const DAY_MS = 86_400_000;
@@ -355,7 +355,7 @@ export class Billing {
     const unapplied = await tx.query<{ n: number }>(
       `SELECT count(*)::int AS n FROM invoices WHERE tenant_id = $1 AND status IN ('paid', 'paid_late') AND applied_at IS NULL`, [tenantId]);
     return {
-      plan: plan === null ? null : { code: plan.code, name: plan.name, price_per_seat: apiMoney({ amountMinor: plan.pricePerSeatMinor, currency: plan.currency }), placeholder: true },
+      plan: plan === null ? null : { code: plan.code, name: plan.name, price_per_seat: apiMoney({ amountMinor: plan.pricePerSeatMinor, currency: plan.currency }), placeholder: CATALOGUE_IS_PLACEHOLDER },
       seats_requested: row.seats,
       seat_limit: limit,
       seats_unlimited: row.unlimited,
@@ -375,8 +375,9 @@ export class Billing {
       open_invoice: open === null ? null : toApiInvoice(open),
       can_renew_now: open === null && due !== null,
       payments_available: this.#deps.provider.canCollect,
+      payment_page: this.#deps.provider.canCollect && !this.#deps.provider.collectsUnattended,
       payments_needing_attention: unapplied.rows[0]?.n ?? 0,
-      if_nothing_is_done: row.auto_renew && this.#deps.provider.canCollect ? 'automatic_renewal_is_tried' : 'read_only_then_export_only',
+      if_nothing_is_done: row.auto_renew && this.#deps.provider.collectsUnattended ? 'automatic_renewal_is_tried' : 'read_only_then_export_only',
     };
   }
 
@@ -395,8 +396,10 @@ export class Billing {
         throw problems.conflict('seats-below-use', `${term.personCards} cards are in use; revoke cards first or choose at least that many seats`);
       }
     }
-    if (patch.auto_renew === true && !this.#deps.provider.canCollect) {
-      throw problems.conflict('payments-unavailable', 'No payment provider is connected, so nothing can renew by itself');
+    if (patch.auto_renew === true && !this.#deps.provider.collectsUnattended) {
+      throw problems.conflict('payments-unavailable', this.#deps.provider.canCollect
+        ? 'Payments are made on the payment provider\'s page by a person, so nothing can renew by itself'
+        : 'No payment provider is connected, so nothing can renew by itself');
     }
     await tx.query(
       `UPDATE subscriptions SET seats = COALESCE($2, seats), auto_renew = COALESCE($3, auto_renew), updated_at = $4, updated_by_card_id = $5
@@ -461,7 +464,9 @@ export class Billing {
     if (open !== null) {
       const same = open.kind === due.kind && open.seats === due.seats && open.plan_code === plan.code && open.term_days === term.termDays
         && sameMoney(moneyOf(open), due.amount);
-      if (same) return { invoice: open, reused: true, collect: this.#deps.provider.canCollect && open.provider_reference === null };
+      // a provider with its own payment page is asked again (it gives the same page): the Owner may have closed it
+      const ask = open.provider_reference === null || !this.#deps.provider.collectsUnattended;
+      if (same) return { invoice: open, reused: true, collect: this.#deps.provider.canCollect && ask };
       await this.#close(tx, tenantId, open, 'superseded', ctx);
     }
     let invoice = await this.#issueInvoice(tx, tenantId, plan, due, term.termDays, by, ctx);
@@ -705,7 +710,7 @@ export class Billing {
    */
   async autoRenewPrepare(tx: Tx, tenantId: string, planCode: string, ctx: RequestContext): Promise<InvoiceRow | null> {
     const row = await this.#lock(tx, tenantId);
-    if (!row.auto_renew || !this.#deps.provider.canCollect || planOf(planCode) === null) return null;
+    if (!row.auto_renew || !this.#deps.provider.collectsUnattended || planOf(planCode) === null) return null;
     const term = await this.#term().term(tx, tenantId);
     if (term === null) return null;
     const phase = termPhase(term, ctx.now);

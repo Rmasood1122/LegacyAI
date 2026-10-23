@@ -1,14 +1,15 @@
 // The renewal center (features 31-35): the one renewal date of the company, what the next term costs, seats,
-// automatic renewal, and the invoices. Paying asks twice, because it is about money.
+// automatic renewal, and the invoices. Paying asks twice, because it is about money. With Stripe (D37) the Owner pays
+// on Stripe's own page: the API hands its address over, and this screen only links to it.
 // The prices shown come from a placeholder catalogue until the founder sets real ones; the screen says so.
 import { useState } from 'react';
 import type { Invoice, Subscription } from '../../api/generated.ts';
 import { useSession } from '../../session/session.tsx';
 import {
-  Banner, Card, CheckboxField, ConfirmButton, DataTable, Empty, ErrorNote, Facts, formatDate, InvoiceStatus, Loading, moneyOf, Page, PartialListNote, TextField,
+  Banner, Button, Card, CheckboxField, ConfirmButton, DataTable, Empty, ErrorNote, Facts, formatDate, InvoiceStatus, Loading, moneyOf, Page, PartialListNote, TextField,
 } from '../../ui/index.tsx';
 import {
-  parseSeats, PHASE_TEXT, renewPanelState, seatPrompt, useInvoices, useStartRenewal, useSubscription, useUpdateAutoRenew, useUpdateSeats, type RenewPanel,
+  parseSeats, paymentPageOk, PHASE_TEXT, renewPanelState, seatPrompt, useInvoices, useStartRenewal, useSubscription, useUpdateAutoRenew, useUpdateSeats, type RenewPanel,
 } from './hooks.ts';
 
 export function BillingScreen() {
@@ -63,17 +64,22 @@ function Center({ s }: { s: Subscription }) {
 
 const forWhat = (i: Pick<Invoice, 'kind' | 'seats' | 'term_days'>): string => (i.kind === 'seats' ? `${i.seats} more seats` : `${i.seats} seats, ${i.term_days} days`);
 
-function PayPanel({ panel, s, busy, onPay }: { panel: RenewPanel; s: Subscription; busy: boolean; onPay: () => void }) {
+function PayPanel({ panel, s, busy, onPay, paymentUrl }: { panel: RenewPanel; s: Subscription; busy: boolean; onPay: () => void; paymentUrl: string | null }) {
   switch (panel.kind) {
     case 'settled':
       return <Banner tone="success" title={panel.invoice.kind === 'seats' ? 'The seats were added' : 'The term was renewed'}>Nothing was to pay. It took effect today.</Banner>;
     case 'waiting':
       return (
-        <Banner tone="info" title={`Invoice ${panel.invoice.number} is waiting for payment`}>
-          {moneyOf(panel.invoice.amount)} for {forWhat(panel.invoice)}. {panel.byOperator
-            ? 'No payment provider is connected: pay as agreed with the platform operator, who then records the payment.'
-            : 'It takes effect when the payment arrives. Nothing changes before that.'}
-        </Banner>
+        <>
+          <Banner tone="info" title={`Invoice ${panel.invoice.number} is waiting for payment`}>
+            {moneyOf(panel.invoice.amount)} for {forWhat(panel.invoice)}. {panel.byOperator
+              ? 'No payment provider is connected: pay as agreed with the platform operator, who then records the payment.'
+              : 'It takes effect when the payment arrives. Nothing changes before that.'}
+          </Banner>
+          {s.payment_page && (paymentUrl === null
+            ? <Button variant="primary" busy={busy} onClick={onPay}>Get the payment page</Button>
+            : <PaymentLink url={paymentUrl} />)}
+        </>
       );
     case 'no_price':
       return <Banner tone="warning" title="This plan has no price">Ask the platform operator; nothing can be invoiced until it has one.</Banner>;
@@ -94,12 +100,23 @@ function PayPanel({ panel, s, busy, onPay }: { panel: RenewPanel; s: Subscriptio
   }
 }
 
+/** Stripe's own page, where the card is entered (never on this site). Only an https address of Stripe's is linked. */
+function PaymentLink({ url }: { url: string }) {
+  if (!paymentPageOk(url)) return <Banner tone="danger" title="The payment page could not be opened">Please try again later.</Banner>;
+  return (
+    <p>
+      <a className="button button-primary" href={url} rel="noopener noreferrer">Pay on Stripe&rsquo;s secure page</a>
+      <span className="muted"> You come back here afterwards. The renewal shows once Stripe confirms the payment.</span>
+    </p>
+  );
+}
+
 function Pay({ s }: { s: Subscription }) {
   const start = useStartRenewal();
   return (
     <Card title="Renew and pay">
       <ErrorNote error={start.error} />
-      <PayPanel panel={renewPanelState(s, start.data)} s={s} busy={start.isPending} onPay={() => start.mutate({})} />
+      <PayPanel panel={renewPanelState(s, start.data)} s={s} busy={start.isPending} onPay={() => start.mutate({})} paymentUrl={start.data?.payment_url ?? null} />
     </Card>
   );
 }
@@ -125,9 +142,16 @@ function Change({ s }: { s: Subscription }) {
         onConfirm={() => { if (parsed.ok) seatsUpdate.mutate({ body: { seats: parsed.seats } }); }} />
       <h3>Automatic renewal</h3>
       <ErrorNote error={autoRenew.error} />
-      <CheckboxField label="Renew automatically on the renewal date" checked={s.auto_renew} disabled={autoRenew.isPending || (!s.payments_available && !s.auto_renew)}
-        onChange={(checked) => autoRenew.mutate({ body: { auto_renew: checked } })} />
-      <p className="muted">It is tried on the renewal date, at most three times. If every attempt fails you are told, and the company becomes read-only as it would without it.</p>
+      {s.payment_page && !s.auto_renew
+        ? <p className="muted">Payments are made on the payment provider&rsquo;s page each term, so automatic renewal is not available.</p>
+        : (
+          <>
+            <CheckboxField label="Renew automatically on the renewal date" checked={s.auto_renew}
+              disabled={autoRenew.isPending || ((!s.payments_available || s.payment_page) && !s.auto_renew)}
+              onChange={(checked) => autoRenew.mutate({ body: { auto_renew: checked } })} />
+            <p className="muted">It is tried on the renewal date, at most three times. If every attempt fails you are told, and the company becomes read-only as it would without it.</p>
+          </>
+        )}
     </Card>
   );
 }

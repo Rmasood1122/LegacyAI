@@ -653,7 +653,7 @@ describe('invoices nobody answered, and a provider that does not answer', () => 
     // provider never answers and whose time limit is 50 ms instead of 10 seconds.
     const tenant = await createTenant(t, 'billing-timeout');
     await termEndsIn(tenant, 2);
-    const hanging = { name: 'hanging', canCollect: true, start: () => new Promise<never>(() => undefined), parseEvent: () => null };
+    const hanging = { name: 'hanging', canCollect: true, collectsUnattended: true, start: () => new Promise<never>(() => undefined), parseEvent: () => null };
     const slow = await startApp({ paymentProvider: hanging, providerTimeoutMs: 50 }, { AI_SERVICE_URL: stub.url });
     try {
       const owner = await login(slow, tenant.ownerCard, { passkey: tenant.ownerPasskey });

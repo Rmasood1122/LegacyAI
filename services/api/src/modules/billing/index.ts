@@ -2,19 +2,21 @@
 //
 // What it does (Phase 4, docs/phase4/05-billing.md): one subscription per company, invoices, renewal against a
 // payment provider behind a port, reminders and automatic renewal, and the seat limit asked by the policy decision
-// point. What it does NOT do: connect a real payment provider, handle taxes, refunds or currency conversion.
+// point. Payment providers: none, the test stand-in, and Stripe (D37). What it does NOT do: handle taxes, refunds or
+// currency conversion.
 // No payment card data ever reaches this service.
 //
 // The company's term itself is the company card's validity (identity module, decision D19). Billing reaches it only
 // through the CompanyTermPort, which app.ts wires - billing never imports the identity module.
 import type { RequestContext } from '../../shared/policy-types.ts';
-import type { Config, Database, Notifier, RateLimiter, RouteDef, Tx } from '../platform/index.ts';
+import type { Config, Database, Logger, Notifier, RateLimiter, RouteDef, Tx } from '../platform/index.ts';
 import { Billing, type CompanyTermPort, type SeatState } from './internal/billing.ts';
-import { catalogueProblems } from './internal/catalogue.ts';
+import { CATALOGUE_IS_PLACEHOLDER, catalogueProblems } from './internal/catalogue.ts';
 import { FakePaymentProvider, NoPaymentProvider, type PaymentProvider } from './internal/provider.ts';
+import { StripePaymentProvider } from './internal/stripe.ts';
 import { billingRoutes, collect, finish } from './internal/routes.ts';
 
-export { amountDue, catalogueProblems, planOf, PLANS, priceFor, sameMoney, type Money, type Plan } from './internal/catalogue.ts';
+export { amountDue, CATALOGUE_IS_PLACEHOLDER, catalogueProblems, planOf, PLANS, priceFor, sameMoney, type Money, type Plan } from './internal/catalogue.ts';
 export {
   dueNow, enforcedLimit, INVOICE_CAUSES, INVOICE_STATUSES, isUnfinished, MAX_AUTO_RENEW_ATTEMPTS, MORE_CARDS_THAN_SEATS, nextStatus, notAppliedReason,
   OPEN_INVOICE_DAYS, openInvoiceBound, paidSeatsCover, reminderStages, renewalSeats, seatFree, seatState, seatsToAdd, termPhase, UNANSWERED_AFTER_DAYS,
@@ -22,8 +24,11 @@ export {
 } from './internal/billing.ts';
 export {
   EVENT_TOLERANCE_MS, EVENT_VERSION, FakePaymentProvider, NoPaymentProvider, signEvent, verifyEvent,
-  type IncomingMessage, type PaymentEvent, type PaymentEventInput, type PaymentProvider, type PaymentRequest,
+  type IncomingMessage, type PaymentEvent, type PaymentEventInput, type PaymentProvider, type PaymentRequest, type StartedPayment,
 } from './internal/provider.ts';
+export {
+  checkoutFields, eventOfStripe, formEncode, STRIPE_API, STRIPE_API_VERSION, STRIPE_EVENT_TYPES, StripePaymentProvider, stripeSignatureValid,
+} from './internal/stripe.ts';
 
 export { collect, finish, PROVIDER_TIMEOUT_MS } from './internal/routes.ts';
 export type { Billing, InvoiceRow, NotAppliedReason } from './internal/billing.ts';
@@ -78,14 +83,17 @@ export interface BillingModule {
 const SEAT_ACTIONS = new Set(['card:issue']);
 
 export function createBilling(deps: {
-  config: Config; db: Database; notifier: Notifier; rateLimiter: RateLimiter; provider?: PaymentProvider;
+  config: Config; db: Database; notifier: Notifier; rateLimiter: RateLimiter; log: Logger; provider?: PaymentProvider;
   /** For tests only: how long the provider gets to answer. Default PROVIDER_TIMEOUT_MS. */
   providerTimeoutMs?: number;
 }): BillingModule {
   const broken = catalogueProblems();
   if (broken.length > 0) throw new Error(`The plan catalogue is not usable: ${broken.join('; ')}`);
-  const provider = deps.provider
-    ?? (deps.config.payment.provider === 'fake' ? new FakePaymentProvider(deps.config.payment.eventKey?.reveal() ?? null) : new NoPaymentProvider());
+  const provider = deps.provider ?? providerOf(deps.config, deps.log);
+  // real money is never taken at an invented price: a live Stripe key waits for the real catalogue (D37)
+  if (provider instanceof StripePaymentProvider && provider.live && CATALOGUE_IS_PLACEHOLDER) {
+    throw new Error('A live Stripe key is configured but the plan prices are still placeholders: set the real prices first (docs/phase4/05-billing.md, "Prices"), or use a test-mode key');
+  }
   let term: CompanyTermPort | null = null;
   const billing = new Billing({ notifier: deps.notifier, provider, term: () => term });
   const { db } = deps;
@@ -137,4 +145,14 @@ export function createBilling(deps: {
     },
     sweepCompany,
   };
+}
+
+function providerOf(config: Config, log: Logger): PaymentProvider {
+  const { payment } = config;
+  if (payment.provider === 'fake') return new FakePaymentProvider(payment.eventKey?.reveal() ?? null);
+  // the configuration refuses PAYMENT_PROVIDER=stripe without both keys
+  if (payment.provider === 'stripe' && payment.stripe !== null) {
+    return new StripePaymentProvider({ secretKey: payment.stripe.secretKey, webhookSecret: payment.stripe.webhookSecret, returnUrl: payment.stripe.returnUrl, log });
+  }
+  return new NoPaymentProvider();
 }

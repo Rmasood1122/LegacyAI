@@ -482,6 +482,20 @@ Details: `06-open-api-webhooks-email.md`, part C, "Resend"; decision D36; runboo
 - **Not done or proven:** no Resend account, key or sending domain exists; no real e-mail has been sent. Whether
   Resend's real answers match its documentation is an ASSUMPTION until the founder's first test e-mail.
 
+## Step 11 — payments through Stripe (the founder's choice, 2026-10-23)
+
+Details: `05-billing.md`, "Stripe" and "Prices"; decision D37.
+
+- `PAYMENT_PROVIDER=stripe`: "Renew now" gives the Owner Stripe's own payment page for the invoice (one per invoice,
+  never two). Stripe's signed message (checked over the exact bytes) marks it paid, as before. No library added.
+- Prices researched and selected (Team $150, Business $300 per seat per year; a free pilot). **Not yet in the
+  catalogue**: the catalogue prices per term, not per year; that change is next.
+- Measured locally: 23 new API unit tests (signature, events, the request, a local stand-in for Stripe, the
+  configuration, no live key while prices are placeholders) and 3 new screen tests. The database test (`test/integration/billing-stripe.test.ts`) runs on GitHub.
+- **Not done or proven:** no Stripe account, key or webhook exists; no money has been taken. Automatic renewal with a
+  saved card, refunds, taxes and receipts are not built. Whether Stripe's real events match its documentation is an
+  ASSUMPTION until the founder's first test payment.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

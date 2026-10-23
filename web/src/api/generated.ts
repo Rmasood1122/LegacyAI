@@ -1446,6 +1446,7 @@ export interface Subscription {
   open_invoice: null | Invoice;
   can_renew_now: boolean;
   payments_available: boolean;
+  payment_page: boolean;
   payments_needing_attention: number;
   if_nothing_is_done: "automatic_renewal_is_tried" | "read_only_then_export_only";
 }
@@ -1480,6 +1481,17 @@ export interface RenewalStarted {
   invoice: Invoice;
   already_open: boolean;
   collected_by: "provider" | "operator";
+  payment_url: string | null;
+}
+
+export interface StripeEventRequest {
+  id: string;
+  object: "event";
+  type: string;
+  data: {
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
 }
 
 export interface PaymentEventRequest {
@@ -3031,9 +3043,9 @@ export interface OperationTypes {
   receivePaymentEvent: {
     path: undefined;
     query: undefined;
-    body: PaymentEventRequest;
+    body: PaymentEventRequest | StripeEventRequest;
     response: {
-      status: "applied" | "duplicate" | "recorded";
+      status: "applied" | "duplicate" | "recorded" | "ignored";
     };
   };
   getTenantBilling: {
