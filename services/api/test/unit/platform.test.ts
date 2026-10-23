@@ -26,7 +26,7 @@ describe('config loader fails closed', () => {
     expect(loadConfig(testEnv({ NODE_ENV: 'test' })).payment.provider).toBe('fake');
     expect(() => loadConfig(testEnv({ NODE_ENV: 'development', PAYMENT_PROVIDER: undefined }))).not.toThrow();
     expect(() => loadConfig(testEnv({ PAYMENT_EVENT_KEY: undefined }))).toThrow(/PAYMENT_EVENT_KEY is required/);
-    expect(loadConfig(testEnv({ PAYMENT_PROVIDER: undefined, PAYMENT_EVENT_KEY: undefined })).payment).toEqual({ provider: 'none', eventKey: null });
+    expect(loadConfig(testEnv({ PAYMENT_PROVIDER: undefined, PAYMENT_EVENT_KEY: undefined })).payment).toEqual({ provider: 'none', eventKey: null, stripe: null });
   });
 
   const SECRETS = ['DATABASE_URL', 'SC_PEPPER_KEYRING', 'CREDENTIAL_ENC_KEYRING', 'HMAC_INDEX_KEY', 'SERVICE_TOKEN_KEY'];

@@ -81,7 +81,7 @@ export async function createApp(config: Config, overrides: AppOverrides = {}): P
 
   // Billing answers the policy decision point's plan-limit question; the identity module gives billing the company's
   // term (the company card's dates). Each knows the other only through a port.
-  const billing = createBilling({ config, db, notifier, rateLimiter, provider: overrides.paymentProvider, providerTimeoutMs: overrides.providerTimeoutMs });
+  const billing = createBilling({ config, db, notifier, rateLimiter, log, provider: overrides.paymentProvider, providerTimeoutMs: overrides.providerTimeoutMs });
   // Every secret the API keeps for a company is sealed by ONE sealer: the platform's key, or the company's own (D35).
   const sealing = new TenantSealing({
     platform: new SealingCipher(config.credentialEnc), keys: overrides.keyService ?? keyServiceFrom(config.keyService), cacheSeconds: overrides.keyCacheSeconds,

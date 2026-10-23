@@ -7,7 +7,7 @@ import type { Invoice, Subscription } from '../api/generated.ts';
 import { FakeApi, makeSession, permissionsFor, problem, renderScreen, sessionValue } from '../test/harness.tsx';
 import { money } from '../ui/index.tsx';
 import { BillingScreen } from './billing/BillingScreen.tsx';
-import { parseSeats, renewPanelState, seatPrompt } from './billing/hooks.ts';
+import { parseSeats, paymentPageOk, renewPanelState, seatPrompt } from './billing/hooks.ts';
 import { losesDays, OperatorBilling, settleable } from './operator/OperatorBilling.tsx';
 
 const ID = (n: number): string => `01a10174-0000-7000-8000-${String(n).padStart(12, '0')}`;
@@ -21,7 +21,7 @@ const subscription = (over: Partial<Subscription> = {}): Subscription => ({
   plan: { code: 'pilot', name: 'Pilot', price_per_seat: usd(1500), placeholder: true }, seats_requested: null, seat_limit: 5, seats_unlimited: false,
   seats_used: 2, seat_state: 'ok', auto_renew: false, term_days: 90, expires_at: '2026-12-01T00:00:00.000Z', renewal_due: '2026-11-17T00:00:00.000Z',
   grace_until: '2026-12-15T00:00:00.000Z', read_only: false, export_only: false, phase: 'renewal_open', next_term: { seats: 5, amount: usd(7500) },
-  due_now: { kind: 'renewal', seats: 5, amount: usd(7500) }, open_invoice: null, can_renew_now: true, payments_available: true,
+  due_now: { kind: 'renewal', seats: 5, amount: usd(7500) }, open_invoice: null, can_renew_now: true, payments_available: true, payment_page: false,
   payments_needing_attention: 0, if_nothing_is_done: 'read_only_then_export_only', ...over,
 });
 const invoice = (over: Partial<Invoice> = {}): Invoice => ({
@@ -53,7 +53,7 @@ describe('the words and numbers', () => {
   });
 
   it('the pay panel shows exactly one thing, decided by what the API says', () => {
-    const started = { invoice: invoice(), already_open: false, collected_by: 'provider' } as const;
+    const started = { invoice: invoice(), already_open: false, collected_by: 'provider', payment_url: null } as const;
     expect(renewPanelState(subscription(), undefined)).toMatchObject({ kind: 'can_pay', byOperator: false, due: { kind: 'renewal' } });
     expect(renewPanelState(subscription({ payments_available: false }), undefined)).toMatchObject({ kind: 'can_pay', byOperator: true });
     // an invoice is waiting: that wins over everything, also over "can renew"
@@ -87,7 +87,7 @@ describe('the renewal center', () => {
       listInvoices: () => page([]),
       startRenewal: () => {
         open = invoice();
-        return { invoice: open, already_open: false, collected_by: 'provider' as const };
+        return { invoice: open, already_open: false, collected_by: 'provider' as const, payment_url: null };
       },
     });
     renderScreen(<BillingScreen />, { api, session: as(...OWNER) });
@@ -98,6 +98,49 @@ describe('the renewal center', () => {
     expect(screen.getByText(/It takes effect when the payment arrives\. Nothing changes before that\.$/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Renew now…' })).toBeNull();
     expect(api.callsTo('startRenewal')).toHaveLength(1);
+  });
+
+  it('with Stripe: after "Renew now" the Owner gets a link to Stripe\'s own page; coming back later, the page can be fetched again; no automatic renewal', async () => {
+    const user = userEvent.setup();
+    const URL_ = 'https://checkout.stripe.com/c/pay/cs_test_a1b2c3';
+    let open: Invoice | null = null;
+    const api = new FakeApi({
+      getSubscription: () => subscription(open === null ? { payment_page: true } : { payment_page: true, open_invoice: open, can_renew_now: false }),
+      listInvoices: () => page([]),
+      startRenewal: () => {
+        const already = open !== null;
+        open = invoice();
+        return { invoice: open, already_open: already, collected_by: 'provider' as const, payment_url: URL_ };
+      },
+    });
+    const { unmount } = renderScreen(<BillingScreen />, { api, session: as(...OWNER) });
+    expect(await screen.findByText(/automatic renewal is not available/)).toBeTruthy();
+    expect(screen.queryByLabelText('Renew automatically on the renewal date')).toBeNull();
+    await user.click(await screen.findByRole('button', { name: 'Renew now…' }));
+    await user.click(screen.getByRole('button', { name: 'Yes, renew for 90 days for 75.00 USD' }));
+    const link = await screen.findByRole('link', { name: 'Pay on Stripe’s secure page' });
+    expect(link.getAttribute('href')).toBe(URL_);
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+    unmount();
+    // the Owner closed the page and comes back: the invoice waits; one click fetches the page again
+    renderScreen(<BillingScreen />, { api, session: as(...OWNER) });
+    await user.click(await screen.findByRole('button', { name: 'Get the payment page' }));
+    expect((await screen.findByRole('link', { name: 'Pay on Stripe’s secure page' })).getAttribute('href')).toBe(URL_);
+    expect(api.callsTo('startRenewal')).toHaveLength(2);
+  });
+
+  it('a payment page that is not Stripe\'s own https page is never linked', () => {
+    expect(paymentPageOk('https://checkout.stripe.com/c/pay/cs_test_1')).toBe(true);
+    for (const bad of ['https://evil.example/pay', 'http://checkout.stripe.com/x', 'javascript:alert(1)', 'https://checkout.stripe.com.evil.example/x']) {
+      expect(paymentPageOk(bad), bad).toBe(false);
+    }
+  });
+
+  it('without a payment page (no provider, or one that collects by itself) there is no "Get the payment page" button', async () => {
+    const api = new FakeApi({ getSubscription: () => subscription({ open_invoice: invoice(), can_renew_now: false }), listInvoices: () => page([]) });
+    renderScreen(<BillingScreen />, { api, session: as(...OWNER) });
+    expect(await screen.findByText('Invoice 1 is waiting for payment')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Get the payment page' })).toBeNull();
   });
 
   it('too early: there is no button; a payment that did not take effect is said in words, and so is a late one in the list', async () => {
@@ -126,7 +169,7 @@ describe('the renewal center', () => {
         asked = true;
         return subscription({ ...reached, seats_requested: 4 });
       },
-      startRenewal: () => ({ invoice: invoice({ kind: 'seats', seats: 2, amount: usd(3000), number: 2 }), already_open: false, collected_by: 'provider' as const }),
+      startRenewal: () => ({ invoice: invoice({ kind: 'seats', seats: 2, amount: usd(3000), number: 2 }), already_open: false, collected_by: 'provider' as const, payment_url: null }),
     });
     renderScreen(<BillingScreen />, { api, session: as(...OWNER) });
     expect(await screen.findByText('All 2 seats are in use')).toBeTruthy();

@@ -4,6 +4,9 @@
 > possible without a database**: the database tests and the browser test run on GitHub and had not run when this
 > note was written. Nothing is deployed. **No payment provider is connected. No money can be taken. No account was
 > opened and no payment service was called.** The prices in the catalogue are placeholders. Decision D29.
+>
+> **Update 2026-10-23: Stripe can now be connected** (decision D37, section "Stripe" below). It was tested only
+> against a local stand-in for Stripe: no Stripe account exists, no key was used, **no money has been taken**.
 
 ## In plain language
 
@@ -132,14 +135,88 @@ hold.
 8. A badly formed body answers 400 (that reveals nothing about a signature); everything else that is not accepted
    answers the same 403. An accepted message always answers 200 with `applied`, `duplicate` or `recorded`.
 
+## Stripe (decision D37, 2026-10-23)
+
+`services/api/src/modules/billing/internal/stripe.ts`. No Stripe library. Read from Stripe's documentation on
+2026-10-23: [Checkout Sessions](https://docs.stripe.com/api/checkout/sessions/create),
+[webhook signatures](https://docs.stripe.com/webhooks?verify=verify-manually),
+[idempotent requests](https://docs.stripe.com/api/idempotent_requests), [versioning](https://docs.stripe.com/api/versioning).
+
+**How the Owner pays.** "Renew now" issues the invoice as before, then asks Stripe for a **Checkout Session**: a
+payment page hosted by Stripe for exactly that invoice's amount. The API answers with its address (`payment_url`);
+the screen shows "Pay on Stripe's secure page". The card is typed on Stripe's page, **never on ours**. Stripe sends
+the Owner back to the billing page. Nothing changes until Stripe's signed message arrives.
+
+- **No double charge.** The request carries `Idempotency-Key: legacyai-invoice-<invoice id>` and is the same every
+  time for the same invoice, so asking again (a click twice, a timeout, coming back later) gives the **same**
+  session and page. Stripe keeps a key for at least 24 hours; a session is open for 24 hours by default.
+- **Coming back later.** While the invoice waits, the screen offers "Get the payment page"; it asks again and gets the
+  same page. (The invoice keeps the first session id as its reference.)
+- **No real money at an invented price.** While the catalogue's prices are placeholders, the API refuses to start
+  with a **live** Stripe key; a test-mode key (which takes no money) works.
+- **Automatic renewal is not offered with Stripe**, because a Checkout payment needs the Owner on Stripe's page
+  (`payment_page: true`, `collectsUnattended: false`). Saving a card for later charges is a separate step (it needs a
+  Stripe customer per company and the customer's agreement); not built.
+- The API version is pinned (`Stripe-Version: 2026-07-29.dahlia`): Stripe's newest on 2026-10-23 was 23 days old,
+  so under the 60-day rule this is the newest one allowed. **Set the webhook endpoint in Stripe to the same version.**
+
+**How Stripe's message is believed.** The endpoint is the same (`POST /v1/billing/provider-events`).
+
+1. The server now keeps the **exact bytes** of a JSON body; only a public route that declares `rawBody` is given
+   them (this one). JSON is still parsed by Fastify's own parser.
+2. `Stripe-Signature: t=...,v1=...`: HMAC-SHA256 with the endpoint's signing secret over `"<t>.<exact bytes>"`,
+   compared in constant time; any `v1` may match (Stripe sends two while a secret is rolled); `v0` is ignored.
+   Within 5 minutes of now. No header, no bytes, a wrong signature or time: the same 403 as before.
+3. Only then is the body read. `checkout.session.completed` with `payment_status: "paid"` and
+   `checkout.session.async_payment_succeeded` mean paid; `checkout.session.async_payment_failed` means declined. The
+   session must name the company and invoice in its metadata and the invoice again as `client_reference_id`. A live
+   key never accepts a test-mode event, and the reverse.
+4. Anything else that is verified is answered **200 `ignored`** and changes nothing (another event type, a session
+   this product did not make, a bank payment still on its way). Without the 200, Stripe would keep sending it for
+   three days.
+5. From there on everything is as before: the amount and currency are compared with the invoice, each event id is
+   applied once, a late or mismatched payment is kept on record and reported, never applied silently.
+
+**What the founder does once (not done by me - it needs the founder's Stripe account):**
+
+1. In Stripe, start in **test mode**. Create a **restricted key** with write access to Checkout Sessions only
+   (Stripe recommends restricted keys for live mode). Put it in Secret Manager as `STRIPE_SECRET_KEY`.
+2. Add a webhook endpoint: `https://<API address>/v1/billing/provider-events`, API version `2026-07-29.dahlia`,
+   events `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+   `checkout.session.async_payment_failed`. Copy its signing secret (`whsec_...`) to Secret Manager as
+   `STRIPE_WEBHOOK_SECRET`.
+3. Set `PAYMENT_PROVIDER=stripe` on the API. `STRIPE_RETURN_URL` defaults to the web application's `/billing` page.
+4. With a test company: "Renew now", pay with Stripe's test card, and check that the invoice shows as paid. Then
+   switch to live keys.
+
+**Fees** (read 2026-10-23 from [stripe.com/pricing](https://stripe.com/pricing)): 2.9% + 30 cents per successful
+domestic card payment; +1.5% for international cards; +1% if currency conversion is needed; Checkout itself has no
+extra fee. A $3,750 card payment costs about $109 in fees (domestic) or $165 (international).
+
+## Prices (researched 2026-10-23; selected, not yet in the catalogue - decision D37)
+
+Published prices of comparable tools, read on 2026-10-23 from each vendor's own pricing page (QUOTED unless said):
+
+| Tool | Plan | Per user per month | Notes |
+|---|---|---|---|
+| Tettra | Scaling | $8 (annual) | 10-user minimum; no free plan shown |
+| Slite | Basic / Pro | $10 / $20 | the monthly and annual figures read the same (may be a reading error) |
+| Notion | Plus / Business | $10 / $20 | Business includes AI; the page did not say annual or monthly |
+| Confluence | Standard / Premium | $5.78 / $11.16 | monthly billing; free up to 10 users |
+| Scribe | Pro Personal / Pro Team | $25 / $23 or $13 | the page showed two Pro Team prices |
+| SkillPass (retiree handover) | per handover | $15-39 one-time | not per seat |
+| Guru, Glean, Bloomfire, Document360, Trainual | - | not published | |
+
+Selected (per seat per **year**, USD): **Pilot** free (up to 5 cards, 60 days, once); **Team $150**; **Business
+$300** (from 25 seats; SSO, SCIM, own key). What remains to build: a yearly price turned into the price of the term's
+length, and the Business plan code (see D37).
+
 ## What a real provider still needs (not done)
 
-- **Raw bytes.** Real providers sign the exact bytes of the request. Public routes now receive the request's
-  headers, and the provider interface has a place for the raw body, but the server does not yet keep the raw bytes
-  (`rawBody` is always empty). That is one more change in the HTTP layer.
-- One new file implementing the provider interface (`start` a payment, `parseEvent` a message), its configuration,
-  and an entry in `docs/DEPENDENCIES.md` after the 60-day check if a library is used.
-- A decision about refunds, taxes and receipts.
+- Refunds, taxes (Stripe Tax is extra: 0.5% per transaction where registered) and receipts: decisions for the
+  founder. There is still no refund function; a refund is made in Stripe's dashboard, and the operator records what
+  that means here.
+- Automatic renewal with a saved card (see "Stripe" above).
 
 The call to the provider already happens **outside** any database transaction: the invoice is stored first; a
 provider that fails or does not answer in 10 seconds leaves an open invoice, no charge on record, and an answer of
@@ -152,6 +229,8 @@ provider that fails or does not answer in 10 seconds leaves an open invoice, no 
   must be declared on the `receivePaymentEvent` route; cookies, `Authorization` and the CSRF token can never be
   declared.
 - The stand-in provider starts only when `NODE_ENV=test`. Development and production refuse it.
+- Stripe: start-up refuses a missing or malformed key or signing secret, the test placeholders in production, and a
+  return page outside the web application.
 
 ## What was measured
 

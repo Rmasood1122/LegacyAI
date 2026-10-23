@@ -1,9 +1,9 @@
 // The payment provider as the billing module sees it, and the check on the provider's messages.
 //
 // Nothing here knows any real provider: no SDK, no network call, no account. The words used are the product's own
-// ("payment", "event", "paid", "declined"). A real provider is added as one more implementation of PaymentProvider:
-// it collects money in start() and turns ITS message into a PaymentEvent in parseEvent(). The callers do not change.
-// docs/phase4/05-billing.md says what that still needs (the raw bytes of the request, above all).
+// ("payment", "event", "paid", "declined"). A real provider is one more implementation of PaymentProvider: it
+// collects money in start() and turns ITS message into a PaymentEvent in parseEvent(). The callers do not change.
+// Stripe is one (stripe.ts, decision D37).
 //
 // HOW A MESSAGE IS TRUSTED. The provider tells us "this invoice was paid" by calling the API. That call carries no
 // session, so everything rests on its signature:
@@ -29,7 +29,7 @@ export interface IncomingMessage {
   body: unknown;
   /** Request headers, lower-case names. A real provider puts its signature here. */
   headers: Readonly<Record<string, string | undefined>>;
-  /** The exact bytes that were sent, when the HTTP layer kept them (it does not yet: see 05-billing.md). */
+  /** The exact bytes that were sent (a provider that signs bytes needs them), or null. */
   rawBody: Buffer | null;
 }
 
@@ -37,10 +37,29 @@ export interface PaymentProvider {
   readonly name: string;
   /** False = nothing can be collected through the product (an invoice is then settled by the operator). */
   readonly canCollect: boolean;
-  /** Asks the provider to collect the amount. The outcome arrives later as a signed event, never in this answer. */
-  start(request: PaymentRequest): Promise<{ reference: string }>;
-  /** The provider's message as a verified event in the product's own words, or null. Null says nothing about WHY. */
-  parseEvent(message: IncomingMessage, now: Date): PaymentEvent | null;
+  /**
+   * True = the provider can collect with nobody present (automatic renewal). False = a person pays on the provider's
+   * own page (`paymentUrl`), so automatic renewal is not offered.
+   */
+  readonly collectsUnattended: boolean;
+  /**
+   * Asks the provider to collect the amount. The outcome arrives later as a signed event, never in this answer.
+   * Asking again for the same invoice must not charge twice (the provider de-duplicates by invoice id), and gives the
+   * same payment page while it is valid.
+   */
+  start(request: PaymentRequest): Promise<StartedPayment>;
+  /**
+   * The provider's message as a verified event in the product's own words; 'ignored' for a message that is verified
+   * as the provider's but says nothing this product acts on; or null. Null says nothing about WHY.
+   */
+  parseEvent(message: IncomingMessage, now: Date): PaymentEvent | 'ignored' | null;
+}
+
+export interface StartedPayment {
+  /** The provider's id of this attempt (kept on the invoice). */
+  reference: string;
+  /** Where the person pays, when the provider has its own payment page; null otherwise. */
+  paymentUrl: string | null;
 }
 
 export type PaymentOutcome = 'paid' | 'declined';
@@ -112,7 +131,8 @@ export function verifyEvent(key: Buffer | null, input: PaymentEventInput, now: D
 export class NoPaymentProvider implements PaymentProvider {
   readonly name = 'none';
   readonly canCollect = false;
-  async start(): Promise<{ reference: string }> {
+  readonly collectsUnattended = false;
+  async start(): Promise<StartedPayment> {
     throw new Error('no payment provider is configured');
   }
   parseEvent(): PaymentEvent | null {
@@ -128,12 +148,13 @@ export class NoPaymentProvider implements PaymentProvider {
 export class FakePaymentProvider implements PaymentProvider {
   readonly name = 'fake';
   readonly canCollect = true;
+  readonly collectsUnattended = true;
   readonly #key: Buffer | null;
   constructor(key: Buffer | null) {
     this.#key = key;
   }
-  async start(request: PaymentRequest): Promise<{ reference: string }> {
-    return { reference: `fake-${request.invoiceId}` };
+  async start(request: PaymentRequest): Promise<StartedPayment> {
+    return { reference: `fake-${request.invoiceId}`, paymentUrl: null };
   }
   parseEvent(message: IncomingMessage, now: Date): PaymentEvent | null {
     return verifyEvent(this.#key, message.body as PaymentEventInput, now);

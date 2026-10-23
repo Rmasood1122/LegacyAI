@@ -113,13 +113,18 @@ export interface PublicHandlerArgs {
   headers: Readonly<Record<string, string | undefined>>;
   /** The flow cookie (FLOW_COOKIE) - only for a public route that declares `flowCookie`; undefined everywhere else. */
   flowCookie?: string;
+  /**
+   * The exact bytes of a JSON body as they arrived - only for a public route that declares `rawBody` (a provider
+   * that signs the bytes, not the parsed JSON); null everywhere else.
+   */
+  rawBody: Buffer | null;
   body: any;
   params: any;
   query: any;
 }
 
 /** What a handler gets once the policy allowed the request. `S` says who may be asking. */
-export interface AuthorizedHandlerArgs<S extends Subject> extends Omit<PublicHandlerArgs, 'headers' | 'flowCookie'> {
+export interface AuthorizedHandlerArgs<S extends Subject> extends Omit<PublicHandlerArgs, 'headers' | 'flowCookie' | 'rawBody'> {
   /** The request's content type (without parameters), for raw-file uploads. */
   contentType?: string;
   tx: Tx;
@@ -180,6 +185,10 @@ export type RouteDef =
       headers?: readonly string[];
       /** This route reads (and may set) FLOW_COOKIE. Default: it never sees it. */
       flowCookie?: true;
+      /** This route receives the exact bytes of its JSON body (`rawBody`). Default: null. */
+      rawBody?: true;
+      /** A larger body limit than the public default of 16 KB (a provider's messages). */
+      bodyLimit?: number;
       handler: (a: PublicHandlerArgs) => Promise<HandlerResult>;
     }
   | {
@@ -325,6 +334,15 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
   app.addContentTypeParser(['application/pdf', 'text/plain', 'text/markdown'], { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
   // A company directory (SCIM, RFC 7644) sends JSON as application/scim+json: read exactly like application/json.
   app.addContentTypeParser('application/scim+json', { parseAs: 'string' }, app.getDefaultJsonParser('error', 'error'));
+  const rawBodies = new WeakMap<FastifyRequest, Buffer>();
+  // JSON is parsed exactly as before (Fastify's own parser, which refuses __proto__ and constructor keys); the bytes
+  // are kept beside it, and only a public route that declares `rawBody` is handed them (a provider's signature).
+  const json = app.getDefaultJsonParser('error', 'error');
+  app.removeContentTypeParser('application/json');
+  app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
+    rawBodies.set(req, body as Buffer);
+    json(req, (body as Buffer).toString('utf8'), done);
+  });
 
   const staticReplies = new WeakSet<FastifyReply>();
   app.addHook('onSend', async (req, reply) => {
@@ -711,7 +729,7 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
         url: op.fastifyPath,
         config: { [ROUTE_MARK]: true } as Record<symbol, unknown>,
         // Sign-in and enrollment bodies are small; anonymous callers get a tighter limit. Uploads declare their own.
-        ...(kind === 'public' ? { bodyLimit: 16 * 1024 } : {}),
+        ...(kind === 'public' ? { bodyLimit: def.kind === 'public' && def.bodyLimit !== undefined ? def.bodyLimit : 16 * 1024 } : {}),
         ...(def.kind === 'gateway' && def.bodyLimit !== undefined ? { bodyLimit: def.bodyLimit } : {}),
         handler: (req, reply) =>
           tracer.startActiveSpan(op.operationId, async (span) => {
@@ -726,6 +744,7 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
                 try {
                   result = await def.handler({
                     ctx, headers: declaredHeaders(req.headers, publicHeaders), body: input.body, params: input.params, query: input.query,
+                    rawBody: def.rawBody === true ? rawBodies.get(req) ?? null : null,
                     ...(def.flowCookie === true ? { flowCookie: req.cookies[FLOW_COOKIE] } : {}),
                   });
                 } catch (err) {

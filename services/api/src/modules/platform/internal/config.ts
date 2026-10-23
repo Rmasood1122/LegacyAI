@@ -61,8 +61,13 @@ export interface Config {
    * Payments (docs/phase4/05). 'none': nothing can be paid through the product and the provider's messages are all
    * refused. 'fake': a stand-in that takes no money, for tests and demonstrations - refused in production.
    * `eventKey` checks the signature on the provider's messages; without it every message is refused.
+   * 'stripe': Stripe (decision D37), with its secret key, the webhook endpoint's signing secret and the page Stripe
+   * sends the Owner back to (`stripe`, null for every other provider).
    */
-  payment: { provider: 'none' | 'fake'; eventKey: Secret<Buffer> | null };
+  payment: {
+    provider: 'none' | 'fake' | 'stripe'; eventKey: Secret<Buffer> | null;
+    stripe: { secretKey: Secret; webhookSecret: Secret; returnUrl: string } | null;
+  };
   /**
    * Outgoing webhooks (docs/phase4/06, part B). 'none' (default): endpoints can be registered but nothing is sent -
    * events wait in the outbox. 'https': the delivery job sends signed messages to the registered public addresses.
@@ -307,7 +312,7 @@ export function loadConfig(env: Env): Config {
     validateResponses: bool('VALIDATE_RESPONSES', nodeEnv !== 'production'),
     exportDir: raw('EXPORT_DIR') ?? './exports',
     webDistDir: raw('WEB_DIST_DIR') ?? null,
-    payment: { provider: oneOf('PAYMENT_PROVIDER', ['none', 'fake'] as const, 'none'), eventKey: null },
+    payment: { provider: oneOf('PAYMENT_PROVIDER', ['none', 'fake', 'stripe'] as const, 'none'), eventKey: null, stripe: null },
     webhooks: { delivery: oneOf('WEBHOOK_DELIVERY', ['none', 'https'] as const, 'none') },
     mail: {
       sender: oneOf('MAIL_SENDER', ['none', 'fake', 'resend'] as const, 'none'), from: raw('MAIL_FROM') ?? 'LegacyAI <no-reply@localhost>', resendApiKey: null,
@@ -371,6 +376,40 @@ export function loadConfig(env: Env): Config {
     // only where automated tests run: NODE_ENV must be exactly "test" - not production, not development, not unset.
     if (nodeEnv !== 'test') problems.push('PAYMENT_PROVIDER=fake takes no money and is allowed only when NODE_ENV=test');
     if (config.payment.eventKey === null) problems.push('PAYMENT_EVENT_KEY is required when PAYMENT_PROVIDER is set');
+  }
+  if (config.payment.provider === 'stripe') {
+    const secretKey = raw('STRIPE_SECRET_KEY');
+    const webhookSecret = raw('STRIPE_WEBHOOK_SECRET');
+    const returnUrl = raw('STRIPE_RETURN_URL') ?? `${allowedOrigins[0] ?? 'http://localhost:3000'}/billing`;
+    let ok = true;
+    // a restricted key (rk_) is what Stripe recommends for live mode; a test-mode key takes no real money
+    if (secretKey === undefined || !/^(sk|rk)_(test|live)_[A-Za-z0-9]{10,250}$/.test(secretKey)) {
+      problems.push('STRIPE_SECRET_KEY must be a Stripe secret or restricted key (sk_... or rk_...) when PAYMENT_PROVIDER=stripe');
+      ok = false;
+    }
+    if (webhookSecret === undefined || !/^whsec_[A-Za-z0-9+/=]{10,250}$/.test(webhookSecret)) {
+      problems.push('STRIPE_WEBHOOK_SECRET must be the webhook endpoint\'s signing secret (whsec_...) when PAYMENT_PROVIDER=stripe');
+      ok = false;
+    }
+    if (nodeEnv === 'production' && [secretKey, webhookSecret].some((v) => v !== undefined && /^[a-z]+_(test_|live_)?FAKE/.test(v))) {
+      problems.push('a placeholder Stripe key is in use; use the keys from the Stripe account');
+      ok = false;
+    }
+    let returnOk = false;
+    try {
+      const u = new URL(returnUrl);
+      returnOk = (u.protocol === 'https:' || (u.protocol === 'http:' && nodeEnv !== 'production' && ['localhost', '127.0.0.1'].includes(u.hostname)))
+        && u.hash === '' && u.search === '' && u.username === '' && allowedOrigins.includes(u.origin);
+    } catch {
+      returnOk = false;
+    }
+    if (!returnOk) {
+      problems.push('STRIPE_RETURN_URL must be an https page of the web application (one of ALLOWED_ORIGINS), without ? or #; http only on localhost outside production');
+      ok = false;
+    }
+    if (ok && secretKey !== undefined && webhookSecret !== undefined) {
+      config.payment.stripe = { secretKey: new Secret(secretKey), webhookSecret: new Secret(webhookSecret), returnUrl };
+    }
   }
 
   // The placeholder keys from .env.example decode to text starting with "FAKE-". They must
