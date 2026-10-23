@@ -234,6 +234,7 @@ CONSEQUENCES:
 - Chosen (founder, from three options): ignore exactly these eight IDs in the CI audit, with the reason next to them; any other advisory still fails. Rejected: forcing pillow 13 against fastembed's declared limit and D2; leaving CI red.
 - pypdf moved 6.19.0 -> 6.20.1 for its four advisories (same major version; D2 does not apply).
 - 2026-10-22 (founder's choice, same reasoning): 16 more pillow advisories, again fixed only in 13.0.0, accepted by ID: CVE-2026-112402, CVE-2026-112900, CVE-2026-112893, CVE-2026-112392, CVE-2026-112891, CVE-2026-112405, CVE-2026-112390, CVE-2026-112401, CVE-2026-112901, CVE-2026-112391, CVE-2026-112894, CVE-2026-112406, CVE-2026-112399, CVE-2026-112892, CVE-2026-112393, CVE-2026-112396. pypdf 6.20.1 -> 6.21.1 for CVE-2026-113786 (same major version).
+- 2026-10-23 (same rule as the founder's two earlier choices, applied by Claude; the founder can reverse it): 11 more pillow advisories, again fixed only in 13.0.0, accepted by ID: CVE-2026-96636, CVE-2026-96637, CVE-2026-96638, CVE-2026-96639, CVE-2026-96640, CVE-2026-96641, CVE-2026-96642, CVE-2026-96643, CVE-2026-96644, CVE-2026-96778, GHSA-78g4-xqwv-q3g8. fastembed 0.9.0 still requires pillow<13 (PyPI, read 2026-10-23).
 - Re-check when fastembed allows pillow 13 and pillow 13 is 60 days old (2026-12-15). Details: docs/DEPENDENCIES.md 9.1.
 
 **D33 — SSO: the company's identity provider is a strong factor, chosen by the company the person names, linked by the provider's subject (2026-10-21).**

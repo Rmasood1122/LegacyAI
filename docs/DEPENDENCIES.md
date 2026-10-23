@@ -192,6 +192,8 @@ move to it and remove the ignores.
 
 **pillow, 2026-10-22: 16 more advisories accepted by ID (D32, founder's choice).** CVE-2026-112402, CVE-2026-112900, CVE-2026-112893, CVE-2026-112392, CVE-2026-112891, CVE-2026-112405, CVE-2026-112390, CVE-2026-112401, CVE-2026-112901, CVE-2026-112391, CVE-2026-112894, CVE-2026-112406, CVE-2026-112399, CVE-2026-112892, CVE-2026-112393, CVE-2026-112396 - all fixed only in pillow 13.0.0. fastembed 0.9.0 still requires `pillow<13` (read https://pypi.org/pypi/fastembed/json on 2026-10-22); the service still never imports pillow. Same re-check date, 2026-12-15.
 
+**pillow, 2026-10-23: 11 more advisories accepted by ID (D32, the founder's earlier rule applied again).** CVE-2026-96636, CVE-2026-96637, CVE-2026-96638, CVE-2026-96639, CVE-2026-96640, CVE-2026-96641, CVE-2026-96642, CVE-2026-96643, CVE-2026-96644, CVE-2026-96778, GHSA-78g4-xqwv-q3g8 - all fixed only in pillow 13.0.0 (published 2026-10-16). fastembed 0.9.0 still requires `pillow<13` (read https://pypi.org/pypi/fastembed/json on 2026-10-23). Same re-check date, 2026-12-15.
+
 ### 9.2 TypeScript
 
 | Purpose | Package and version | Released | Licence | Evidence |
