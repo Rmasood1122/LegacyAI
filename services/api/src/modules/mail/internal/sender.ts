@@ -1,6 +1,6 @@
-// The e-mail service as the mail module sees it. No real service is connected: which one, and the sending domain
-// (SPF, DKIM, DMARC), are the founder's choice (docs/phase4/06). A real service is added as one more MailSender; the
-// callers do not change.
+// The e-mail service as the mail module sees it. The founder chose Resend (resend.ts, decision D36); the sending
+// domain (SPF, DKIM, DMARC) is set up in the founder's Resend account (docs/phase4/06). Another service would be one
+// more MailSender; the callers do not change.
 //
 // FakeMailSender sends NOTHING: it keeps the messages in memory so that tests can read them. The configuration
 // accepts it only when NODE_ENV=test.

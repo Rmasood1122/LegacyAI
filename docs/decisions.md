@@ -273,3 +273,12 @@ CONSEQUENCES:
 - Key services: `none` (default) and `local` (a stand-in, refused in production). A real KMS is one adapter, and a founder decision (it needs a cloud account).
 - No new library.
 - **Confirmed by the founder (2026-10-22, the recommended defaults):** secrets first (and no "your data under your key" claim until documents and knowledge are covered); the operator sets the key; the 5-minute delay. Still open until a customer asks: which key service.
+
+**D36 — E-mail: Resend, called directly over HTTPS, with the message id as the idempotency key (2026-10-22).**
+- The founder chose Resend (2026-10-22). Details: `docs/phase4/06-open-api-webhooks-email.md`, part C, "Resend".
+- One more `MailSender` (`MAIL_SENDER=resend`, key in `RESEND_API_KEY` from Secret Manager). The callers did not change.
+- **No library:** one `POST https://api.resend.com/emails` through the platform's guarded HTTPS client. Resend's Node package was not added: it would be more code that runs with the key, for one request.
+- The message id is the `Idempotency-Key`, so a retry of a message Resend already took is not sent twice (Resend keeps keys 24 hours; our retries end within about 15).
+- A set-up problem on our side (key, unverified domain) is retried, not dropped, and logged with Resend's error name only. A message Resend refuses as invalid is not retried.
+- Start-up refuses a missing or malformed key, the placeholder key in production, and a `localhost` sender line.
+- Tested against a local stand-in for Resend only. **No real e-mail has been sent.** The founder's part: account, sending domain (SPF, DKIM, DMARC), a sending-only key.

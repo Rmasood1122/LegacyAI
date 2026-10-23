@@ -348,3 +348,8 @@ know, and CI fails if the committed file differs from the contract.
 - ASSUMPTION: the pinned versions work together in the Linux CI image; locally (Windows, Node 24.14.1) install, type-check, lint,
   44 unit tests and the build pass.
 
+## 11. Outside services (Phase 4) — no library added
+
+| Service | Chosen | Evidence (read on) | Why / how it is used |
+|---|---|---|---|
+| Resend (e-mail) | REST API `POST https://api.resend.com/emails`, called with `node:https` | QUOTED 2026-10-22: [send email](https://resend.com/docs/api-reference/emails/send-email) (Bearer key; `Idempotency-Key` header, 1-256 characters, kept 24 hours; answer `{"id": ...}`), [errors](https://resend.com/docs/api-reference/errors) (status codes and error names). Prices REPORTED 2026-10-22 by an automated summary of [resend.com/pricing](https://resend.com/pricing): free 3,000 e-mails a month; Pro $20/month for 50,000; Scale $90/month for 100,000. | Founder's choice (D36). The maturity rule applies to code we install; no code of Resend's is installed. ASSUMPTION: Resend's real answers match its documentation (tested only against a stand-in). |

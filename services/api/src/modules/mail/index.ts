@@ -2,17 +2,19 @@
 // 33 are the first users: their notices - retirement nudges, renewal reminders - now also go out by e-mail).
 //
 // What it does: when an e-mail sender is configured, every notice the product raises is queued as well as logged,
-// and the delivery run sends it, as fixed plain text, to the people the notice is for. What it does NOT do: connect
-// a real e-mail service (MAIL_SENDER is 'none' or the test stand-in 'fake'); store addresses (they are read when a
-// message is sent); send anything a company wrote, a code, a key or a link.
+// and the delivery run sends it, as fixed plain text, to the people the notice is for. What it does NOT do: send
+// anything unless MAIL_SENDER names a sender ('resend', or the test stand-in 'fake'); store addresses (they are read
+// when a message is sent); send anything a company wrote, a code, a key or a link.
 //
 // Nothing here imports another feature module: who receives a notice comes through the RecipientDirectory port,
 // which the identity module implements and app.ts connects.
 import type { Config, Database, Logger, Notifier, Tx } from '../platform/index.ts';
 import { MailNotifier, runMailCompany, type MailRunResult, type RecipientDirectory } from './internal/queue.ts';
+import { ResendMailSender } from './internal/resend.ts';
 import { FakeMailSender, type MailSender } from './internal/sender.ts';
 
 export { MAIL_LIMITS, nextMailAttemptAt } from './internal/rules.ts';
+export { RESEND_URL, ResendMailSender, resendOutcome } from './internal/resend.ts';
 export { FakeMailSender, isSendableAddress, type MailMessage, type MailOutcome, type MailSender } from './internal/sender.ts';
 export { isNoticeType, render, TEMPLATES, type Audience, type NoticeType, type Template } from './internal/templates.ts';
 export { recipientsOf, SETTLE_MS, type MailRunResult, type RecipientDirectory } from './internal/queue.ts';
@@ -34,10 +36,10 @@ export interface MailModule {
 
 export function createMail(deps: {
   config: Config; db: Database; log: Logger; notifier: Notifier;
-  /** For tests: a stand-in sender. Default: what MAIL_SENDER names ('none' = nothing; 'fake' = the stand-in). */
+  /** For tests: a stand-in sender. Default: what MAIL_SENDER names ('none' = nothing; 'fake' = the stand-in; 'resend'). */
   sender?: MailSender;
 }): MailModule {
-  const sender: MailSender | null = deps.sender ?? (deps.config.mail.sender === 'fake' ? new FakeMailSender() : null);
+  const sender: MailSender | null = deps.sender ?? senderOf(deps.config, deps.log);
   const queue = sender === null ? null : new MailNotifier(deps.notifier, deps.db, deps.log);
   let directory: RecipientDirectory | null = null;
   return {
@@ -64,4 +66,12 @@ export function createMail(deps: {
       return messages.rowCount + notices.rowCount;
     },
   };
+}
+
+function senderOf(config: Config, log: Logger): MailSender | null {
+  const { mail } = config;
+  if (mail.sender === 'fake') return new FakeMailSender();
+  // the configuration refuses MAIL_SENDER=resend without a key
+  if (mail.sender === 'resend' && mail.resendApiKey !== null) return new ResendMailSender({ apiKey: mail.resendApiKey, log });
+  return null;
 }
