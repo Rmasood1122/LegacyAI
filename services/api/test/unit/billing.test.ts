@@ -3,8 +3,8 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
-  amountDue, catalogueProblems, collect, dueNow, enforcedLimit, EVENT_TOLERANCE_MS, FakePaymentProvider, finish, INVOICE_CAUSES, INVOICE_STATUSES,
-  isUnfinished, MORE_CARDS_THAN_SEATS, nextStatus, NoPaymentProvider, notAppliedReason, openInvoiceBound, paidSeatsCover, planOf, PLANS, priceFor,
+  amountDue, CATALOGUE_IS_PLACEHOLDER, catalogueProblems, collect, dueNow, enforcedLimit, EVENT_TOLERANCE_MS, FakePaymentProvider, finish, INVOICE_CAUSES, INVOICE_STATUSES,
+  isUnfinished, MORE_CARDS_THAN_SEATS, nextStatus, NoPaymentProvider, notAppliedReason, openInvoiceBound, paidSeatsCover, planOf, PLANS, priceFor, seatPriceForTerm,
   reminderStages, renewalSeats, sameMoney, seatFree, seatState, seatsToAdd, signEvent, termPhase, verifyEvent,
   type Billing, type InvoiceRow, type PaymentEventInput, type SeatFacts,
 } from '../../src/modules/billing/index.ts';
@@ -22,27 +22,48 @@ function signed(over: Partial<Omit<PaymentEventInput, 'signature'>> = {}, key: B
   return { ...fields, signature: signEvent(key, fields) };
 }
 
-describe('the plan catalogue (placeholder values)', () => {
-  it('is usable, and every plan in it has a whole-number price in a three-letter currency', () => {
+describe('the plan catalogue (decision D38)', () => {
+  it('is usable, and every plan in it has a whole-number yearly price in a three-letter currency', () => {
     expect(catalogueProblems()).toEqual([]);
-    for (const p of PLANS) expect(Number.isInteger(p.pricePerSeatMinor) && /^[A-Z]{3}$/.test(p.currency), p.code).toBe(true);
-    expect(planOf('free')?.pricePerSeatMinor).toBe(0);
+    for (const p of PLANS) expect(Number.isInteger(p.pricePerSeatPerYearMinor) && /^[A-Z]{3}$/.test(p.currency), p.code).toBe(true);
+    expect(planOf('free')?.pricePerSeatPerYearMinor).toBe(0);
     expect(planOf('no-such-plan')).toBeNull();
+  });
+
+  it('the selected prices: Team (the default plan, code "pilot") USD 150 per seat and year; the free pilot 0; no longer placeholders', () => {
+    expect(planOf('pilot')).toEqual({ code: 'pilot', name: 'Team', pricePerSeatPerYearMinor: 15_000, currency: 'USD' });
+    expect(planOf('free')).toMatchObject({ name: 'Pilot (free)', pricePerSeatPerYearMinor: 0 });
+    expect(CATALOGUE_IS_PLACEHOLDER).toBe(false);
   });
 
   it('a broken catalogue is reported, not used', () => {
     expect(catalogueProblems([
-      { code: 'pilot', name: 'a', pricePerSeatMinor: 15.5, currency: 'USD' }, { code: 'pilot', name: 'b', pricePerSeatMinor: 1, currency: 'usd' },
+      { code: 'pilot', name: 'a', pricePerSeatPerYearMinor: 15.5, currency: 'USD' }, { code: 'pilot', name: 'b', pricePerSeatPerYearMinor: 1, currency: 'usd' },
     ])).toHaveLength(3);   // a fraction, listed twice, lower-case currency
   });
 
-  it('an amount is price times seats, in whole numbers only', () => {
-    const plan = { code: 'pilot', name: 'x', pricePerSeatMinor: 1500, currency: 'USD' };
-    expect(amountDue(plan, 3)).toBe(4500);
-    expect(amountDue({ ...plan, pricePerSeatMinor: 0 }, 250)).toBe(0);
-    for (const seats of [0, -1, 1.5, Number.NaN]) expect(() => amountDue(plan, seats), String(seats)).toThrow();
-    expect(() => amountDue({ ...plan, pricePerSeatMinor: 0.1 }, 3)).toThrow();
-    expect(() => amountDue({ ...plan, pricePerSeatMinor: Number.MAX_SAFE_INTEGER }, 2)).toThrow();
+  it('a seat costs the yearly price for the term\'s days, rounded to the cent, half up; whole numbers only', () => {
+    const team = { code: 'pilot', name: 'Team', pricePerSeatPerYearMinor: 15_000, currency: 'USD' };
+    expect(seatPriceForTerm(team, 365)).toBe(15_000);
+    expect(seatPriceForTerm(team, 90)).toBe(3699);      // 15000 x 90 / 365 = 3698.63
+    expect(seatPriceForTerm(team, 30)).toBe(1233);      // 1232.88
+    expect(seatPriceForTerm(team, 366)).toBe(15_041);   // 15041.10: a leap-year card is one day longer
+    expect(seatPriceForTerm(team, 1)).toBe(41);         // 41.10
+    expect(seatPriceForTerm({ ...team, pricePerSeatPerYearMinor: 73 }, 5)).toBe(1);   // exactly 1.0
+    expect(seatPriceForTerm({ ...team, pricePerSeatPerYearMinor: 365 }, 1)).toBe(1);
+    expect(seatPriceForTerm({ ...team, pricePerSeatPerYearMinor: 1 }, 182)).toBe(0);   // 0.4986: down
+    expect(seatPriceForTerm({ ...team, pricePerSeatPerYearMinor: 1 }, 183)).toBe(1);   // 0.5014: up
+    for (const days of [0, 367, 1.5, Number.NaN]) expect(() => seatPriceForTerm(team, days), String(days)).toThrow();
+  });
+
+  it('an amount is the price of a seat for the term times seats, in whole numbers only', () => {
+    const plan = { code: 'pilot', name: 'x', pricePerSeatPerYearMinor: 1500, currency: 'USD' };
+    expect(amountDue(plan, 3, 365)).toBe(4500);
+    expect(amountDue({ ...plan, pricePerSeatPerYearMinor: 15_000 }, 3, 90)).toBe(3 * 3699);   // per seat first, then times seats
+    expect(amountDue({ ...plan, pricePerSeatPerYearMinor: 0 }, 250, 90)).toBe(0);
+    for (const seats of [0, -1, 1.5, Number.NaN]) expect(() => amountDue(plan, seats, 365), String(seats)).toThrow();
+    expect(() => amountDue({ ...plan, pricePerSeatPerYearMinor: 0.1 }, 3, 365)).toThrow();
+    expect(() => amountDue({ ...plan, pricePerSeatPerYearMinor: Number.MAX_SAFE_INTEGER }, 2, 365)).toThrow();
   });
 });
 
@@ -156,7 +177,8 @@ describe('an invoice changes state only along one table', () => {
 
 describe('seats: what is asked, what is paid, what is enforced', () => {
   const facts = (over: Partial<SeatFacts> = {}): SeatFacts => ({ requested: null, limit: null, unlimited: false, ...over });
-  const plan = { code: 'pilot', name: 'x', pricePerSeatMinor: 1500, currency: 'USD' };
+  // a price per year with a term of a year: the price of a seat for the term is the yearly price
+  const plan = { code: 'pilot', name: 'x', pricePerSeatPerYearMinor: 1500, currency: 'USD' };
   const term = (personCards: number) => ({
     renewalDue: new Date(NOW.getTime() + 10 * DAY), expiresAt: new Date(NOW.getTime() + 24 * DAY), graceUntil: new Date(NOW.getTime() + 38 * DAY),
     termDays: 365, personCards,
@@ -194,7 +216,7 @@ describe('seats: what is asked, what is paid, what is enforced', () => {
   });
 
   it('money is equal only when amount AND currency are equal', () => {
-    expect(priceFor(plan, 3)).toEqual({ amountMinor: 4500, currency: 'USD' });
+    expect(priceFor(plan, 3, 365)).toEqual({ amountMinor: 4500, currency: 'USD' });
     expect(sameMoney({ amountMinor: 4500, currency: 'USD' }, { amountMinor: 4500, currency: 'USD' })).toBe(true);
     expect(sameMoney({ amountMinor: 4500, currency: 'USD' }, { amountMinor: 4500, currency: 'EUR' })).toBe(false);
     expect(sameMoney({ amountMinor: 4500, currency: 'USD' }, { amountMinor: 4501, currency: 'USD' })).toBe(false);

@@ -27,12 +27,14 @@ async function renew(page: Page, invoiceNumber: number): Promise<void> {
   await expect(page.getByText(`Invoice ${invoiceNumber} is waiting for payment`)).toBeVisible();
 }
 
-test('the owner sees the renewal center; it is too early to renew; prices are marked as placeholders', async ({ page }) => {
+test('the owner sees the renewal center; it is too early to renew; the Team plan and its price per year are shown', async ({ page }) => {
   await signIn(page, 'owner');
   await manage(page, 'Billing and renewal').click();
   await expect(page.getByRole('heading', { name: 'Billing and renewal', level: 1 })).toBeVisible();
   await expect(page.getByText('The subscription is running')).toBeVisible();
-  await expect(page.getByText('These prices are placeholders')).toBeVisible();
+  await expect(page.getByText('These prices are placeholders')).toHaveCount(0);
+  await expect(page.getByText('Team', { exact: true })).toBeVisible();
+  await expect(page.getByText('150.00 USD', { exact: true })).toBeVisible();
   await expect(page.getByText('No invoice has been issued yet.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Renew now…' })).toHaveCount(0);
   expect(await subscription(page)).toMatchObject({ phase: 'normal', can_renew_now: false, seat_limit: null, seat_state: 'not_limited' });

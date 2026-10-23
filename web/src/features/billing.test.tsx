@@ -18,7 +18,7 @@ const OWNER = ['getSubscription', 'listInvoices', 'updateSubscription', 'startRe
 const usd = (amount_minor: number) => ({ amount_minor, currency: 'USD' });
 
 const subscription = (over: Partial<Subscription> = {}): Subscription => ({
-  plan: { code: 'pilot', name: 'Pilot', price_per_seat: usd(1500), placeholder: true }, seats_requested: null, seat_limit: 5, seats_unlimited: false,
+  plan: { code: 'pilot', name: 'Pilot', price_per_seat: usd(1500), price_per_seat_per_year: usd(6083), placeholder: true }, seats_requested: null, seat_limit: 5, seats_unlimited: false,
   seats_used: 2, seat_state: 'ok', auto_renew: false, term_days: 90, expires_at: '2026-12-01T00:00:00.000Z', renewal_due: '2026-11-17T00:00:00.000Z',
   grace_until: '2026-12-15T00:00:00.000Z', read_only: false, export_only: false, phase: 'renewal_open', next_term: { seats: 5, amount: usd(7500) },
   due_now: { kind: 'renewal', seats: 5, amount: usd(7500) }, open_invoice: null, can_renew_now: true, payments_available: true, payment_page: false,
@@ -77,6 +77,18 @@ describe('the renewal center', () => {
     expect(screen.getByText('75.00 USD (5 seats)')).toBeTruthy();
     expect(screen.getByText('Read-only, then export only')).toBeTruthy();
     expect(await screen.findAllByText('Paid')).toHaveLength(2);   // the column and this invoice's state
+  });
+
+  it('the selected prices: the plan, its price per seat and year, and what a seat costs for this company\'s term; no placeholder notice', async () => {
+    const api = new FakeApi({
+      getSubscription: () => subscription({ plan: { code: 'pilot', name: 'Team', price_per_seat: usd(3699), price_per_seat_per_year: usd(15_000), placeholder: false } }),
+      listInvoices: () => page([]),
+    });
+    renderScreen(<BillingScreen />, { api, session: as(...OWNER) });
+    expect(await screen.findByText('Team')).toBeTruthy();
+    expect(screen.getByText('150.00 USD')).toBeTruthy();
+    expect(screen.getByText('36.99 USD (90 days)')).toBeTruthy();
+    expect(screen.queryByText('These prices are placeholders')).toBeNull();
   });
 
   it('renewing asks twice and names the amount; afterwards the screen says the invoice waits and nothing changes until the payment arrives', async () => {

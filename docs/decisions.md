@@ -294,9 +294,16 @@ CONSEQUENCES:
 - While the catalogue's prices are placeholders, a live Stripe key stops the API at start-up (test-mode keys work).
 - Tested against a local stand-in for Stripe only. **No Stripe account, no key, no money.**
 
-**Prices — selected at the founder's request ("search and select best fit", 2026-10-22); not yet in the catalogue (2026-10-23).**
+**Prices — selected at the founder's request ("search and select best fit", 2026-10-22). In the catalogue since D38.**
 - Comparable tools' published prices, read 2026-10-23 (per user per month): Tettra $8 (10-user minimum); Slite $10 / $20; Notion $10 / $20 (Business includes AI; whether these are annual prices was not clear); Confluence $5.78 / $11.16 (monthly billing); Scribe $23-25. Guru, Glean, Bloomfire, Document360 and Trainual publish no prices. One retiree-handover tool (SkillPass) charges $15-39 per handover. Sources and gaps: `docs/phase4/05-billing.md`, "Prices".
 - **Selected:** Pilot - free, up to 5 person cards, one term of 60 days. **Team - $150 per seat per year** (about $12.50 a month; between Tettra and the $20 AI workspaces). **Business - $300 per seat per year**, from 25 seats, with SSO, SCIM and the company's own key; above about 250 seats, a quoted price.
 - Why not yet in the code: the catalogue prices a seat **per term**, and a term is the company card's validity (90 days by default, up to 366). A yearly price has to be turned into a price for the term's length, and the Business plan needs a new plan code in the database. That is the next billing change, with its own tests; until then the catalogue keeps its placeholders and the screen keeps saying so.
 - Stripe's fee on these prices: about 2.9% (domestic card) to 4.4% (international). Large Business invoices ($15,000+) may hit card limits; a bank-transfer option is worth considering (ASSUMPTION, not tested).
+
+**D38 — The catalogue holds the selected prices, per seat and year, charged for the term's length (2026-10-23).**
+- Details: `docs/phase4/05-billing.md`, "Prices". The prices are those selected under D37; the founder can change them in `services/api/src/modules/billing/internal/catalogue.ts`.
+- A price is per seat and **year**. A company pays for its term (the company card's validity, 90 days by default, at most 366): one seat costs the yearly price times the term's days / 365, rounded to the cent (half up, in whole numbers), then times the seats. Team at USD 150 a year is USD 36.99 a seat for a 90-day term.
+- The default plan of a new company (code `pilot`, since Phase 1) is now **Team, USD 150** per seat and year; `free` is the **free pilot**. The screen shows the yearly price and the price for the company's term.
+- `placeholder` is now false: the "placeholder prices" notice is gone, and a live Stripe key is accepted.
+- **Not done:** the Business plan (USD 300, from 25 seats) - no route can put a company on another plan yet, so it would be unreachable; it comes with that operator action. The pilot's "5 cards, 60 days, once" is a sales rule, not enforced by the code. Invoices issued before this change keep their amounts (an invoice never changes).
 

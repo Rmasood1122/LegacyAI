@@ -16,7 +16,9 @@ import { FakePaymentProvider, NoPaymentProvider, type PaymentProvider } from './
 import { StripePaymentProvider } from './internal/stripe.ts';
 import { billingRoutes, collect, finish } from './internal/routes.ts';
 
-export { amountDue, CATALOGUE_IS_PLACEHOLDER, catalogueProblems, planOf, PLANS, priceFor, sameMoney, type Money, type Plan } from './internal/catalogue.ts';
+export {
+  amountDue, CATALOGUE_IS_PLACEHOLDER, catalogueProblems, DAYS_PER_YEAR, planOf, PLANS, priceFor, sameMoney, seatPriceForTerm, type Money, type Plan,
+} from './internal/catalogue.ts';
 export {
   dueNow, enforcedLimit, INVOICE_CAUSES, INVOICE_STATUSES, isUnfinished, MAX_AUTO_RENEW_ATTEMPTS, MORE_CARDS_THAN_SEATS, nextStatus, notAppliedReason,
   OPEN_INVOICE_DAYS, openInvoiceBound, paidSeatsCover, reminderStages, renewalSeats, seatFree, seatState, seatsToAdd, termPhase, UNANSWERED_AFTER_DAYS,
@@ -90,10 +92,8 @@ export function createBilling(deps: {
   const broken = catalogueProblems();
   if (broken.length > 0) throw new Error(`The plan catalogue is not usable: ${broken.join('; ')}`);
   const provider = deps.provider ?? providerOf(deps.config, deps.log);
-  // real money is never taken at an invented price: a live Stripe key waits for the real catalogue (D37)
-  if (provider instanceof StripePaymentProvider && provider.live && CATALOGUE_IS_PLACEHOLDER) {
-    throw new Error('A live Stripe key is configured but the plan prices are still placeholders: set the real prices first (docs/phase4/05-billing.md, "Prices"), or use a test-mode key');
-  }
+  const refused = liveMoneyProblem(provider, CATALOGUE_IS_PLACEHOLDER);
+  if (refused !== null) throw new Error(refused);
   let term: CompanyTermPort | null = null;
   const billing = new Billing({ notifier: deps.notifier, provider, term: () => term });
   const { db } = deps;
@@ -155,4 +155,15 @@ function providerOf(config: Config, log: Logger): PaymentProvider {
     return new StripePaymentProvider({ secretKey: payment.stripe.secretKey, webhookSecret: payment.stripe.webhookSecret, returnUrl: payment.stripe.returnUrl, log });
   }
   return new NoPaymentProvider();
+}
+
+/**
+ * Real money is never taken at an invented price: a provider that takes real money (a live Stripe key) is refused
+ * while the catalogue is a placeholder (D37). Null = nothing against it. Pure.
+ */
+export function liveMoneyProblem(provider: PaymentProvider, placeholderCatalogue: boolean): string | null {
+  if (provider instanceof StripePaymentProvider && provider.live && placeholderCatalogue) {
+    return 'A live Stripe key is configured but the plan prices are still placeholders: set the real prices first (docs/phase4/05-billing.md, "Prices"), or use a test-mode key';
+  }
+  return null;
 }
