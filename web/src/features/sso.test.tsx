@@ -112,7 +112,7 @@ describe('the Owner\'s company sign-in screen', () => {
   const OWNER = ['getSsoConnection', 'putSsoConnection', 'removeSsoConnection'] as const;
   const as = (...ops: Parameters<typeof permissionsFor>) => sessionValue(makeSession(permissionsFor(...ops)));
   const conn: SsoConnection = {
-    id: '01a10174-0000-7000-8000-000000000001', name: 'Company sign-in', protocol: 'oidc', issuer: 'https://idp.example.com', client_id: 'legacyai',
+    id: '01a10174-0000-7000-8000-000000000001', name: 'Company sign-in', protocol: 'oidc', provider: 'other', issuer: 'https://idp.example.com', allowed_domain: null, client_id: 'legacyai',
     enabled: true, has_client_secret: true, redirect_uri: `https://app.example.com/sso/return/${COMPANY}`, created_by_card_id: '01a10174-0000-7000-8000-000000000002',
     created_at: '2026-10-07T09:00:00.000Z', updated_at: '2026-10-07T09:00:00.000Z',
   };
@@ -139,6 +139,38 @@ describe('the Owner\'s company sign-in screen', () => {
     expect(api.callsTo('putSsoConnection')[0]?.body).toEqual({ name: 'Company sign-in', issuer: 'https://idp.example.com', client_id: 'legacyai', enabled: true, client_secret: CLIENT_SECRET });
     expect(await screen.findByText('Stored (never shown)')).toBeTruthy();
     expect(document.body.textContent).not.toContain(CLIENT_SECRET);
+  });
+
+  it('Google: the Workspace domain is asked for and required before saving; it is sent and then shown', async () => {
+    const user = userEvent.setup();
+    let stored: SsoConnection | null = null;
+    const googleConn: SsoConnection = { ...conn, name: 'Google Workspace', provider: 'google', issuer: 'https://accounts.google.com', allowed_domain: 'example.com' };
+    const api = new FakeApi({
+      getSsoConnection: () => ({ connection: stored, redirect_uri: conn.redirect_uri }),
+      putSsoConnection: () => {
+        stored = googleConn;
+        return googleConn;
+      },
+    });
+    renderScreen(<SsoScreen />, { api, session: as(...OWNER) });
+    await user.clear(await screen.findByLabelText('Provider (issuer)'));
+    expect(screen.queryByLabelText('Your Google Workspace domain')).toBeNull();
+    await user.type(screen.getByLabelText('Provider (issuer)'), 'https://accounts.google.com');
+    await user.type(screen.getByLabelText('Client id'), 'legacyai');
+    await user.type(screen.getByLabelText('Client secret'), CLIENT_SECRET);
+    const save = screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);                                   // no domain yet: any Google account could sign in
+    await user.type(screen.getByLabelText('Your Google Workspace domain'), 'https://example.com');
+    expect(screen.getByText('Write the domain only, for example example.com.')).toBeTruthy();
+    expect(save.disabled).toBe(true);
+    await user.clear(screen.getByLabelText('Your Google Workspace domain'));
+    await user.type(screen.getByLabelText('Your Google Workspace domain'), 'Example.com');
+    expect(save.disabled).toBe(false);
+    await user.click(save);
+    await waitFor(() => expect(api.callsTo('putSsoConnection')).toHaveLength(1));
+    expect(api.callsTo('putSsoConnection')[0]?.body).toMatchObject({ issuer: 'https://accounts.google.com', allowed_domain: 'example.com' });
+    expect(await screen.findByText('Google')).toBeTruthy();
+    expect(screen.getByText('example.com')).toBeTruthy();
   });
 
   it('removing it asks twice, and the result stays on the screen after the connection is gone (found by the browser test)', async () => {

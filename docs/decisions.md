@@ -235,6 +235,7 @@ CONSEQUENCES:
 - pypdf moved 6.19.0 -> 6.20.1 for its four advisories (same major version; D2 does not apply).
 - 2026-10-22 (founder's choice, same reasoning): 16 more pillow advisories, again fixed only in 13.0.0, accepted by ID: CVE-2026-112402, CVE-2026-112900, CVE-2026-112893, CVE-2026-112392, CVE-2026-112891, CVE-2026-112405, CVE-2026-112390, CVE-2026-112401, CVE-2026-112901, CVE-2026-112391, CVE-2026-112894, CVE-2026-112406, CVE-2026-112399, CVE-2026-112892, CVE-2026-112393, CVE-2026-112396. pypdf 6.20.1 -> 6.21.1 for CVE-2026-113786 (same major version).
 - 2026-10-23 (same rule as the founder's two earlier choices, applied by Claude; the founder can reverse it): 11 more pillow advisories, again fixed only in 13.0.0, accepted by ID: CVE-2026-96636, CVE-2026-96637, CVE-2026-96638, CVE-2026-96639, CVE-2026-96640, CVE-2026-96641, CVE-2026-96642, CVE-2026-96643, CVE-2026-96644, CVE-2026-96778, GHSA-78g4-xqwv-q3g8. fastembed 0.9.0 still requires pillow<13 (PyPI, read 2026-10-23).
+- 2026-10-24 (same rule, applied by Claude; the founder can reverse it): 2 more pillow advisories fixed only in 13.0.0, accepted by ID: CVE-2026-114501, CVE-2026-112398. pypdf 6.21.1 -> 6.21.2 for CVE-2026-115572, CVE-2026-115580, CVE-2026-115585 (a patch release of the same version; D2 does not apply, as before).
 - Re-check when fastembed allows pillow 13 and pillow 13 is 60 days old (2026-12-15). Details: docs/DEPENDENCIES.md 9.1.
 
 **D33 — SSO: the company's identity provider is a strong factor, chosen by the company the person names, linked by the provider's subject (2026-10-21).**
@@ -306,4 +307,14 @@ CONSEQUENCES:
 - The default plan of a new company (code `pilot`, since Phase 1) is now **Team, USD 150** per seat and year; `free` is the **free pilot**. The screen shows the yearly price and the price for the company's term.
 - `placeholder` is now false: the "placeholder prices" notice is gone, and a live Stripe key is accepted.
 - **Not done:** the Business plan (USD 300, from 25 seats) - no route can put a company on another plan yet, so it would be unreachable; it comes with that operator action. The pilot's "5 cards, 60 days, once" is a sales rule, not enforced by the code. Invoices issued before this change keep their amounts (an invoice never changes).
+
+**D39 — SSO: the rules of Google, Microsoft Entra ID and Okta; Google only with the company's domain (2026-10-24).**
+- The founder asked for "real SSO" for these providers. Details and set-up steps: `docs/phase4/07-sso-scim.md`, "Real providers". Read from each provider's documentation on 2026-10-24.
+- **Google lets any Google account sign in.** A Google connection must name the company's Google Workspace domain (`sso_connections.allowed_domain`, migration `20261024000100`), and every ID token must carry that domain in `hd`; a personal account or another company's is refused. The domain is refused for other providers, where it would mean nothing.
+- Google accepts no `prompt=login`: the account chooser is asked for instead. A fresh password at Google cannot be demanded; the 3-digit code is still asked here.
+- Microsoft: only a tenant-specific issuer (`.../<tenant ID>/v2.0`); `common`, `organizations`, `consumers` and domain names are refused with a message saying what to enter.
+- Google's ID tokens may say `accounts.google.com` without `https://`; both are accepted for Google only.
+- The client secret goes the way the provider's discovery document says it takes it (Basic, else the form body).
+- Rollback is refused while a live connection has a domain (the older code would let any Google account in).
+- Tested against the stand-in provider only. Not tested with any real provider.
 

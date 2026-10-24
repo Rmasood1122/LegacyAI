@@ -1594,8 +1594,10 @@ export interface SsoConnection {
   id: string;
   name: string;
   protocol: "oidc";
+  provider: "google" | "microsoft" | "okta" | "other";
   issuer: string;
   client_id: string;
+  allowed_domain: string | null;
   enabled: boolean;
   has_client_secret: boolean;
   redirect_uri: string;
@@ -1609,6 +1611,7 @@ export interface SsoConnectionInput {
   issuer: string;
   client_id: string;
   client_secret?: string;
+  allowed_domain?: string | null;
   enabled?: boolean;
 }
 

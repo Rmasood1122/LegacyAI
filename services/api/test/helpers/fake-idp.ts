@@ -15,6 +15,8 @@ export interface TokenTweaks {
   audience?: string | string[];
   azp?: string;
   issuer?: string;
+  /** Google's Workspace domain claim. */
+  hd?: string;
   /** Seconds relative to now. */
   expiresIn?: number;
   issuedAgo?: number;
@@ -37,6 +39,12 @@ export class FakeIdp {
   lieAboutIssuer = false;
   /** The discovery document names these endpoints instead of its own. */
   endpoints: Partial<Record<'authorization_endpoint' | 'token_endpoint' | 'jwks_uri', string>> = {};
+  /** More fields of the discovery document (e.g. token_endpoint_auth_methods_supported). */
+  discoveryExtra: Record<string, unknown> = {};
+  /** The client secret is taken in the form body (client_secret_post) instead of HTTP Basic. */
+  secretInBody = false;
+  /** Every `prompt` and `hd` the API asked the sign-in page for. */
+  readonly asked: Array<{ prompt: string | null; hd: string | null }> = [];
 
   constructor(p: { issuer?: string; clientId?: string; clientSecret?: string } = {}) {
     this.issuer = p.issuer ?? `https://idp-${randomBytes(4).toString('hex')}.example.test`;
@@ -57,15 +65,19 @@ export class FakeIdp {
     this.requests.push(req);
     const url = new URL(req.url);
     if (url.origin !== new URL(this.issuer).origin) return { ok: false, error: 'dns' };
+    // an issuer may have a path (Microsoft: /<tenant>/v2.0, Okta: /oauth2/<id>): its endpoints live under it
+    const base = new URL(this.issuer).pathname.replace(/\/+$/, '');
+    if (!url.pathname.startsWith(`${base}/`)) return { ok: true, status: 404, body: Buffer.from('{"error":"not_found"}') };
+    const path = url.pathname.slice(base.length);
     const json = (status: number, body: unknown): HttpsResponse => ({ ok: true, status, body: Buffer.from(JSON.stringify(body)) });
-    if (req.method === 'GET' && url.pathname === '/.well-known/openid-configuration') {
+    if (req.method === 'GET' && path === '/.well-known/openid-configuration') {
       return json(200, {
         issuer: this.lieAboutIssuer ? 'https://other.example.test' : this.issuer, authorization_endpoint: `${this.issuer}/authorize`,
-        token_endpoint: `${this.issuer}/token`, jwks_uri: `${this.issuer}/jwks`, ...this.endpoints,
+        token_endpoint: `${this.issuer}/token`, jwks_uri: `${this.issuer}/jwks`, ...this.endpoints, ...this.discoveryExtra,
       });
     }
-    if (req.method === 'GET' && url.pathname === '/jwks') return json(200, { keys: [this.#jwk] });
-    if (req.method === 'POST' && url.pathname === '/token') return this.#token(req);
+    if (req.method === 'GET' && path === '/jwks') return json(200, { keys: [this.#jwk] });
+    if (req.method === 'POST' && path === '/token') return this.#token(req);
     return json(404, { error: 'not_found' });
   };
 
@@ -77,6 +89,7 @@ export class FakeIdp {
     for (const [k, v] of [['response_type', 'code'], ['client_id', this.clientId], ['scope', 'openid'], ['code_challenge_method', 'S256']] as const) {
       if (q.get(k) !== v) throw new Error(`fake idp: ${k} is ${q.get(k)}, expected ${v}`);
     }
+    this.asked.push({ prompt: q.get('prompt'), hd: q.get('hd') });
     const state = q.get('state');
     const nonce = q.get('nonce');
     const challenge = q.get('code_challenge');
@@ -90,9 +103,15 @@ export class FakeIdp {
   async #token(req: HttpsRequest): Promise<HttpsResponse> {
     const fail = (error: string): HttpsResponse => ({ ok: true, status: 400, body: Buffer.from(JSON.stringify({ error })) });
     const auth = req.headers?.authorization ?? '';
-    const expected = `Basic ${Buffer.from(`${encodeURIComponent(this.clientId)}:${encodeURIComponent(this.clientSecret)}`).toString('base64')}`;
-    if (auth !== expected) return { ok: true, status: 401, body: Buffer.from('{"error":"invalid_client"}') };
     const form = new URLSearchParams(req.body ?? '');
+    if (this.secretInBody) {
+      if (auth !== '' || form.get('client_id') !== this.clientId || form.get('client_secret') !== this.clientSecret) {
+        return { ok: true, status: 401, body: Buffer.from('{"error":"invalid_client"}') };
+      }
+    } else {
+      const expected = `Basic ${Buffer.from(`${encodeURIComponent(this.clientId)}:${encodeURIComponent(this.clientSecret)}`).toString('base64')}`;
+      if (auth !== expected || form.has('client_secret')) return { ok: true, status: 401, body: Buffer.from('{"error":"invalid_client"}') };
+    }
     const issued = this.#codes.get(form.get('code') ?? '');
     if (form.get('grant_type') !== 'authorization_code' || issued === undefined || issued.used) return fail('invalid_grant');
     issued.used = true;
@@ -103,7 +122,7 @@ export class FakeIdp {
     this.tweakNext = null;
     const now = Math.floor(Date.now() / 1000);
     let idToken: string;
-    const claims: Record<string, unknown> = { nonce: t.nonce ?? issued.nonce, ...(t.azp === undefined ? {} : { azp: t.azp }) };
+    const claims: Record<string, unknown> = { nonce: t.nonce ?? issued.nonce, ...(t.azp === undefined ? {} : { azp: t.azp }), ...(t.hd === undefined ? {} : { hd: t.hd }) };
     if (t.alg === 'none') {
       const enc = (o: object): string => Buffer.from(JSON.stringify(o)).toString('base64url');
       idToken = `${enc({ alg: 'none' })}.${enc({ ...claims, iss: this.issuer, sub: issued.sub, aud: this.clientId, iat: now, exp: now + 300 })}.`;

@@ -171,6 +171,57 @@ history (append-only) refers to them and the rollback will not rewrite history.
 Still open, because it needs a customer: which providers the customers use first (OpenID Connect covers the common
 ones; SAML is not built).
 
+### Real providers: Microsoft Entra ID, Google, Okta (decision D39, 2026-10-24)
+
+Read from each provider's own documentation on 2026-10-24:
+[Google](https://developers.google.com/identity/openid-connect/openid-connect),
+[Microsoft](https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc),
+[Okta](https://developer.okta.com/docs/api/openapi/okta-oauth/oauth/orgas). The code is
+`services/api/src/modules/identity-access/internal/providers.ts`; the API recognises the provider from the issuer and
+shows it (`provider`: google, microsoft, okta, other).
+
+What differs, and what the API does about it:
+
+| | Google | Microsoft Entra ID | Okta |
+|---|---|---|---|
+| Issuer to enter | `https://accounts.google.com` | `https://login.microsoftonline.com/<tenant ID>/v2.0` | `https://<org>.okta.com` or `https://<org>.okta.com/oauth2/<server id>` |
+| Who could sign in | **any Google account in the world** | only the tenant's accounts (with a tenant-specific issuer) | only the org's accounts |
+| What the API adds | the connection must name the company's **Google Workspace domain**; every ID token must carry exactly that domain (`hd`), or it is refused | refuses `common`, `organizations`, `consumers` and a domain name instead of the tenant ID (those would let other tenants in, or never match) | nothing special |
+| "Sign in again" | Google has no `prompt=login`: the API asks for the **account chooser** (`select_account`); Google may not ask for the password again | `prompt=login` | `prompt=login` |
+| Issuer in the ID token | `https://accounts.google.com` **or** `accounts.google.com` (both accepted, for Google only) | as entered | as entered |
+
+Also new for every provider: the client secret is sent the way the provider says it takes it (HTTP Basic, or the form
+body when the provider offers only that); a provider that offers neither is not used.
+
+**What the Owner does at each provider (not done by me - it needs the company's admin account):**
+
+*Microsoft Entra ID*
+1. Entra admin center → App registrations → New registration. Account type: **this organizational directory only**.
+   Redirect URI (Web): the address shown on our "Company sign-in" screen (`.../sso/return/<company id>`).
+2. Copy the **Directory (tenant) ID** and the **Application (client) ID**. Certificates & secrets → new client secret;
+   copy its value.
+3. On our screen: issuer `https://login.microsoftonline.com/<tenant ID>/v2.0`, client id, secret. Switch on.
+
+*Google Workspace*
+1. Google Cloud console → APIs & Services → OAuth consent screen: user type **Internal** (only the Workspace's users).
+2. Credentials → Create OAuth client ID → Web application; authorised redirect URI: the address on our screen.
+3. On our screen: issuer `https://accounts.google.com`, client id, secret, and **your Workspace domain**
+   (e.g. `example.com`). Switch on. (Both the "Internal" consent screen and our domain check keep other Google
+   accounts out; the domain check is the one we enforce.)
+
+*Okta*
+1. Okta admin console → Applications → Create App Integration → OIDC, **Web Application**; grant type
+   Authorization Code; sign-in redirect URI: the address on our screen. Assign the people or groups.
+2. Copy the client ID and secret. Issuer: `https://<your org>.okta.com` (or your custom authorization server's).
+3. On our screen: issuer, client id, secret. Switch on.
+
+**Tested:** against the test stand-in provider playing each provider's address and quirks - 10 unit tests (which
+provider an issuer is, look-alikes refused, Google's two issuer forms, the domain check, Microsoft's refused addresses,
+the prompt, secret in Basic or body) and 1 screen test; the database test (`test/integration/sso-providers.test.ts`,
+on GitHub) covers the connection rules and a Google set-up with the right, a missing and another company's domain.
+**Not tested:** any real provider. Whether each provider behaves exactly as its documentation says is an ASSUMPTION
+until the first company connects one.
+
 ## Part B — SCIM (people from the company's directory)
 
 ### What it is for

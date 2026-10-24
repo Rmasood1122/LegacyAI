@@ -13858,8 +13858,10 @@ components:
         - id
         - name
         - protocol
+        - provider
         - issuer
         - client_id
+        - allowed_domain
         - enabled
         - has_client_secret
         - redirect_uri
@@ -13875,10 +13877,17 @@ components:
         protocol:
           type: string
           const: oidc
+        provider:
+          description: Recognised from the issuer; `google`, `microsoft` and `okta` follow that provider's rules (decision D39), `other` plain OpenID Connect.
+          type: string
+          enum: [google, microsoft, okta, other]
         issuer:
           type: string
         client_id:
           type: string
+        allowed_domain:
+          description: Google only - the company's Google Workspace domain; every sign-in must be an account of that domain.
+          type: [string, "null"]
         enabled:
           type: boolean
         has_client_secret:
@@ -13909,7 +13918,10 @@ components:
           maxLength: 100
           pattern: "^[^\\u0000-\\u001f\\u007f]+$"
         issuer:
-          description: The provider's issuer (OpenID Connect), exactly as its discovery document states it. https only.
+          description: >-
+            The provider's issuer (OpenID Connect), exactly as its discovery document states it. https only. Google:
+            https://accounts.google.com. Microsoft Entra ID: https://login.microsoftonline.com/<tenant ID>/v2.0 (not
+            common or organizations). Okta: https://<org>.okta.com or https://<org>.okta.com/oauth2/<server id>.
           type: string
           minLength: 9
           maxLength: 2048
@@ -13923,5 +13935,14 @@ components:
           type: string
           minLength: 1
           maxLength: 1024
+        allowed_domain:
+          description: >-
+            Required for Google (https://accounts.google.com), refused for every other provider: the company's Google
+            Workspace domain, e.g. example.com. Google lets any Google account sign in; only accounts whose ID token
+            carries this domain (`hd`) are accepted. Left out = keep the stored one.
+          type: [string, "null"]
+          minLength: 4
+          maxLength: 253
+          pattern: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$"
         enabled:
           type: boolean

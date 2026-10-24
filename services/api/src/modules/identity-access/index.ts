@@ -47,8 +47,9 @@ export {
 export { CardService } from './internal/cards.ts';
 export { StrongFactorProof, verifySsoFactor, type FactorType, type SsoIdentity } from './internal/factors.ts';
 export {
-  authorizationUrl, codeChallenge, discover, exchangeCode, newFlowSecrets, OidcCache, OidcError, verifyIdToken, type Discovery, type OidcHttp,
+  authorizationUrl, codeChallenge, discover, exchangeCode, newFlowSecrets, OidcCache, OidcError, tokenAuthOf, verifyIdToken, type Discovery, type OidcHttp,
 } from './internal/oidc.ts';
+export { DOMAIN, domainMatches, GOOGLE_ISSUER, issuerSetupProblem, providerKind, rulesFor, type ProviderKind } from './internal/providers.ts';
 export { issuerProblem, ssoIdentityOf, SSO_CONTINUE_TTL_SECONDS, SSO_FLOW_TTL_SECONDS } from './internal/sso.ts';
 export { applyPatch, parseScimFilter, ScimInputError, scimStateOf, toScimUser, type ScimState } from './internal/scim.ts';
 export {

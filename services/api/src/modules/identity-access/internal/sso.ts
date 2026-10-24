@@ -28,6 +28,7 @@ import { hmacSha256, isUuid, randomToken, sha256 } from '../../../shared/crypto.
 import { getSettings, urlProblem, type Database, type TenantSealing, type Tx } from '../../platform/index.ts';
 import type { SsoIdentity } from './factors.ts';
 import { authorizationUrl, exchangeCode, newFlowSecrets, OidcError, type OidcCache } from './oidc.ts';
+import { issuerSetupProblem, providerKind, rulesFor, type IssuerSetupProblem } from './providers.ts';
 
 /** How long a sign-in at the provider may take, from "start" to "finish". */
 export const SSO_FLOW_TTL_SECONDS = 600;
@@ -40,6 +41,8 @@ export interface ConnectionRow {
   name: string;
   issuer: string;
   client_id: string;
+  /** Google only: the company's Google Workspace domain; every ID token must carry it (providers.ts). */
+  allowed_domain: string | null;
   enabled: boolean;
   has_secret: boolean;
   created_by_card_id: string;
@@ -48,12 +51,13 @@ export interface ConnectionRow {
   removed_at: Date | null;
 }
 
-const CONNECTION_COLUMNS = `id, tenant_id, name, issuer, client_id, enabled, client_secret_enc IS NOT NULL AS has_secret, created_by_card_id,
+const CONNECTION_COLUMNS = `id, tenant_id, name, issuer, client_id, allowed_domain, enabled, client_secret_enc IS NOT NULL AS has_secret, created_by_card_id,
   created_at, updated_at, removed_at`;
 
 export function toApiConnection(row: ConnectionRow, redirectUri: string): Record<string, unknown> {
   return {
-    id: row.id, name: row.name, protocol: 'oidc', issuer: row.issuer, client_id: row.client_id, enabled: row.enabled, has_client_secret: row.has_secret,
+    id: row.id, name: row.name, protocol: 'oidc', provider: providerKind(row.issuer), issuer: row.issuer, client_id: row.client_id,
+    allowed_domain: row.allowed_domain, enabled: row.enabled, has_client_secret: row.has_secret,
     redirect_uri: redirectUri, created_by_card_id: row.created_by_card_id, created_at: row.created_at.toISOString(), updated_at: row.updated_at.toISOString(),
   };
 }
@@ -64,10 +68,12 @@ export interface ConnectionInput {
   client_id: string;
   /** Required when the connection is made; left out = keep the stored one. */
   client_secret?: string;
+  /** Google only (required there): the company's Google Workspace domain. Left out = keep the stored one. */
+  allowed_domain?: string | null;
   enabled?: boolean;
 }
 
-export type ConnectionProblem = 'issuer-changed' | 'secret-required' | 'bad-issuer';
+export type ConnectionProblem = 'issuer-changed' | 'secret-required' | 'bad-issuer' | IssuerSetupProblem | 'domain-required' | 'domain-only-google';
 
 /**
  * The issuer as a provider writes it, and an address the server may call: https on port 443, a public host name (no
@@ -122,26 +128,34 @@ export class SsoService {
   /** Makes the connection, or changes its name, client id, secret or switch. Another issuer = remove first. */
   async put(tx: Tx, tenantId: string, cardId: string, input: ConnectionInput, now: Date): Promise<ConnectionRow | ConnectionProblem> {
     if (issuerProblem(input.issuer)) return 'bad-issuer';
+    const setup = issuerSetupProblem(input.issuer);
+    if (setup !== null) return setup;
     await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`sso-connection:${tenantId}`]);
     const current = await this.get(tx, tenantId);
+    // Google lets in any Google account: the company's domain is required there, and means nothing anywhere else
+    const domain = input.allowed_domain === undefined ? current?.allowed_domain ?? null : input.allowed_domain;
+    const needsDomain = rulesFor(input.issuer).needsDomain;
+    if (needsDomain && domain === null) return 'domain-required';
+    if (!needsDomain && domain !== null) return 'domain-only-google';
     if (current === null) {
       if (input.client_secret === undefined) return 'secret-required';
       const { rows: ids } = await tx.query<{ id: string }>('SELECT uuidv7()::text AS id');
       const id = (ids[0] as { id: string }).id;
       const sealed = (await this.#sealing.forTenant(tx, tenantId)).encrypt(input.client_secret, secretAad(tenantId, id));
       const { rows } = await tx.query<ConnectionRow>(
-        `INSERT INTO sso_connections (id, tenant_id, name, issuer, client_id, client_secret_enc, secret_key_id, enabled, created_by_card_id, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10) RETURNING ${CONNECTION_COLUMNS}`,
-        [id, tenantId, input.name, input.issuer, input.client_id, sealed.ciphertext, sealed.keyId, input.enabled ?? false, cardId, now]);
+        `INSERT INTO sso_connections (id, tenant_id, name, issuer, client_id, client_secret_enc, secret_key_id, enabled, created_by_card_id, created_at, updated_at,
+                                      allowed_domain)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11) RETURNING ${CONNECTION_COLUMNS}`,
+        [id, tenantId, input.name, input.issuer, input.client_id, sealed.ciphertext, sealed.keyId, input.enabled ?? false, cardId, now, domain]);
       return rows[0] as ConnectionRow;
     }
     if (current.issuer !== input.issuer) return 'issuer-changed';
     const sealed = input.client_secret === undefined ? null : (await this.#sealing.forTenant(tx, tenantId)).encrypt(input.client_secret, secretAad(tenantId, current.id));
     const { rows } = await tx.query<ConnectionRow>(
       `UPDATE sso_connections SET name = $3, client_id = $4, enabled = coalesce($5, enabled),
-              client_secret_enc = coalesce($6, client_secret_enc), secret_key_id = coalesce($7, secret_key_id), updated_at = $8
+              client_secret_enc = coalesce($6, client_secret_enc), secret_key_id = coalesce($7, secret_key_id), updated_at = $8, allowed_domain = $9
         WHERE tenant_id = $1 AND id = $2 RETURNING ${CONNECTION_COLUMNS}`,
-      [tenantId, current.id, input.name, input.client_id, input.enabled ?? null, sealed?.ciphertext ?? null, sealed?.keyId ?? null, now]);
+      [tenantId, current.id, input.name, input.client_id, input.enabled ?? null, sealed?.ciphertext ?? null, sealed?.keyId ?? null, now, domain]);
     return rows[0] as ConnectionRow;
   }
 
@@ -196,7 +210,7 @@ export class SsoService {
     const secrets = newFlowSecrets();
     try {
       const discovery = await this.#cache.discovery(connection.issuer, p.now.getTime());
-      url = authorizationUrl(discovery, { clientId: connection.client_id, redirectUri: this.redirectUriFor(tenantId), secrets });
+      url = authorizationUrl(discovery, { clientId: connection.client_id, redirectUri: this.redirectUriFor(tenantId), secrets, domain: connection.allowed_domain });
     } catch (err) {
       if (err instanceof OidcError) return null;
       throw err;
@@ -236,24 +250,24 @@ export class SsoService {
     if (flow === undefined) return null;
     const tenantId = flow.tenant_id;
     const connection = await db.withTenantTx(tenantId, async (tx) => {
-      const { rows } = await tx.query<{ issuer: string; client_id: string; client_secret_enc: Buffer | null; secret_key_id: string | null }>(
-        `SELECT issuer, client_id, client_secret_enc, secret_key_id FROM sso_connections
+      const { rows } = await tx.query<{ issuer: string; client_id: string; allowed_domain: string | null; client_secret_enc: Buffer | null; secret_key_id: string | null }>(
+        `SELECT issuer, client_id, allowed_domain, client_secret_enc, secret_key_id FROM sso_connections
           WHERE tenant_id = $1 AND id = $2 AND removed_at IS NULL AND enabled`, [tenantId, flow.payload.connection_id]);
       const row = rows[0];
       if (row === undefined || row.client_secret_enc === null || row.secret_key_id === null) return null;
       // opened with the company's own key when it brought one (D35): switched off there, no SSO sign-in here
       const clientSecret = (await this.#sealing.forTenant(tx, tenantId)).decrypt(row.client_secret_enc, row.secret_key_id, secretAad(tenantId, flow.payload.connection_id));
-      return clientSecret === null ? null : { issuer: row.issuer, client_id: row.client_id, clientSecret };
+      return clientSecret === null ? null : { issuer: row.issuer, client_id: row.client_id, allowed_domain: row.allowed_domain, clientSecret };
     });
     if (connection === null) return null;
     // RFC 9207: a provider that names itself on the way back must be the flow's provider
-    if (p.iss !== undefined && p.iss !== connection.issuer) return null;
+    if (p.iss !== undefined && !rulesFor(connection.issuer).issuers.includes(p.iss)) return null;
     const { clientSecret } = connection;
     let subject: string;
     try {
       ({ subject } = await exchangeCode(this.#cache, {
         issuer: connection.issuer, clientId: connection.client_id, clientSecret, redirectUri: this.redirectUriFor(tenantId), code: p.code,
-        codeVerifier: flow.payload.code_verifier, nonce: flow.challenge, now: p.now,
+        codeVerifier: flow.payload.code_verifier, nonce: flow.challenge, now: p.now, domain: connection.allowed_domain,
       }));
     } catch (err) {
       if (err instanceof OidcError) return null;
