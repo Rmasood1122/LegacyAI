@@ -1,6 +1,7 @@
 # Documents and knowledge under the company's key — design (decision D41, 2026-10-24)
 
-> **Status: a design, not built.** Nothing in this document is in the code yet. It answers the gap named in
+> **Status: step 2 of 7 built (2026-10-24).** The AI service can lock and unlock content with the company's key
+> (`services/ai/app/platform/sealing.py`, 12 tests), but nothing uses it yet: content is still stored readable. This design answers the gap named in
 > `08-bring-your-own-key.md` ("documents and knowledge are not covered") and splits the work into steps that can each
 > be built, tested and merged on their own. The founder confirmed the three choices at the end on 2026-10-24.
 
@@ -110,6 +111,7 @@ which unlocks a company's content into memory for a few minutes while it is bein
    - the local and Cloud KMS key services in Python;
    - tests against stand-ins.
    - Nothing uses it yet.
+   - **Built 2026-10-24.** A test opens a key wrapped by the API's own code, so both services use one format.
 3. **Search in memory, while the text is still readable:**
    - build the in-memory index from today's readable columns;
    - compare its rankings with today's SQL on the synthetic companies (the acceptance test above);
