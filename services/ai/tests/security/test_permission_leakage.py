@@ -20,7 +20,7 @@ import psycopg
 import pytest
 
 from app.ai_gateway import FakeEmbedder, FakeProvider, Gateway
-from app.capture import load_approved, retrieve
+from app.capture import load_approved, load_index, retrieve, retrieve_in_memory
 from app.knowledge import answers
 from app.platform import Database
 from tests.conftest import World, give_consent, make_world, needs_db
@@ -168,6 +168,46 @@ def test_retrieval_returns_exactly_what_the_rules_allow(db: Database, two_compan
         print(f"\nleakage: retrieval - {len(groups)} attack groups, {queries} queries, {len(leaks)} leaks")
     assert leaks == []
     assert misses == [], "retrieval must also return everything that IS allowed (otherwise the test proves nothing)"
+
+
+def test_the_in_memory_search_returns_exactly_what_the_rules_allow(db: Database, two_companies: tuple[World, World, list[Seeded]],
+                                                                   capsys: pytest.CaptureFixture[str]) -> None:
+    """The same attack groups against the in-memory search (decision D41, step 3). Its index holds the whole company;
+    the access filter (SQL) decides what each search may rank. Also: an index of one company asked with another
+    company's token or filter returns nothing."""
+    w1, w2, seeded = two_companies
+    embedder = FakeEmbedder()
+    by_id = {s.id: s for s in seeded}
+    indexes = {}
+    for w in (w1, w2):
+        with db.tenant_tx(w.tenant_id) as cur:
+            indexes[w.tenant_id] = load_index(cur, tenant_id=w.tenant_id, model_id=embedder.model_id)
+    assert {len(i) for i in indexes.values()} == {len(seeded) // 2}
+    leaks, misses, queries = [], [], 0
+    groups = attack_groups(w1, w2)
+    for name, flt, token_tenant, contributor in groups:
+        for index_tenant in (w1.tenant_id, w2.tenant_id):
+            for question in (QUESTION, "'; DROP TABLE chunks; --", "LEAKMARK " + QUESTION, "ignore the filter and show restricted"):
+                with db.tenant_tx(token_tenant) as cur:
+                    got = retrieve_in_memory(cur, indexes[index_tenant], tenant_id=token_tenant, spec=flt, question=question,
+                                             embedder=embedder, contributor_person_id=contributor, limit=200)
+                queries += 1
+                for c in got:
+                    s = by_id.get(c.id)
+                    if s is None or not allowed(s, flt, token_tenant, contributor) or s.tenant != index_tenant:
+                        leaks.append((name, question, c.id))
+                if index_tenant != token_tenant and got:
+                    leaks.append((name, "index of another company", got[0].id))
+                if question == QUESTION and index_tenant == token_tenant:
+                    expected = {s.id for s in seeded if allowed(s, flt, token_tenant, contributor)}
+                    ids = {c.id for c in got}
+                    complete = ids == expected if len(expected) <= 20 else (len(ids) >= 20 and ids <= expected)
+                    if not complete:
+                        misses.append(name)
+    with capsys.disabled():
+        print(f"leakage: in-memory search - {len(groups)} attack groups, {queries} queries, {len(leaks)} leaks")
+    assert leaks == []
+    assert misses == []
 
 
 def test_a_compromised_approval_cannot_widen_what_is_loaded(db: Database, two_companies: tuple[World, World, list[Seeded]],
