@@ -95,7 +95,7 @@ describe('signing in with Google', () => {
   it('a card is set up with an account of the company\'s domain - also when the token says Google\'s issuer without https://', async () => {
     const { card } = await issueMember(tenant.owner, [{ role_key: 'expert' }]);
     const res = await enrol(card, '104500000000000000001', { hd: 'example.com', issuer: 'accounts.google.com' });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(204);   // enrollmentComplete answers 204 (openapi.yaml), as in test/integration/sso.test.ts
     expect(google.asked.at(-1)).toEqual({ prompt: 'select_account', hd: 'example.com' });
   });
 
