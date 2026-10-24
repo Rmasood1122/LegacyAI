@@ -514,7 +514,7 @@ Details: `07-sso-scim.md`, "Real providers"; decision D39.
 - The API knows what differs between the three: Google needs the company's Workspace domain (otherwise any Google
   account could sign in) and has no "sign in again" prompt; Microsoft needs a tenant-specific issuer; Okta is
   standard. Step-by-step set-up for each in the document.
-- Measured locally: 12 new API unit tests, 1 new screen test. The database test runs on GitHub.
+- Measured locally: 10 new API unit tests, 1 new screen test. The database test runs on GitHub.
 - **Not done or proven:** no real provider was used; no company account exists. SAML is still not supported (D33).
 
 ## Not built yet (from the plan)

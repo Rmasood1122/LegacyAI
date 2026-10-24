@@ -215,7 +215,7 @@ body when the provider offers only that); a provider that offers neither is not 
 2. Copy the client ID and secret. Issuer: `https://<your org>.okta.com` (or your custom authorization server's).
 3. On our screen: issuer, client id, secret. Switch on.
 
-**Tested:** against the test stand-in provider playing each provider's address and quirks - 12 unit tests (which
+**Tested:** against the test stand-in provider playing each provider's address and quirks - 10 unit tests (which
 provider an issuer is, look-alikes refused, Google's two issuer forms, the domain check, Microsoft's refused addresses,
 the prompt, secret in Basic or body) and 1 screen test; the database test (`test/integration/sso-providers.test.ts`,
 on GitHub) covers the connection rules and a Google set-up with the right, a missing and another company's domain.
