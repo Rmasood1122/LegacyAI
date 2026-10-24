@@ -326,7 +326,7 @@ CONSEQUENCES:
 - Tested against a local stand-in only. **No Google Cloud account, project or key was used.**
 
 **D41 — Documents and knowledge sealed per company; search moves into the AI service's memory (2026-10-24).**
-- Details and the steps: `docs/phase4/10-content-under-company-key.md`. A design; nothing built yet.
+- Details and the steps: `docs/phase4/10-content-under-company-key.md`. Step 2 built on 2026-10-24 (locking and unlocking in the AI service, `services/ai/app/platform/sealing.py`); nothing uses it yet.
 - Every content field is sealed (AES-256-GCM, bound to company, table, column, row and key version) with a content key derived from the company's data key, which is wrapped by the company's own key (BYOK) or the platform's.
 - The AI service unlocks keys itself (local stand-in, Cloud KMS with its own service account); the API never passes a key in a request. Keys and unlocked content are kept for at most 5 minutes.
 - Search (meaning and words) runs per company in memory: vectors as a matrix, words by BM25; the access filter stays in SQL on the readable labels.

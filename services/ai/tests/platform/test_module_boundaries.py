@@ -5,7 +5,9 @@
 - capture imports platform and ai_gateway, never knowledge;
 - knowledge imports platform, ai_gateway and capture;
 - between modules, only the package itself is imported (`from app.capture import x`), never a file inside it;
-- only ai_gateway may load a provider SDK, an HTTP client or the embedding library.
+- only ai_gateway may load a provider SDK, an HTTP client or the embedding library - with ONE named exception:
+  platform/sealing.py reaches the company's key service and the metadata server (decision D41). The key service
+  belongs to the platform layer, which may not import ai_gateway; the exception is per file, never per module.
 
 The last test breaks the rules on purpose to prove the checker notices.
 """
@@ -22,7 +24,9 @@ ALLOWED = {
     "capture": {"platform", "ai_gateway", "capture"},
     "knowledge": {"platform", "ai_gateway", "capture", "knowledge"},
 }
-GATEWAY_ONLY = {"anthropic", "openai", "httpx", "requests", "urllib3", "aiohttp", "fastembed", "onnxruntime"}
+GATEWAY_ONLY = {"anthropic", "openai", "httpx", "requests", "urllib", "urllib3", "aiohttp", "http", "fastembed", "onnxruntime"}
+# file -> the GATEWAY_ONLY libraries it may use anyway (see the module docstring)
+EXCEPTIONS = {"platform/sealing.py": {"urllib"}}
 
 
 def violations(module: str, filename: str, source: str) -> list[str]:
@@ -35,7 +39,7 @@ def violations(module: str, filename: str, source: str) -> list[str]:
             names = [node.module]
         for name in names:
             top = name.split(".")[0]
-            if top in GATEWAY_ONLY and module != "ai_gateway":
+            if top in GATEWAY_ONLY and module != "ai_gateway" and top not in EXCEPTIONS.get(filename, set()):
                 found.append(f"{filename}: {name} may be used only in app/ai_gateway")
             if top != "app":
                 continue
@@ -68,3 +72,8 @@ def test_the_checker_catches_broken_rules() -> None:
     assert violations("capture", "x.py", "import httpx") != []
     assert violations("knowledge", "x.py", "from anthropic import Anthropic") != []
     assert violations("knowledge", "x.py", "from app.capture import redact") == []
+    # the standard library's HTTP client counts as an HTTP client; the one exception is that file, nowhere else
+    assert violations("capture", "x.py", "import urllib.request") != []
+    assert violations("platform", "platform/db.py", "import urllib.request") != []
+    assert violations("platform", "platform/sealing.py", "import urllib.request") == []
+    assert violations("platform", "platform/sealing.py", "import httpx") != []

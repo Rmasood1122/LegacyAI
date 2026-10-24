@@ -527,6 +527,20 @@ Details: `08-bring-your-own-key.md`, "Google Cloud KMS"; decision D40.
 - **Not done or proven:** no Google Cloud account, project, key or service account was used. Documents and knowledge
   are still not covered by the company's key (next item).
 
+## Step 15 — Content under the company's key, part 2: locking and unlocking in the AI service (2026-10-24)
+
+Details: `10-content-under-company-key.md`, step 2; decision D41.
+
+- The AI service can now unlock a company's data key itself (the local stand-in, or Google Cloud KMS with its own
+  service account), derive the company's content key, and lock or unlock one field (a text or a vector) so that it
+  opens only at its own company, table, column, row and key version. Unlocked keys are kept 5 minutes at most.
+- **Nothing uses it yet.** Content is still stored readable; that changes in steps 4 and 5.
+- One library added: `cryptography` 50.0.2 (AES-GCM and HKDF; `docs/DEPENDENCIES.md`).
+- Measured locally: 12 new tests. One of them opens a key that the API's own code locked, so the two services agree
+  on the format. Cloud KMS is tested against a stand-in only.
+- **Not done or proven:** no Google Cloud account, project or key was used. Search, sealing on write and moving old
+  content are steps 3 to 5.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in
