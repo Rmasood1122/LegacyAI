@@ -27,7 +27,7 @@ describe('PKCE and the sign-in address', () => {
   it('asks for a fresh sign-in, the openid scope, the code flow with PKCE - and carries no secret', () => {
     const secrets = newFlowSecrets();
     const url = new URL(authorizationUrl(
-      { issuer: 'https://idp.example.test', authorization_endpoint: 'https://idp.example.test/authorize?tenant=1', token_endpoint: 'x', jwks_uri: 'y' },
+      { issuer: 'https://idp.example.test', authorization_endpoint: 'https://idp.example.test/authorize?tenant=1', token_endpoint: 'x', jwks_uri: 'y', token_auth: 'basic' },
       { clientId: 'c', redirectUri: REDIRECT, secrets }));
     expect(Object.fromEntries(url.searchParams)).toEqual({
       tenant: '1', response_type: 'code', client_id: 'c', redirect_uri: REDIRECT, scope: 'openid', state: secrets.state, nonce: secrets.nonce,

@@ -307,3 +307,13 @@ CONSEQUENCES:
 - `placeholder` is now false: the "placeholder prices" notice is gone, and a live Stripe key is accepted.
 - **Not done:** the Business plan (USD 300, from 25 seats) - no route can put a company on another plan yet, so it would be unreachable; it comes with that operator action. The pilot's "5 cards, 60 days, once" is a sales rule, not enforced by the code. Invoices issued before this change keep their amounts (an invoice never changes).
 
+**D39 — SSO: the rules of Google, Microsoft Entra ID and Okta; Google only with the company's domain (2026-10-24).**
+- The founder asked for "real SSO" for these providers. Details and set-up steps: `docs/phase4/07-sso-scim.md`, "Real providers". Read from each provider's documentation on 2026-10-24.
+- **Google lets any Google account sign in.** A Google connection must name the company's Google Workspace domain (`sso_connections.allowed_domain`, migration `20261024000100`), and every ID token must carry that domain in `hd`; a personal account or another company's is refused. The domain is refused for other providers, where it would mean nothing.
+- Google accepts no `prompt=login`: the account chooser is asked for instead. A fresh password at Google cannot be demanded; the 3-digit code is still asked here.
+- Microsoft: only a tenant-specific issuer (`.../<tenant ID>/v2.0`); `common`, `organizations`, `consumers` and domain names are refused with a message saying what to enter.
+- Google's ID tokens may say `accounts.google.com` without `https://`; both are accepted for Google only.
+- The client secret goes the way the provider's discovery document says it takes it (Basic, else the form body).
+- Rollback is refused while a live connection has a domain (the older code would let any Google account in).
+- Tested against the stand-in provider only. Not tested with any real provider.
+

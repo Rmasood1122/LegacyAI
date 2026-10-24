@@ -507,6 +507,16 @@ Details: `05-billing.md`, "Prices"; decision D38.
 - **Not done:** the Business plan (USD 300), enforcing the pilot's limits, taxes. Invoices issued before keep their
   amounts.
 
+## Step 13 — SSO with Microsoft Entra ID, Google and Okta (2026-10-24)
+
+Details: `07-sso-scim.md`, "Real providers"; decision D39.
+
+- The API knows what differs between the three: Google needs the company's Workspace domain (otherwise any Google
+  account could sign in) and has no "sign in again" prompt; Microsoft needs a tenant-specific issuer; Okta is
+  standard. Step-by-step set-up for each in the document.
+- Measured locally: 12 new API unit tests, 1 new screen test. The database test runs on GitHub.
+- **Not done or proven:** no real provider was used; no company account exists. SAML is still not supported (D33).
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

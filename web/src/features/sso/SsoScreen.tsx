@@ -42,11 +42,21 @@ export function SsoScreen() {
   );
 }
 
+const PROVIDER_NAME: Readonly<Record<SsoConnection['provider'], string>> = {
+  google: 'Google', microsoft: 'Microsoft Entra ID', okta: 'Okta', other: 'OpenID Connect provider',
+};
+
+/** Google lets any Google account in: a Google connection names the company's Workspace domain (D39). */
+export const isGoogleIssuer = (issuer: string): boolean => issuer.trim().replace(/\/+$/, '') === 'https://accounts.google.com';
+const DOMAIN = /^(?=.{4,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
+export const domainOk = (domain: string): boolean => DOMAIN.test(domain.trim());
+
 function Current({ connection }: { connection: SsoConnection }) {
   return (
     <Card title={connection.name}>
       <Facts items={[
-        ['Provider (issuer)', connection.issuer], ['Client id', connection.client_id],
+        ['Provider', PROVIDER_NAME[connection.provider]], ['Issuer', connection.issuer], ['Client id', connection.client_id],
+        ...(connection.allowed_domain === null ? [] : [['Only accounts of', connection.allowed_domain] as const]),
         ['State', connection.enabled ? 'Switched on' : 'Switched off'], ['Client secret', connection.has_client_secret ? 'Stored (never shown)' : 'Missing'],
         ['Last changed', formatDate(connection.updated_at)],
       ]} />
@@ -61,10 +71,16 @@ function ConnectionForm({ existing }: { existing: SsoConnection | null }) {
   const [clientId, setClientId] = useState(existing?.client_id ?? '');
   const [secret, setSecret] = useState('');
   const [enabled, setEnabled] = useState(existing?.enabled ?? false);
-  const ready = name.trim() !== '' && /^https:\/\/[^\s/]+\.[^\s]+$/.test(issuer.trim()) && clientId.trim() !== '' && (existing !== null || secret !== '');
+  const [domain, setDomain] = useState(existing?.allowed_domain ?? '');
+  const google = isGoogleIssuer(issuer);
+  const ready = name.trim() !== '' && /^https:\/\/[^\s/]+\.[^\s]+$/.test(issuer.trim()) && clientId.trim() !== '' && (existing !== null || secret !== '')
+    && (!google || domainOk(domain));
   const onSave = (e: FormEvent): void => {
     e.preventDefault();
-    save.mutate({ body: { name: name.trim(), issuer: issuer.trim(), client_id: clientId.trim(), enabled, ...(secret === '' ? {} : { client_secret: secret }) } }, {
+    save.mutate({ body: {
+      name: name.trim(), issuer: issuer.trim(), client_id: clientId.trim(), enabled, ...(secret === '' ? {} : { client_secret: secret }),
+      ...(google ? { allowed_domain: domain.trim() } : {}),
+    } }, {
       onSuccess: () => setSecret(''),
     });
   };
@@ -73,7 +89,14 @@ function ConnectionForm({ existing }: { existing: SsoConnection | null }) {
       <form onSubmit={onSave} noValidate>
         <TextField label="Name" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
         <TextField label="Provider (issuer)" value={issuer} disabled={existing !== null} onChange={(e) => setIssuer(e.target.value)}
-          hint={existing === null ? 'The OpenID Connect issuer address your provider gives you. It cannot be changed later.' : 'Another provider needs a new connection: remove this one first.'} />
+          hint={existing === null
+            ? 'Google: https://accounts.google.com. Microsoft Entra ID: https://login.microsoftonline.com/<your tenant ID>/v2.0. Okta: https://<your org>.okta.com. It cannot be changed later.'
+            : 'Another provider needs a new connection: remove this one first.'} />
+        {google && (
+          <TextField label="Your Google Workspace domain" value={domain} placeholder="example.com" autoComplete="off" onChange={(e) => setDomain(e.target.value.toLowerCase())}
+            hint="Google lets any Google account sign in. Only accounts of this domain are accepted."
+            error={domain.trim() === '' || domainOk(domain) ? null : 'Write the domain only, for example example.com.'} />
+        )}
         <TextField label="Client id" value={clientId} onChange={(e) => setClientId(e.target.value)} />
         <TextField label={existing === null ? 'Client secret' : 'New client secret (leave empty to keep the stored one)'} type="password" autoComplete="off"
           value={secret} onChange={(e) => setSecret(e.target.value)} />

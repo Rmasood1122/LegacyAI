@@ -11,11 +11,14 @@
 //   - the ID token is checked with `jose` (already a dependency): signature against the provider's published keys,
 //     asymmetric algorithms only, issuer, audience = our client id (and `azp` when there are several audiences),
 //     expiry with 2 minutes of tolerance, issued within the last 10 minutes, and the nonce we sent;
+//   - what differs between Google, Microsoft and Okta (accepted `iss` values, the prompt, Google's domain check) is in
+//     providers.ts (decision D39);
 //   - the identity is `sub`, which the provider promises never to reassign. E-mail addresses are NOT used to link
 //     anyone: a provider may let people choose them.
 import { createHash, randomBytes } from 'node:crypto';
 import { createLocalJWKSet, jwtVerify, type JSONWebKeySet } from 'jose';
 import { urlProblem, type HttpsRequest, type HttpsResponse } from '../../platform/index.ts';
+import { domainMatches, rulesFor } from './providers.ts';
 
 export type OidcHttp = (req: HttpsRequest) => Promise<HttpsResponse>;
 
@@ -24,6 +27,8 @@ export interface Discovery {
   authorization_endpoint: string;
   token_endpoint: string;
   jwks_uri: string;
+  /** How the client secret is sent: HTTP Basic (the default of the standard) unless the provider offers only the form. */
+  token_auth: 'basic' | 'post';
 }
 
 export type OidcFailure =
@@ -59,7 +64,15 @@ export async function discover(http: OidcHttp, issuer: string): Promise<Discover
   const { authorization_endpoint: auth, token_endpoint: token, jwks_uri: jwks } = doc;
   if (!callable(auth) || !callable(token) || !callable(jwks)) throw new OidcError('discovery_invalid');
   if (hostOf(auth) !== hostOf(issuer)) throw new OidcError('discovery_invalid');
-  return { issuer, authorization_endpoint: auth, token_endpoint: token, jwks_uri: jwks };
+  return { issuer, authorization_endpoint: auth, token_endpoint: token, jwks_uri: jwks, token_auth: tokenAuthOf(doc.token_endpoint_auth_methods_supported) };
+}
+
+/** OpenID Connect Discovery: without the list, client_secret_basic is what a provider supports. Pure. */
+export function tokenAuthOf(methods: unknown): 'basic' | 'post' {
+  if (!Array.isArray(methods)) return 'basic';
+  if (methods.includes('client_secret_basic')) return 'basic';
+  if (methods.includes('client_secret_post')) return 'post';
+  throw new OidcError('discovery_invalid');
 }
 
 /** Discovery documents and key sets change rarely: kept for 10 minutes per issuer (in memory, per process). */
@@ -100,7 +113,8 @@ export function newFlowSecrets(): FlowSecrets {
 export const codeChallenge = (verifier: string): string => createHash('sha256').update(verifier).digest('base64url');
 
 /** Where the browser is sent to sign in. Pure. */
-export function authorizationUrl(d: Discovery, p: { clientId: string; redirectUri: string; secrets: FlowSecrets }): string {
+export function authorizationUrl(d: Discovery, p: { clientId: string; redirectUri: string; secrets: FlowSecrets; domain?: string | null }): string {
+  const rules = rulesFor(d.issuer);
   const url = new URL(d.authorization_endpoint);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('client_id', p.clientId);
@@ -110,18 +124,25 @@ export function authorizationUrl(d: Discovery, p: { clientId: string; redirectUr
   url.searchParams.set('nonce', p.secrets.nonce);
   url.searchParams.set('code_challenge', codeChallenge(p.secrets.codeVerifier));
   url.searchParams.set('code_challenge_method', 'S256');
-  url.searchParams.set('prompt', 'login');   // a sign-in is a factor: ask for it, do not reuse an old provider session silently
+  // a sign-in is a factor: ask for it, do not reuse an old provider session silently. Google offers no "login": the
+  // account chooser at least makes the person pick the account (providers.ts)
+  url.searchParams.set('prompt', rules.prompt);
+  // a hint to Google's account chooser only; the ID token's hd is what is checked
+  if (rules.needsDomain && p.domain) url.searchParams.set('hd', p.domain);
   return url.toString();
 }
 
 const ALGORITHMS = ['RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512', 'ES256', 'ES384', 'ES512', 'EdDSA'];
 
 /** The provider's ID token as an identity, or an OidcError. */
-export async function verifyIdToken(idToken: string, keys: JSONWebKeySet, p: { issuer: string; clientId: string; nonce: string; now: Date }): Promise<{ subject: string }> {
+export async function verifyIdToken(
+  idToken: string, keys: JSONWebKeySet, p: { issuer: string; clientId: string; nonce: string; now: Date; domain?: string | null },
+): Promise<{ subject: string }> {
+  const rules = rulesFor(p.issuer);
   let payload: Record<string, unknown>;
   try {
     ({ payload } = await jwtVerify(idToken, createLocalJWKSet(keys), {
-      issuer: p.issuer, audience: p.clientId, algorithms: ALGORITHMS, clockTolerance: 120, maxTokenAge: '10m', currentDate: p.now, requiredClaims: ['sub', 'iat', 'exp'],
+      issuer: rules.issuers, audience: p.clientId, algorithms: ALGORITHMS, clockTolerance: 120, maxTokenAge: '10m', currentDate: p.now, requiredClaims: ['sub', 'iat', 'exp'],
     }));
   } catch {
     throw new OidcError('id_token_invalid');
@@ -129,6 +150,8 @@ export async function verifyIdToken(idToken: string, keys: JSONWebKeySet, p: { i
   if (payload.nonce !== p.nonce) throw new OidcError('id_token_invalid');
   if (Array.isArray(payload.aud) && payload.aud.length > 1 && payload.azp !== p.clientId) throw new OidcError('id_token_invalid');
   if (payload.azp !== undefined && payload.azp !== p.clientId) throw new OidcError('id_token_invalid');
+  // Google: any Google account could have signed in; only the company's domain is let through. No domain = nobody.
+  if (rules.needsDomain && (typeof p.domain !== 'string' || !domainMatches(payload.hd, p.domain))) throw new OidcError('id_token_invalid');
   const sub = payload.sub;
   if (typeof sub !== 'string' || sub.length < 1 || sub.length > 255) throw new OidcError('id_token_invalid');
   return { subject: sub };
@@ -137,14 +160,18 @@ export async function verifyIdToken(idToken: string, keys: JSONWebKeySet, p: { i
 /** Code -> verified identity: the token request (client secret over HTTP Basic, the PKCE verifier) and the checks. */
 export async function exchangeCode(cache: OidcCache, p: {
   issuer: string; clientId: string; clientSecret: string; redirectUri: string; code: string; codeVerifier: string; nonce: string; now: Date;
+  domain?: string | null;
 }): Promise<{ subject: string }> {
   const d = await cache.discovery(p.issuer, p.now.getTime());
-  const basic = Buffer.from(`${encodeURIComponent(p.clientId)}:${encodeURIComponent(p.clientSecret)}`).toString('base64');
   const form = new URLSearchParams({ grant_type: 'authorization_code', code: p.code, redirect_uri: p.redirectUri, code_verifier: p.codeVerifier });
-  const res = await cache.http({
-    url: d.token_endpoint, method: 'POST', body: form.toString(),
-    headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json', authorization: `Basic ${basic}` },
-  });
+  const headers: Record<string, string> = { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' };
+  if (d.token_auth === 'basic') {
+    headers.authorization = `Basic ${Buffer.from(`${encodeURIComponent(p.clientId)}:${encodeURIComponent(p.clientSecret)}`).toString('base64')}`;
+  } else {
+    form.set('client_id', p.clientId);
+    form.set('client_secret', p.clientSecret);
+  }
+  const res = await cache.http({ url: d.token_endpoint, method: 'POST', body: form.toString(), headers });
   if (!res.ok || res.status !== 200) throw new OidcError('token_request_failed');
   let tokens: Record<string, unknown>;
   try {
@@ -153,7 +180,7 @@ export async function exchangeCode(cache: OidcCache, p: {
     throw new OidcError('token_response_invalid');
   }
   if (typeof tokens.id_token !== 'string' || tokens.id_token.length > 16_384) throw new OidcError('token_response_invalid');
-  const check = (keys: JSONWebKeySet) => verifyIdToken(tokens.id_token as string, keys, { issuer: p.issuer, clientId: p.clientId, nonce: p.nonce, now: p.now });
+  const check = (keys: JSONWebKeySet) => verifyIdToken(tokens.id_token as string, keys, { issuer: p.issuer, clientId: p.clientId, nonce: p.nonce, now: p.now, domain: p.domain ?? null });
   try {
     return await check(await cache.jwks(p.issuer, p.now.getTime()));
   } catch (err) {

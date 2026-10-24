@@ -11,6 +11,9 @@ const PROBLEM_TEXT: Readonly<Record<ConnectionProblem, [number, string, string]>
   'issuer-changed': [409, 'sso-issuer-changed', 'The provider of a connection cannot change; remove the connection first'],
   'secret-required': [422, 'unprocessable', 'A new connection needs the client secret'],
   'bad-issuer': [422, 'unprocessable', 'The issuer must be a public https address (port 443, a host name, no query or fragment)'],
+  'microsoft-needs-tenant-id': [422, 'unprocessable', 'For Microsoft Entra ID use https://login.microsoftonline.com/<your tenant ID>/v2.0 (the directory\'s ID, not "common", "organizations" or a domain name)'],
+  'domain-required': [422, 'unprocessable', 'A Google connection needs your Google Workspace domain (allowed_domain): without it any Google account could be used'],
+  'domain-only-google': [422, 'unprocessable', 'allowed_domain is for Google connections only'],
 };
 
 const theConnection = async ({ subject }: { subject: CardSubject }): Promise<ResourceRef> => ({ type: 'sso_connection', tenant_id: subject.tenant_id, collection: true });
