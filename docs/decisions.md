@@ -318,3 +318,18 @@ CONSEQUENCES:
 - Rollback is refused while a live connection has a domain (the older code would let any Google account in).
 - Tested against the stand-in provider only. Not tested with any real provider.
 
+**D40 — Bring-your-own-key: Google Cloud KMS, called directly, with the service account's token (2026-10-24).**
+- The founder asked for "the real key service". Details and set-up: `docs/phase4/08-bring-your-own-key.md`, "Google Cloud KMS".
+- `KEY_SERVICE=google-kms`. The company's key stays in the company's own Google Cloud project; it grants this installation's service account Encrypter/Decrypter on that one key, and can disable it or take the role back at any time.
+- **No library:** two REST calls (encrypt, decrypt) through the guarded HTTPS client; the access token from the metadata server (no key file). Rejected: the Google Cloud client library (much more code running with the token, for two calls).
+- CRC32C integrity checks as Google recommends; every failure is KeyUnavailable (fail closed, as D35).
+- Tested against a local stand-in only. **No Google Cloud account, project or key was used.**
+
+**D41 — Documents and knowledge sealed per company; search moves into the AI service's memory (2026-10-24).**
+- Details and the steps: `docs/phase4/10-content-under-company-key.md`. A design; nothing built yet.
+- Every content field is sealed (AES-256-GCM, bound to company, table, column, row and key version) with a content key derived from the company's data key, which is wrapped by the company's own key (BYOK) or the platform's.
+- The AI service unlocks keys itself (local stand-in, Cloud KMS with its own service account); the API never passes a key in a request. Keys and unlocked content are kept for at most 5 minutes.
+- Search (meaning and words) runs per company in memory: vectors as a matrix, words by BM25; the access filter stays in SQL on the readable labels.
+- Not protected: a running compromised AI service, the AI provider during a call, labels and structure.
+- **Confirmed by the founder (2026-10-24, the recommended defaults):** every company's content is sealed, not only BYOK companies; the vectors are sealed too; the costs are accepted after measuring them on test companies first (step 3) and showing the numbers before switching over.
+

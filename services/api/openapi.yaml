@@ -12220,11 +12220,12 @@ components:
           type: string
           format: uuid
         key_service:
-          description: "The key service this installation is configured with: none, or local (a stand-in for tests and development)."
+          description: "The key service this installation is configured with: none, local (a stand-in for tests and development) or google-kms (Google Cloud KMS; key_ref is projects/.../locations/.../keyRings/.../cryptoKeys/...)."
           type: string
           enum:
             - none
             - local
+            - google-kms
         key_ref:
           description: "Where the company's key is, at the key service. Null = the company uses the platform's key."
           type:

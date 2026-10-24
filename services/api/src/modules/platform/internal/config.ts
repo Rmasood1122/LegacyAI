@@ -88,9 +88,10 @@ export interface Config {
   /**
    * Bring-your-own-key (feature 21, D35): the service that holds companies' own encryption keys. 'none' = no company
    * can bring a key. 'local' = keys from LOCAL_KEY_SERVICE_KEYS, a stand-in for tests and development only (never in
-   * production). A real key service (a cloud KMS) is one more adapter.
+   * production). 'google-kms' = Google Cloud KMS (D40): each company's key in its own Google Cloud project, used with
+   * this installation's service account; nothing more to configure here.
    */
-  keyService: { kind: 'none' | 'local'; localKeys: ReadonlyMap<string, Secret<Buffer>> };
+  keyService: { kind: 'none' | 'local' | 'google-kms'; localKeys: ReadonlyMap<string, Secret<Buffer>> };
 }
 
 export class ConfigError extends Error {
@@ -318,7 +319,7 @@ export function loadConfig(env: Env): Config {
       sender: oneOf('MAIL_SENDER', ['none', 'fake', 'resend'] as const, 'none'), from: raw('MAIL_FROM') ?? 'LegacyAI <no-reply@localhost>', resendApiKey: null,
     },
     sso: { redirectUri: raw('SSO_REDIRECT_URI') ?? `${allowedOrigins[0] ?? 'http://localhost:3000'}/sso/return` },
-    keyService: { kind: oneOf('KEY_SERVICE', ['none', 'local'] as const, 'none'), localKeys: new Map() },
+    keyService: { kind: oneOf('KEY_SERVICE', ['none', 'local', 'google-kms'] as const, 'none'), localKeys: new Map() },
   };
   if (config.keyService.kind === 'local') {
     if (nodeEnv === 'production') problems.push('KEY_SERVICE=local keeps keys in the configuration and is not allowed when NODE_ENV=production');
