@@ -1,7 +1,8 @@
 // The renewal center (features 31-35): the one renewal date of the company, what the next term costs, seats,
 // automatic renewal, and the invoices. Paying asks twice, because it is about money. With Stripe (D37) the Owner pays
 // on Stripe's own page: the API hands its address over, and this screen only links to it.
-// The prices shown come from a placeholder catalogue until the founder sets real ones; the screen says so.
+// Prices are per seat and year; a company pays for its term's length (decision D38). While a catalogue is only a
+// placeholder, the screen says so.
 import { useState } from 'react';
 import type { Invoice, Subscription } from '../../api/generated.ts';
 import { useSession } from '../../session/session.tsx';
@@ -51,7 +52,8 @@ function Center({ s }: { s: Subscription }) {
           ['Read-only until (if not renewed)', formatDate(s.grace_until)],
           ['Length of a term', `${s.term_days} days`],
           ['Cards in use', seatsLine(s)],
-          ['Price per seat and term', s.plan === null ? '—' : moneyOf(s.plan.price_per_seat)],
+          ['Price per seat and year', s.plan === null ? '—' : moneyOf(s.plan.price_per_seat_per_year)],
+          ['Price per seat for this term', s.plan === null ? '—' : `${moneyOf(s.plan.price_per_seat)} (${s.term_days} days)`],
           ['The next term will cost', s.next_term === null ? '—' : `${moneyOf(s.next_term.amount)} (${s.next_term.seats} seats)`],
           ['If nothing is done', s.if_nothing_is_done === 'automatic_renewal_is_tried' ? 'Renewal is tried automatically on the renewal date' : 'Read-only, then export only'],
         ]} />

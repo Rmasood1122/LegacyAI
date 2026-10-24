@@ -5,7 +5,7 @@
 > note was written. Nothing is deployed. **No payment provider is connected. No money can be taken. No account was
 > opened and no payment service was called.** The prices in the catalogue are placeholders. Decision D29.
 >
-> **Update 2026-10-23: Stripe can now be connected** (decision D37, section "Stripe" below). It was tested only
+> **Update 2026-10-23: the prices are set (D38: Team USD 150 per seat and year).** **Stripe can now be connected** (decision D37, section "Stripe" below). It was tested only
 > against a local stand-in for Stripe: no Stripe account exists, no key was used, **no money has been taken**.
 
 ## In plain language
@@ -208,8 +208,13 @@ Published prices of comparable tools, read on 2026-10-23 from each vendor's own 
 | Guru, Glean, Bloomfire, Document360, Trainual | - | not published | |
 
 Selected (per seat per **year**, USD): **Pilot** free (up to 5 cards, 60 days, once); **Team $150**; **Business
-$300** (from 25 seats; SSO, SCIM, own key). What remains to build: a yearly price turned into the price of the term's
-length, and the Business plan code (see D37).
+$300** (from 25 seats; SSO, SCIM, own key).
+
+**In the catalogue since 2026-10-23 (D38):** Team (code `pilot`, the default plan of a new company) at USD 150 and the
+free pilot (code `free`). A seat costs the yearly price for the term's length: USD 150 x 90 / 365 = **USD 36.99** for
+the default 90-day term, USD 150.00 for 365 days, USD 150.41 for 366. Rounded to the cent, half up, per seat, then
+times the seats. Not yet: the Business plan (it needs an operator action that puts a company on another plan) and
+enforcing the pilot's limits.
 
 ## What a real provider still needs (not done)
 

@@ -496,6 +496,17 @@ Details: `05-billing.md`, "Stripe" and "Prices"; decision D37.
   saved card, refunds, taxes and receipts are not built. Whether Stripe's real events match its documentation is an
   ASSUMPTION until the founder's first test payment.
 
+## Step 12 — the selected prices in the catalogue (2026-10-23)
+
+Details: `05-billing.md`, "Prices"; decision D38.
+
+- Team (the default plan) USD 150 per seat and year; the free pilot. A company pays for its term's length: USD 36.99 a
+  seat for the default 90 days. The screen shows both numbers; the "placeholder prices" notice is gone.
+- Measured locally: unit tests of the rounding (90, 30, 365, 366 and 1 day; half a cent; refusals) and of the
+  catalogue; 1 new screen test. The database tests and the browser test (expected amounts updated) run on GitHub.
+- **Not done:** the Business plan (USD 300), enforcing the pilot's limits, taxes. Invoices issued before keep their
+  amounts.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in
