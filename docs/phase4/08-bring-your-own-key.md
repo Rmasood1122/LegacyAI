@@ -73,8 +73,48 @@ There is no screen for it yet. It is an operator action through the API, like th
 `KEY_SERVICE=local` with `LOCAL_KEY_SERVICE_KEYS` (JSON of name → base64 32 bytes) is the stand-in. It is refused when
 `NODE_ENV=production`. Its key references are `local:<name>`.
 
-**The missing piece** is a real key service adapter, for example Google Cloud KMS: one class with the same two calls,
-`wrap` and `unwrap`. It needs a cloud account, and so a decision of the founder.
+`KEY_SERVICE=google-kms` is **Google Cloud KMS** (decision D40, 2026-10-24). Nothing else is configured: each company's
+key reference is the full name of a key in the company's **own** Google Cloud project,
+`projects/<project>/locations/<location>/keyRings/<ring>/cryptoKeys/<key>`.
+
+### Google Cloud KMS (decision D40)
+
+`services/api/src/modules/platform/internal/gcp-kms.ts`. No Google library: two REST calls, read from Google's
+documentation on 2026-10-24 ([encrypt](https://cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/encrypt),
+[decrypt](https://cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/decrypt)), through the
+platform's guarded HTTPS client.
+
+- **Who can use the key:** the API runs as its Cloud Run service account and gets a short-lived access token from
+  the metadata server (no key file anywhere). The company gives that one service account the role **Cloud KMS
+  CryptoKey Encrypter/Decrypter** on that one key, nothing more.
+- **The company stays in control:** disabling or destroying the key version, or removing the role, makes every
+  unwrap fail (KeyUnavailable): nothing sealed with the company's data key opens, and nothing new is sealed with the
+  platform's key instead (D35). Re-enabling brings it back.
+- **Integrity:** CRC32C checksums are sent with every request; KMS must say it verified them, and the checksum of
+  every answer is checked. A damaged or unreadable answer is KeyUnavailable, never a wrong key.
+- **Errors:** only the HTTP status is logged in the error, never Google's message (it can name projects and keys).
+  A 401 drops the cached access token.
+- **Cost** (read 2026-10-24 from [cloud.google.com/kms/pricing](https://cloud.google.com/kms/pricing)), paid by the
+  company in its own project: a software key version USD 0.000082192 an hour (about USD 0.06 a month); USD 0.03 per
+  10,000 encrypt/decrypt operations. The API caches an unwrapped data key for up to 5 minutes (D35), so a busy company
+  makes at most a few hundred decrypts a day.
+
+**What the founder does once (not done by me - it needs the Google Cloud account):**
+1. Set `KEY_SERVICE=google-kms` on the API service.
+2. Tell each company the service account's e-mail address (the Cloud Run service's identity).
+
+**What a company does in its own Google Cloud project:**
+1. Enable the Cloud KMS API. Create a key ring and a **symmetric encrypt/decrypt** key (software protection is
+   enough; HSM costs more).
+2. On that key, grant the LegacyAI service account the role **Cloud KMS CryptoKey Encrypter/Decrypter**.
+3. Send the platform operator the key's full name; the operator sets it for the company (the API checks that the key
+   works before anything is sealed with it).
+
+**Tested:** 9 unit tests against a local stand-in for Cloud KMS (wrap/unwrap round trip, the documented request with
+checksums and a bearer token, token reuse and refresh after a 401, a disabled key, another company's binding, another or
+unknown key, damaged answers, no token, no Google message in the error). **Not tested:** Google Cloud KMS itself, the
+metadata server, IAM. ASSUMPTION: KMS answers as documented; whose project is billed for the calls is as Google
+documents it (not checked).
 
 ## Operations (191 in total)
 

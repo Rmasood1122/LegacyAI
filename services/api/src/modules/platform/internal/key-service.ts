@@ -7,7 +7,7 @@
 //   none  - no company can bring a key (the default);
 //   local - keys from the configuration (LOCAL_KEY_SERVICE_KEYS), a stand-in for tests and development only. A key can
 //           be switched off here (disable) as a company would switch its key off at a real service.
-// A real key service (for example Google Cloud KMS) is one more adapter with the same two calls.
+//   google-kms - Google Cloud KMS (gcp-kms.ts, decision D40): the company's key in its own Google Cloud project.
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type { Secret } from './config.ts';
 
@@ -19,7 +19,7 @@ export class KeyUnavailable extends Error {
 }
 
 export interface KeyService {
-  readonly kind: 'none' | 'local';
+  readonly kind: 'none' | 'local' | 'google-kms';
   /** Could this be a key reference of this service? (Its form only: whether the key works is learned by using it.) */
   validRef(ref: string): boolean;
   /** Encrypts a data key with the company's key. `aad` binds it to one company and one version. */
@@ -96,6 +96,3 @@ export class LocalKeyService implements KeyService {
   }
 }
 
-export function keyServiceFrom(config: { kind: 'none' | 'local'; localKeys: ReadonlyMap<string, Secret<Buffer>> }): KeyService {
-  return config.kind === 'local' ? new LocalKeyService(config.localKeys) : new NoKeyService();
-}

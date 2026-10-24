@@ -517,6 +517,16 @@ Details: `07-sso-scim.md`, "Real providers"; decision D39.
 - Measured locally: 10 new API unit tests, 1 new screen test. The database test runs on GitHub.
 - **Not done or proven:** no real provider was used; no company account exists. SAML is still not supported (D33).
 
+## Step 14 — Google Cloud KMS as the company's key service (2026-10-24)
+
+Details: `08-bring-your-own-key.md`, "Google Cloud KMS"; decision D40.
+
+- `KEY_SERVICE=google-kms`: a company's own key in its own Google Cloud project wraps its data key; the company can
+  switch it off at Google at any time. No library added.
+- Measured locally: 9 unit tests against a local stand-in for Cloud KMS.
+- **Not done or proven:** no Google Cloud account, project, key or service account was used. Documents and knowledge
+  are still not covered by the company's key (next item).
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

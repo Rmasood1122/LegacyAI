@@ -1146,7 +1146,7 @@ export interface ScimServiceProviderConfig {
 
 export interface CompanyEncryptionKey {
   tenant_id: string;
-  key_service: "none" | "local";
+  key_service: "none" | "local" | "google-kms";
   key_ref: string | null;
   version: number | null;
   since: string | null;
