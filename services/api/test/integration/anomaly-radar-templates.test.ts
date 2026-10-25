@@ -344,13 +344,12 @@ describe('department templates', () => {
     expect(first.body).toMatchObject({ template_key: 'maintenance', topics_created: 5, topics_existing: 1, topics_skipped: 0, links_created: 9, links_existing: 0 });
     expect(first.body.created_topic_ids).toHaveLength(5);
     expect(first.body.created_topic_ids).not.toContain(mine.body.id);
-    // each new topic is sent for its search vector, as with createTopic - and so is the company's own topic, which has
-    // none yet (the stand-in AI service of this test stores no vector)
-    expect(stub.ofAction('topic.embed')).toHaveLength(6);
-    // from here on the topics HAVE their vector, as they would after the real AI service answered
-    await su.query(
-      `UPDATE topics SET embedding = ('[' || array_to_string(array_fill(0.1, ARRAY[384]), ',') || ']')::halfvec(384), embedding_model = 'test'
-        WHERE tenant_id = $1`, [tenant.tenantId]);
+    // the AI service is asked once, with every topic of the template and the caller's topic:read filter (it alone can
+    // read topic names, D41 step 6 part 4b; it also gives the new topics their search vectors - tested in services/ai)
+    const sent = stub.ofAction('topic.template');
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.body.topics).toHaveLength(6);
+    expect(sent[0]!.claims.filter.action).toBe('topic:read');
     const topics = await tenant.owner.get('/v1/topics?limit=50');
     const kept = topics.body.items.find((x: any) => x.id === mine.body.id);
     expect(kept).toMatchObject({ name: 'lubrication', description: 'Our own wording.' });
@@ -367,7 +366,7 @@ describe('department templates', () => {
     expect(again.body).toEqual({
       template_key: 'maintenance', topics_created: 0, created_topic_ids: [], topics_existing: 6, topics_skipped: 0, links_created: 0, links_existing: 9,
     });
-    expect(stub.ofAction('topic.embed')).toHaveLength(0);
+    expect(stub.ofAction('topic.template')).toHaveLength(1);
     const after = await tenant.owner.get(`/v1/job-roles/${encodeURIComponent('Maintenance technician')}/topics`);
     expect(after.body.topics.find((x: any) => x.topic_id === mine.body.id)).toMatchObject({ importance: 1, required: false });
     const audit = await su.query(`SELECT details FROM audit_log WHERE tenant_id = $1 AND reason_code = 'TOPIC_TEMPLATE_APPLIED' ORDER BY seq`, [tenant.tenantId]);

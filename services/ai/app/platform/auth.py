@@ -28,6 +28,7 @@ LEEWAY_SECONDS = 5
 API_KEY_ACTIONS: frozenset[str] = frozenset({
     "knowledge.candidates", "knowledge.answer", "item.list", "item.read", "graph.read", "gap.report",
     "source.titles",     # the titles of documents a key lists or reads (sealed from D41 step 6 on); read-only
+    "topic.texts",       # the names of topics a key lists (written only by the AI service from D41 step 6 part 4b); read-only
 })
 
 

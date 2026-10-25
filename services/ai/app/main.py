@@ -150,6 +150,37 @@ class GapQuery(Body):
     job_role: str = Field(min_length=1, max_length=120)
 
 
+TopicName = Annotated[str, Field(min_length=1, max_length=120)]
+TopicDescription = Annotated[str, Field(max_length=500)]
+
+
+class TopicCreate(Body):
+    name: TopicName
+    description: TopicDescription = ""
+    department_id: Uuid | None = None
+    sensitivity: Sensitivity = 0
+
+
+class TopicChange(Body):
+    name: TopicName | None = None
+    description: TopicDescription | None = None
+    status: Literal["active", "proposed", "retired"] | None = None
+
+
+class TemplateTopic(Body):
+    key: str = Field(pattern=r"^[a-z0-9-]{1,40}$")
+    name: TopicName
+    description: TopicDescription = ""
+
+
+class TopicTemplate(Body):
+    topics: list[TemplateTopic] = Field(min_length=1, max_length=50)
+
+
+class TopicTexts(Body):
+    ids: list[Uuid] = Field(max_length=100)
+
+
 
 
 class ExpertQuestion(Body):
@@ -583,6 +614,28 @@ def create_app(services: Services | None = None) -> FastAPI:
         with svc().db.tenant_tx(ctx.tenant_id) as cur:
             report = gap_report(cur, tenant_id=ctx.tenant_id, job_role=body.job_role, item_spec=ctx.filter, topic_spec=ctx.filter)
         return {"job_role": body.job_role, "topics": [g.public() for g in report]}
+
+    # Topic names and descriptions are written and read only here (D41 step 6 part 4b); the API checked the caller's right.
+    @app.post("/internal/topics", status_code=201)
+    def topic_create(body: TopicCreate, ctx: Annotated[ServiceContext, Depends(token("topic.create"))]) -> dict[str, Any]:
+        s = svc()
+        return topics.create(s.db, ctx, s.embedder, name=body.name, description=body.description, department_id=body.department_id,
+                             sensitivity=body.sensitivity)
+
+    @app.post("/internal/topics/{topic_id}/change")
+    def topic_change(topic_id: str, body: TopicChange,
+                     ctx: Annotated[ServiceContext, Depends(token("topic.update", "topic_id"))]) -> dict[str, Any]:
+        s = svc()
+        return topics.update(s.db, ctx, s.embedder, topic_id, name=body.name, description=body.description, status=body.status)
+
+    @app.post("/internal/topics/template")
+    def topic_template(body: TopicTemplate, ctx: Annotated[ServiceContext, Depends(token("topic.template"))]) -> dict[str, Any]:
+        s = svc()
+        return {"topics": topics.apply_template(s.db, ctx, s.embedder, [t.model_dump() for t in body.topics])}
+
+    @app.post("/internal/topics/texts")
+    def topic_texts(body: TopicTexts, ctx: Annotated[ServiceContext, Depends(token("topic.texts"))]) -> dict[str, Any]:
+        return {"topics": topics.texts(svc().db, ctx, body.ids)}
 
     @app.post("/internal/topics/{topic_id}/embed")
     def topic_embed(topic_id: str, ctx: Annotated[ServiceContext, Depends(token("topic.embed", "topic_id"))]) -> dict[str, Any]:
