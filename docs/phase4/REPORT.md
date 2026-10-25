@@ -754,17 +754,19 @@ Details: `10-content-under-company-key.md`, step 6 part 4b (first half); decisio
 - The topic list asks the AI service for the names and descriptions it shows, only for topics the caller may read.
   As chosen: without the AI service the list, creating and changing a topic fail instead of showing wrong names.
 - The API's database login can no longer read topic names or descriptions, and can no longer add or change topics.
-- Measured locally: 5 new AI tests (a new topic is active, has its vector, and a name is used once in any case;
+- Measured locally: 6 new AI tests (a new topic is active, has its vector, and a name is used once in any case;
   changing checks the status move and the name; a template adds what is missing and uses only existing topics the
   caller may read, never a retired one; names only for topics the caller may read, also to a machine's key, not with
-  a malformed filter; the database still refuses a topic nobody made) and 5 new API tests (create and change go to
+  a malformed filter; a card whose grants are all at level 0, whose filter says "verified only", still sees topic
+  names, as the API's own topic filter already allowed - found by the browser tests; the database still refuses a
+  topic nobody made) and 5 new API tests (create and change go to
   the AI service with the caller named; a duplicate name and an illegal status move still answer 409; the list shows
   the AI service's names for exactly the topics shown, with the caller's topic:read filter; without the AI service the
-  three requests fail; the API login is refused the two columns and any write). Without the change 4 of the 5 AI and
+  three requests fail; the API login is refused the two columns and any write). Without the change 5 of the 6 AI and
   4 of the 5 API tests fail (the fifth of each checks a rule that already held). Changed on purpose: the list of
   actions a machine's key may use gains the read-only `topic.texts`; the template test now checks the one call to
   the AI service instead of one search-vector call per topic; the stand-in AI service writes topics as the AI
-  service's own database login. Whole AI suite: 379 passed; the 1 failure is the known one of this machine. API
+  service's own database login. Whole AI suite: 380 passed; the 1 failure is the known one of this machine. API
   integration: 1336 passed; the 7 failures are the known ones of this machine (card and sign-in timing tests, and
   the id function stand-in).
 - **Not done or proven:** topic names are not locked yet (second half of part 4b); the AI service's own screens

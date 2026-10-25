@@ -53,6 +53,15 @@ def embed(db: Database, ctx: ServiceContext, embedder: Embedder, topic_id: str) 
         embed_topic(cur, ctx.tenant_id, topic_id, embedder)
 
 
+def _readable(spec: Any, tenant_id: str) -> tuple[str, list[Any]]:
+    """The caller's topic:read filter as a condition on topics (alias tp). "Verified only" (sent for a card whose grants
+    are all at level 0) concerns knowledge: topics have no verified state, and the API's own topic filter ignores the
+    mark, so it is ignored here too; everything else about the filter applies unchanged."""
+    if isinstance(spec, dict) and spec.get("only_verified") is True:
+        spec = {**spec, "only_verified": False}
+    return condition(spec, "topics", tenant_id)
+
+
 def _public(row: dict[str, Any]) -> dict[str, Any]:
     return {**row, "created_at": row["created_at"].isoformat()}
 
@@ -104,7 +113,7 @@ def apply_template(db: Database, ctx: ServiceContext, embedder: Embedder, entrie
     it is skipped (id None), and nothing says whether it exists at a level the caller cannot see. Nothing existing is
     changed, except that a topic still without its search vector (an earlier, interrupted run) gets it now.
     Returns, per entry, {key, id, created}; the API links the job roles."""
-    where, params = condition(ctx.filter, "topics", ctx.tenant_id)
+    where, params = _readable(ctx.filter, ctx.tenant_id)
     out: list[dict[str, Any]] = []
     with db.tenant_tx(ctx.tenant_id) as cur:
         for entry in entries:
@@ -130,7 +139,7 @@ def apply_template(db: Database, ctx: ServiceContext, embedder: Embedder, entrie
 def texts(db: Database, ctx: ServiceContext, topic_ids: list[str]) -> dict[str, dict[str, str]]:
     """The names and descriptions of these topics, for the API's topic list. Only topics the caller may read are named
     (ctx.filter, built for topic:read); unknown ids and ids the caller may not read are simply left out."""
-    where, params = condition(ctx.filter, "topics", ctx.tenant_id)
+    where, params = _readable(ctx.filter, ctx.tenant_id)
     with db.tenant_tx(ctx.tenant_id) as cur:
         cur.execute(f"""SELECT tp.id::text AS id, tp.name, tp.description FROM topics tp
                          WHERE tp.tenant_id = %s AND tp.id = ANY(%s::uuid[]) AND {where}""",

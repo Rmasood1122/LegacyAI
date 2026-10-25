@@ -119,3 +119,18 @@ def test_the_database_still_lets_this_service_add_only_proposals_or_a_topic_a_pe
         db: Database, world: World) -> None:
     with db.tenant_tx(world.tenant_id) as cur, pytest.raises(psycopg.errors.InsufficientPrivilege):
         cur.execute("INSERT INTO topics (tenant_id, name, origin, status) VALUES (%s, 'Nobody made this', 'admin', 'active')", (world.tenant_id,))
+
+
+def test_verified_only_does_not_hide_topics_as_in_the_apis_own_topic_filter(
+        db: Database, world: World, embedder: FakeEmbedder) -> None:
+    """A card whose grants are all at level 0 gets a filter marked "verified only". That concerns knowledge; topics have
+    no verified state, and the API's own topic filter ignores the mark - so must this service (else such a card would
+    see its topics without names)."""
+    topic = topics.create(db, world.ctx("owner", "topic.create"), embedder, name="Relief valves", description="", department_id=None,
+                          sensitivity=0)
+    level_0 = {**tenant_filter(world.tenant_id, max_sensitivity=0, action="topic:read"), "only_verified": True}
+    assert topics.texts(db, world.ctx("learner", "topic.texts", filter=level_0), [topic["id"]]) == {
+        topic["id"]: {"name": "Relief valves", "description": ""}}
+    found = topics.apply_template(db, world.ctx("owner", "topic.template", filter=level_0), embedder,
+                                  [{"key": "relief", "name": "Relief valves", "description": ""}])
+    assert found == [{"key": "relief", "id": topic["id"], "created": False}]
