@@ -141,7 +141,12 @@ which unlocks a company's content into memory for a few minutes while it is bein
      "company_key_unavailable" (503) and nothing new is written. Production refuses to start without a platform
      content key. Limits: the SQL fallback (`SEARCH_ENGINE=sql`) finds only readable chunks; the database migration
      cannot be rolled back once a chunk is sealed.
-   - 4b part 3: interview turns and knowledge versions.
+   - **4b part 3, built 2026-10-25: knowledge versions and interview turns are stored sealed.** The text of every
+     new knowledge version (`knowledge_versions.body_sealed`) and every new interview question and answer
+     (`interview_turns.question_sealed`, `answer_sealed`), with the key name in `sealed_key`. Bound to the row's natural
+     key ("version:<item>:<number>", "turn:<interview>:<ordinal>"). Versions stay unchangeable; erasing one (consent
+     withdrawal) empties both forms. The item screens, version history, conflict check, test questions, scenarios
+     and the interview screens open them for the request only. Older rows stay readable until step 5.
 5. **The background job** that seals existing rows. Then empty the readable columns. A migration refuses to drop
    them early.
 6. **The rest of the content columns:**

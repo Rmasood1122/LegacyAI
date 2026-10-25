@@ -18,7 +18,7 @@ import psycopg
 from pgvector import HalfVector
 
 from app.ai_gateway import Caller, DataBlock, Embedder, Gateway, ItemExtractOutput
-from app.capture import Sealer, consent_family, redact, row_key, topic_condition
+from app.capture import Fields, Sealer, consent_family, redact, row_key, topic_condition, version_key
 from app.knowledge import item_conflicts, scenario_erasure
 from app.platform import Database, ServiceContext, one, write_audit
 
@@ -45,13 +45,30 @@ def _item(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str, lock: bool = T
     cur.execute(
         f"""SELECT i.id::text AS id, i.status, i.title, i.origin, i.department_id::text AS department_id, i.sensitivity,
                    i.owner_person_id::text AS owner_person_id, i.current_version_id::text AS current_version_id,
-                   v.body, v.change_kind, v.version_no, v.author_person_id::text AS author_person_id
+                   v.body, v.body_sealed, v.sealed_key, v.change_kind, v.version_no, v.author_person_id::text AS author_person_id
               FROM knowledge_items i LEFT JOIN knowledge_versions v ON v.tenant_id = i.tenant_id AND v.id = i.current_version_id
              WHERE i.tenant_id = %s AND i.id = %s{' FOR UPDATE OF i' if lock else ''}""", (tenant_id, item_id))
     row = cur.fetchone()
     if row is None:
         raise ItemRefused("not_found", 404)
-    return dict(row)
+    item = dict(row)
+    sealed, key_id = item.pop("body_sealed"), item.pop("sealed_key")
+    if item["version_no"] is not None:     # the text is sealed from step 4b on (D41): opened here, for this request only
+        item["body"] = Fields(cur, tenant_id, "knowledge_versions").open(version_key(item_id, item["version_no"]), "body", item["body"],
+                                                                         sealed, key_id)
+    return item
+
+
+def insert_version(cur: psycopg.Cursor[Any], *, tenant_id: str, item_id: str, version_no: int, body: str, change_kind: str,
+                   author_card_id: str | None, author_person_id: str | None, prompt_version: str | None = None) -> str:
+    """The ONE place a knowledge version is written: its text sealed with the company's content key (D41)."""
+    readable, sealed, key_id = Fields(cur, tenant_id, "knowledge_versions").seal(version_key(item_id, version_no), "body", body[:BODY_MAX])
+    cur.execute(
+        """INSERT INTO knowledge_versions (tenant_id, item_id, version_no, body, body_sealed, sealed_key, change_kind, author_card_id,
+                                           author_person_id, prompt_version)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id::text AS id""",
+        (tenant_id, item_id, version_no, readable, sealed, key_id, change_kind, author_card_id, author_person_id, prompt_version))
+    return str(one(cur)["id"])
 
 
 def create_item(cur: psycopg.Cursor[Any], *, tenant_id: str, title: str, body: str, origin: str, ai_extracted: bool,
@@ -72,11 +89,8 @@ def create_item(cur: psycopg.Cursor[Any], *, tenant_id: str, title: str, body: s
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id::text AS id""",
         (tenant_id, (title or "Untitled")[:200], origin, ai_extracted, department_id, sensitivity, owner_person_id, consent_id, created_by_card_id))
     item_id = one(cur)["id"]
-    cur.execute(
-        """INSERT INTO knowledge_versions (tenant_id, item_id, version_no, body, change_kind, author_card_id, author_person_id, prompt_version)
-           VALUES (%s, %s, 1, %s, %s, %s, %s, %s) RETURNING id::text AS id""",
-        (tenant_id, item_id, body[:BODY_MAX], change_kind, author_card_id, author_person_id, prompt_version))
-    version_id = one(cur)["id"]
+    version_id = insert_version(cur, tenant_id=tenant_id, item_id=item_id, version_no=1, body=body, change_kind=change_kind,
+                                author_card_id=author_card_id, author_person_id=author_person_id, prompt_version=prompt_version)
     cur.execute("UPDATE knowledge_items SET current_version_id = %s WHERE tenant_id = %s AND id = %s", (version_id, tenant_id, item_id))
     for chunk_id, start, end, digest in provenance:
         cur.execute(
@@ -185,11 +199,8 @@ def propose_version(db: Database, ctx: ServiceContext, item_id: str, body: str) 
             raise ItemRefused("illegal_transition")
         cur.execute("SELECT max(version_no) AS n FROM knowledge_versions WHERE tenant_id = %s AND item_id = %s", (ctx.tenant_id, item_id))
         version_no = int(one(cur)["n"]) + 1
-        cur.execute(
-            """INSERT INTO knowledge_versions (tenant_id, item_id, version_no, body, change_kind, author_card_id, author_person_id)
-               VALUES (%s, %s, %s, %s, 'corrected', %s, %s) RETURNING id::text AS id""",
-            (ctx.tenant_id, item_id, version_no, redact(body).text[:BODY_MAX], ctx.card_id, ctx.person_id))
-        version_id = one(cur)["id"]
+        version_id = insert_version(cur, tenant_id=ctx.tenant_id, item_id=item_id, version_no=version_no, body=redact(body).text,
+                                    change_kind="corrected", author_card_id=ctx.card_id, author_person_id=ctx.person_id)
         cur.execute("UPDATE knowledge_items SET current_version_id = %s WHERE tenant_id = %s AND id = %s", (version_id, ctx.tenant_id, item_id))
         if item["status"] != "in_review":
             if item["status"] == "candidate":

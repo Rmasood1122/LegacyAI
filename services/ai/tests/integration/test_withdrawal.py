@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.ai_gateway import FakeEmbedder, FakeProvider
-from app.capture import ingest
+from app.capture import Fields, ingest, turn_key, version_key
 from app.main import Services, create_app
 from app.platform import Database, Logger
 from tests.conftest import World, give_consent, make_settings, mint, needs_db
@@ -55,6 +55,18 @@ def marker_hits(admin: psycopg.Connection[dict[str, Any]], tenant: str, marker: 
     # sealed chunks (decision D41) cannot be searched in SQL: open them and look inside too
     if any(marker in c["text"] for c in chunk_texts(admin, "c.tenant_id = %s AND c.text_sealed IS NOT NULL", (tenant,))):
         hits.append("chunks.text_sealed")
+    with admin.cursor() as cur:
+        versions = Fields(cur, tenant, "knowledge_versions")
+        for v in admin.execute("""SELECT item_id::text AS item_id, version_no, body_sealed, sealed_key FROM knowledge_versions
+                                   WHERE tenant_id = %s AND body_sealed IS NOT NULL""", (tenant,)).fetchall():
+            if marker in (versions.open(version_key(v["item_id"], v["version_no"]), "body", None, v["body_sealed"], v["sealed_key"]) or ""):
+                hits.append("knowledge_versions.body_sealed")
+        turns = Fields(cur, tenant, "interview_turns")
+        for t in admin.execute("""SELECT interview_id::text AS interview_id, ordinal, question_sealed, answer_sealed, sealed_key FROM interview_turns
+                                   WHERE tenant_id = %s AND question_sealed IS NOT NULL""", (tenant,)).fetchall():
+            key = turn_key(t["interview_id"], t["ordinal"])
+            if any(marker in (turns.open(key, col, None, t[f"{col}_sealed"], t["sealed_key"]) or "") for col in ("question", "answer")):
+                hits.append("interview_turns.sealed")
     return hits
 
 

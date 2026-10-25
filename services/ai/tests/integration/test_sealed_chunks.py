@@ -145,3 +145,52 @@ def test_production_refuses_to_start_without_a_platform_content_key() -> None:
         load_settings({**prod, "KEY_SERVICE": "google-kms"})
     assert load_settings({**prod, "KEY_SERVICE": "google-kms",
                           "PLATFORM_CONTENT_KEY": "projects/acme-prod-1234/locations/us/keyRings/r/cryptoKeys/k"}).platform_content_key
+
+
+# ------------------------------------------------------------------ knowledge versions and interview turns (step 4b part 3)
+
+def test_knowledge_versions_are_stored_sealed_and_read_back_everywhere(db: Database, world: World, embedder: FakeEmbedder,
+                                                                       admin: psycopg.Connection[dict[str, Any]]) -> None:
+    from app.knowledge import items, reads
+
+    first = "Bleed the hydraulic accumulator HA-1 to zero before opening the press guard."
+    item = verified_item(db, world, embedder, first)
+    assert items.propose_version(db, world.ctx("reviewer", "item.propose"), item, first + " Check the gauge reads 0 bar.") == 2
+    rows = admin.execute("SELECT version_no, body, body_sealed, sealed_key FROM knowledge_versions WHERE item_id = %s ORDER BY version_no",
+                         (item,)).fetchall()
+    assert [r["version_no"] for r in rows] == [1, 2]
+    for r in rows:
+        assert r["body"] is None and r["sealed_key"] == "platform:1" and b"accumulator" not in bytes(r["body_sealed"])
+    # read back: the item, its version history, and the copy used for search
+    shown = reads.get_item(db, world.ctx("reviewer", "item.read"), item)
+    assert shown["body"].endswith("Check the gauge reads 0 bar.")
+    assert items.verify(db, world.ctx("owner", "item.verify"), item, embedder) == "corrected"
+    assert chunk_texts(admin, "c.knowledge_item_id = %s", (item,))[0]["text"].endswith("reads 0 bar.")
+
+
+def test_the_database_keeps_sealed_versions_unchangeable_and_erases_both_forms(db: Database, world: World, embedder: FakeEmbedder,
+                                                                              admin: psycopg.Connection[dict[str, Any]]) -> None:
+    item = verified_item(db, world, embedder, "Lock out the conveyor at isolator IS-4 before clearing a jam.")
+    version = admin.execute("SELECT id, body_sealed FROM knowledge_versions WHERE item_id = %s", (item,)).fetchone()
+    with pytest.raises(psycopg.errors.InsufficientPrivilege), admin.transaction():     # a version is never changed
+        admin.execute("SELECT set_config('app.tenant_id', %s, true)", (world.tenant_id,))
+        admin.execute("UPDATE knowledge_versions SET body_sealed = '\\x01' || body_sealed WHERE id = %s", (version["id"],))
+    with admin.transaction():                                                          # ... only erased (consent withdrawal)
+        admin.execute("SELECT set_config('app.tenant_id', %s, true)", (world.tenant_id,))
+        admin.execute("SELECT erase_version(%s)", (version["id"],))
+    after = admin.execute("SELECT body, body_sealed, sealed_key, erased_at FROM knowledge_versions WHERE id = %s", (version["id"],)).fetchone()
+    assert (after["body"], after["body_sealed"], after["sealed_key"]) == ("", None, None) and after["erased_at"] is not None
+
+
+def test_an_erased_interview_turn_keeps_nothing_sealed(db: Database, admin: psycopg.Connection[dict[str, Any]], world: World) -> None:
+    """The database refuses an erased turn that still holds a sealed question or answer."""
+    from app.capture import interviews
+
+    iv = interviews.invite(db, world.ctx("owner", "interview.invite"), world.people["expert"].id, "Synthetic role")
+    sealed = bytes(40)
+    with pytest.raises(psycopg.errors.CheckViolation), admin.transaction():
+        admin.execute("""INSERT INTO interview_turns (tenant_id, interview_id, ordinal, question_sealed, sealed_key, question_kind, erased_at)
+                         VALUES (%s, %s, 1, %s, 'platform:1', 'template', now())""", (world.tenant_id, iv, sealed))
+    with pytest.raises(psycopg.errors.CheckViolation), admin.transaction():         # never both forms of a question
+        admin.execute("""INSERT INTO interview_turns (tenant_id, interview_id, ordinal, question_text, question_sealed, sealed_key, question_kind)
+                         VALUES (%s, %s, 1, 'Readable too?', %s, 'platform:1', 'template')""", (world.tenant_id, iv, sealed))

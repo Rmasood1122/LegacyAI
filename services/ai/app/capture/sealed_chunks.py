@@ -107,3 +107,64 @@ class Opener:
 # The columns a reader selects to be able to open a chunk (alias c).
 SEALED_COLUMNS = """c.text, c.text_sealed, c.sealed_key, c.kind, c.source_id::text AS source_id, c.ordinal,
                     c.knowledge_item_id::text AS knowledge_item_id"""
+
+
+class Fields:
+    """Seals and opens single text fields of other tables the same way (decision D41, step 4b part 3): knowledge
+    versions ("version:<item id>:<version no>") and interview turns ("turn:<interview id>:<ordinal>"). One instance per
+    company and transaction. Without content keys a field is written readable; reading accepts both forms."""
+
+    def __init__(self, cur: psycopg.Cursor[Any], tenant_id: str, table: str, keys: ContentKeys | None = None) -> None:
+        self.cur = cur
+        self.tenant_id = tenant_id
+        self.table = table
+        self.keys = keys if keys is not None else active_content_keys()
+        self._keys: dict[str, bytes] = {}
+        self._write: str | None = None
+
+    def _ref(self, row_key: str, column: str, key_id: str) -> FieldRef:
+        return FieldRef(tenant_id=self.tenant_id, table=self.table, column=column, row_id=row_key, key_id=key_id)
+
+    def _key(self, key_id: str) -> bytes:
+        if key_id not in self._keys:
+            if self.keys is None:
+                raise RuntimeError("a sealed value needs content keys")
+            self._keys[key_id] = self.keys.for_reading(self.cur, self.tenant_id, key_id)
+        return self._keys[key_id]
+
+    def seal(self, row_key: str, column: str, text: str, key_id: str | None = None) -> tuple[str | None, bytes | None, str | None]:
+        """(readable, sealed, key id) to store. `key_id`: a key the row already uses (its other fields), else the
+        company's current one; without content keys the value stays readable."""
+        if self.keys is None:
+            return text, None, None
+        if key_id is None:
+            if self._write is None:
+                self._write, content_key = self.keys.for_writing(self.cur, self.tenant_id)
+                self._keys[self._write] = content_key
+            key_id = self._write
+        return None, seal_text(self._key(key_id), text, self._ref(row_key, column, key_id)), key_id
+
+    def open(self, row_key: str, column: str, readable: str | None, sealed: bytes | memoryview | None, key_id: str | None) -> str | None:
+        """The text, from whichever form the row holds (None when neither: an unanswered question, say)."""
+        if sealed is None:
+            return readable
+        if key_id is None:
+            raise RuntimeError("a sealed value without its key id")
+        return open_text(self._key(key_id), bytes(sealed), self._ref(row_key, column, key_id))
+
+
+def version_key(item_id: str, version_no: int) -> str:
+    return f"version:{item_id}:{version_no}"
+
+
+def turn_key(interview_id: str, ordinal: int) -> str:
+    return f"turn:{interview_id}:{ordinal}"
+
+
+# The columns a reader of a knowledge version (alias v) selects to open its text with version_text().
+VERSION_TEXT = "v.body, v.body_sealed, v.sealed_key AS body_key, v.item_id::text AS version_item_id, v.version_no AS version_number"
+
+
+def version_text(fields: Fields, row: dict[str, Any]) -> str:
+    """A knowledge version's text, sealed or readable ('' once erased)."""
+    return fields.open(version_key(row["version_item_id"], row["version_number"]), "body", row["body"], row["body_sealed"], row["body_key"]) or ""

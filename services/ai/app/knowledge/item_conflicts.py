@@ -20,6 +20,7 @@ from typing import Any
 
 import psycopg
 
+from app.capture import VERSION_TEXT, Fields, version_text
 from app.knowledge.conflicts import check
 from app.platform import write_audit
 
@@ -64,14 +65,16 @@ def sync(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str) -> int:
     """Compare a verified item with the verified items sharing a topic; store what disagrees; keep the tasks in step.
     Returns the number of items it now conflicts with."""
     cur.execute(
-        """SELECT v.body FROM knowledge_items i JOIN knowledge_versions v ON v.tenant_id = i.tenant_id AND v.id = i.current_version_id
-            WHERE i.tenant_id = %s AND i.id = %s AND i.status IN ('verified', 'corrected')""", (tenant_id, item_id))
+        f"""SELECT {VERSION_TEXT} FROM knowledge_items i JOIN knowledge_versions v ON v.tenant_id = i.tenant_id AND v.id = i.current_version_id
+             WHERE i.tenant_id = %s AND i.id = %s AND i.status IN ('verified', 'corrected')""", (tenant_id, item_id))
     row = cur.fetchone()
+    fields = Fields(cur, tenant_id, "knowledge_versions")     # sealed texts are opened here, in memory (D41)
+    body = version_text(fields, row) if row is not None else ""
     cur.execute("DELETE FROM knowledge_item_conflicts WHERE tenant_id = %s AND (item_id = %s OR other_item_id = %s)", (tenant_id, item_id, item_id))
     found: list[str] = []
-    if row is not None and row["body"]:
+    if body:
         cur.execute(
-            """SELECT o.id::text AS id, v.body
+            f"""SELECT o.id::text AS id, {VERSION_TEXT}
                  FROM knowledge_items o JOIN knowledge_versions v ON v.tenant_id = o.tenant_id AND v.id = o.current_version_id
                 WHERE o.tenant_id = %s AND o.id <> %s AND o.status IN ('verified', 'corrected')
                   AND EXISTS (SELECT 1 FROM knowledge_item_topics a JOIN knowledge_item_topics b
@@ -81,7 +84,7 @@ def sync(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str) -> int:
         others = cur.fetchall()
         more_items = len(others) > COMPARED_WITH
         others = others[:COMPARED_WITH]
-        texts = {item_id: row["body"]} | {o["id"]: o["body"] or "" for o in others}
+        texts = {item_id: body} | {o["id"]: version_text(fields, o) for o in others}
         report = check(texts, focus=item_id)                 # every text read once; one work budget for all of it
         first_with: dict[str, Any] = {}
         for c in report.conflicts:

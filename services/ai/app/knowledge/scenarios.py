@@ -20,7 +20,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from app.ai_gateway import Caller, DataBlock, Gateway, QuizGenerateOutput
-from app.capture import condition, redact
+from app.capture import VERSION_TEXT, Fields, condition, redact, version_text
 from app.knowledge.items import ItemRefused, review_settings
 from app.knowledge.readiness import (
     LOW_GRADING_CONFIDENCE,
@@ -314,10 +314,11 @@ def propose_rubric(db: Database, ctx: ServiceContext, gateway: Gateway, caller: 
     """Expected points proposed from the approved items (ctx.approved), for the reviewer to edit. Nothing is stored."""
     with db.tenant_tx(ctx.tenant_id) as cur:
         cur.execute(
-            f"""SELECT v.body FROM knowledge_items i JOIN knowledge_versions v ON v.tenant_id = i.tenant_id AND v.id = i.current_version_id
+            f"""SELECT {VERSION_TEXT} FROM knowledge_items i JOIN knowledge_versions v ON v.tenant_id = i.tenant_id AND v.id = i.current_version_id
                  WHERE i.tenant_id = %s AND i.id = ANY(%s::uuid[]) AND {RELEASED_ITEM} ORDER BY i.id LIMIT %s""",
             (ctx.tenant_id, list(ctx.approved), MAX_ITEMS_PER_STEP))
-        bodies = [r["body"] for r in cur.fetchall()]
+        fields = Fields(cur, ctx.tenant_id, "knowledge_versions")
+        bodies = [version_text(fields, r) for r in cur.fetchall()]
     if not bodies:
         raise ItemRefused("item_not_released", 422)
     points: list[str] = []
