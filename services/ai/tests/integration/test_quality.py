@@ -9,6 +9,7 @@ import psycopg
 import pytest
 
 from app.ai_gateway import FakeEmbedder, FakeProvider, Gateway
+from app.capture import Fields, feedback_key
 from app.knowledge import answers, item_conflicts, items, quality, reads, upkeep
 from app.knowledge.quality import QualityRefused
 from app.platform import Database
@@ -148,9 +149,16 @@ def test_a_reader_says_an_answer_was_wrong_only_about_its_own_answer_and_the_wee
     quality.put_feedback(db, me, answer_id, "helpful", None, False)
     out = quality.put_feedback(db, me, answer_id, "wrong", "The gauge said otherwise. Ask jane.roe@example.com.", True)
     assert out["verdict"] == "wrong" and out["question_shared"] is True and out["question"] == QUESTION and out["outcome"] == "answered"
-    rows = admin.execute("SELECT verdict, comment_redacted FROM answer_feedback WHERE tenant_id = %s", (world.tenant_id,)).fetchall()
+    rows = admin.execute("SELECT verdict, comment_redacted, comment_sealed, sealed_key FROM answer_feedback WHERE tenant_id = %s",
+                         (world.tenant_id,)).fetchall()
     assert len(rows) == 1 and rows[0]["verdict"] == "wrong"                          # the later opinion replaced the earlier one
-    assert "jane.roe@example.com" not in rows[0]["comment_redacted"] and "[EMAIL_1]" in rows[0]["comment_redacted"]
+    # stored sealed (decision D41, step 6): nothing readable at rest, and it opens to the redacted comment
+    assert rows[0]["comment_redacted"] is None and b"jane.roe" not in bytes(rows[0]["comment_sealed"])
+    with admin.cursor() as cur:
+        comment = Fields(cur, world.tenant_id, "answer_feedback").open(feedback_key(answer_id, world.people["learner"].card_id), "comment",
+                                                                       None, rows[0]["comment_sealed"], rows[0]["sealed_key"])
+    assert comment is not None and "jane.roe@example.com" not in comment and "[EMAIL_1]" in comment
+    assert out["comment"] == comment
     assert open_tasks(admin, world.tenant_id, "answer_feedback") == {answer_id}
 
     s = quality.summary(db, world.ctx("owner", "quality.summary"), 4)

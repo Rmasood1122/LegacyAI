@@ -161,6 +161,28 @@ def turn_key(interview_id: str, ordinal: int) -> str:
     return f"turn:{interview_id}:{ordinal}"
 
 
+# Step 6 (part 1): questions people ask, questions put to an expert, readers' comments on answers.
+def answer_key(answer_id: str) -> str:
+    return f"answer:{answer_id}"
+
+
+def expert_question_key(question_id: str) -> str:
+    return f"expert_question:{question_id}"
+
+
+def feedback_key(answer_id: str, card_id: str) -> str:
+    return f"feedback:{answer_id}:{card_id}"
+
+
+def new_row_id(cur: psycopg.Cursor[Any]) -> str:
+    """A row id taken before the insert, so a value can be sealed to its row (the same time-ordered ids the tables use)."""
+    cur.execute("SELECT uuidv7()::text AS id")
+    row = cur.fetchone()
+    if row is None:   # pragma: no cover - the function always returns a row
+        raise RuntimeError("no id")
+    return str(row["id"])
+
+
 # The columns a reader of a knowledge version (alias v) selects to open its text with version_text().
 VERSION_TEXT = "v.body, v.body_sealed, v.sealed_key AS body_key, v.item_id::text AS version_item_id, v.version_no AS version_number"
 

@@ -8,6 +8,7 @@ import psycopg
 import pytest
 
 from app.ai_gateway import FakeEmbedder, FakeProvider, Gateway, GenerateRequest
+from app.capture import Fields, answer_key
 from app.knowledge import answers
 from app.platform import Database
 from tests.conftest import World, needs_db
@@ -116,8 +117,14 @@ def test_the_question_is_redacted_before_it_is_logged_or_sent(db: Database, worl
     chunk = item_chunk_id(admin, verified_item(db, world, embedder, FACT))
     ask(db, world, gateway, embedder, [chunk], question=QUESTION + " My email is sam.ortiz@corp.test")
     assert "sam.ortiz@corp.test" not in provider.received_text()
-    logged = admin.execute("SELECT question_redacted FROM answer_logs WHERE tenant_id = %s", (world.tenant_id,)).fetchone()
-    assert "sam.ortiz" not in logged["question_redacted"] and "[EMAIL_1]" in logged["question_redacted"]
+    logged = admin.execute("SELECT id::text AS id, question_redacted, question_sealed, sealed_key FROM answer_logs WHERE tenant_id = %s",
+                           (world.tenant_id,)).fetchone()
+    # stored sealed (decision D41, step 6): nothing readable at rest, and it opens to the redacted question
+    assert logged["question_redacted"] is None and b"sam.ortiz" not in bytes(logged["question_sealed"])
+    with admin.cursor() as cur:
+        question = Fields(cur, world.tenant_id, "answer_logs").open(answer_key(logged["id"]), "question", None, logged["question_sealed"],
+                                                                    logged["sealed_key"])
+    assert question is not None and "sam.ortiz" not in question and "[EMAIL_1]" in question
 
 
 def test_ask_the_expert_uses_only_that_experts_verified_items(db: Database, world: World, gateway: Gateway, provider: FakeProvider,

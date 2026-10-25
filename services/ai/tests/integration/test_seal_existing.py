@@ -105,7 +105,9 @@ def test_old_rows_are_sealed_in_batches_still_open_and_are_still_found(db: Datab
     assert res.status_code == 200, res.text
     again = res.json()["done"]
     assert {k: again[k] for k in again if k.startswith(("sealed_", "readable_"))} == {
-        "sealed_chunks": 0, "sealed_versions": 0, "sealed_turns": 0, "readable_chunks": 0, "readable_versions": 0, "readable_turns": 0}
+        "sealed_chunks": 0, "sealed_versions": 0, "sealed_turns": 0, "readable_chunks": 0, "readable_versions": 0, "readable_turns": 0,
+        "sealed_questions": 0, "sealed_expert_questions": 0, "sealed_feedback": 0,
+        "readable_questions": 0, "readable_expert_questions": 0, "readable_feedback": 0}
 
 
 def test_one_call_is_bounded_and_the_next_one_goes_on(db: Database, world: World, embedder: FakeEmbedder, gateway: Gateway,

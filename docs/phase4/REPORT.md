@@ -650,6 +650,23 @@ decision D41.
   there (step 5 part 2, after production shows 0 left); re-locking with the platform's key when a company clears its
   own key is not built; titles and the other texts of step 6 are still readable.
 
+## Step 22 — Questions and feedback are stored locked (2026-10-25)
+
+Details: `10-content-under-company-key.md`, step 6 part 1; decision D41.
+
+- The question a person asks, a question sent to an expert, and a reader's comment on an answer are now stored
+  locked with the company's content key. The screens that show them (the reader's own feedback, the quality list,
+  the expert's inbox) open them for that request only. A question is still shown in the quality list only when its
+  reader chose to share it.
+- Older ones are locked by the housekeeping command, like documents in step 21.
+- The text of a question sent to an expert can no longer be changed at all; the database refuses it.
+- Measured locally: 3 new tests (stored locked and shown opened; older rows locked by housekeeping and still shown;
+  the database refuses a changed question and a direct change of an answer log). Without the AI code change all 3
+  fail. 2 existing tests now open the locked question and comment instead of reading them in plain text. Whole AI
+  suite: 364 passed. The evaluation gives the same numbers as before.
+- **Not done or proven:** item titles, conflict excerpts, quiz and scenario texts, document titles, topic names and
+  descriptions are still readable (step 6 parts 2 to 4).
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

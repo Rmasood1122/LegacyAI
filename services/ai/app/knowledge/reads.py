@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.capture import VERSION_TEXT, Fields, condition, topic_condition, version_text
+from app.capture import VERSION_TEXT, Fields, condition, expert_question_key, topic_condition, version_text
 from app.knowledge import item_conflicts
 from app.knowledge.items import ItemRefused, item_topics
 from app.platform import Database, ServiceContext, one, write_audit
@@ -171,11 +171,18 @@ def list_expert_questions(db: Database, ctx: ServiceContext, *, box: str, limit:
     limit = max(1, min(limit, PAGE))
     with db.tenant_tx(ctx.tenant_id) as cur:
         cur.execute(
-            f"""SELECT eq.id::text AS id, eq.question_redacted AS question, eq.expert_person_id::text AS expert_person_id, eq.status,
+            f"""SELECT eq.id::text AS id, eq.question_redacted AS question, eq.question_sealed, eq.sealed_key,
+                       eq.expert_person_id::text AS expert_person_id, eq.status,
                        eq.decline_reason, eq.answer_item_id::text AS answer_item_id, eq.created_at, eq.answered_at, eq.expires_at
                   FROM expert_questions eq WHERE eq.tenant_id = %s AND eq.erased_at IS NULL AND {where}{extra}
                  ORDER BY eq.id DESC LIMIT %s""", [ctx.tenant_id, *params, *extra_params, limit + 1])
-        rows = [_iso(dict(r), "created_at", "answered_at", "expires_at") for r in cur.fetchall()]
+        fields = Fields(cur, ctx.tenant_id, "expert_questions")
+        rows = []
+        for r in cur.fetchall():
+            row = _iso(dict(r), "created_at", "answered_at", "expires_at")
+            row["question"] = fields.open(expert_question_key(row["id"]), "question", row["question"], row.pop("question_sealed"),
+                                          row.pop("sealed_key"))
+            rows.append(row)
     more = len(rows) > limit
     rows = rows[:limit]
     return {"items": rows, "next_cursor": rows[-1]["id"] if more and rows else None}
