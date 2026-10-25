@@ -1048,6 +1048,25 @@
         "title": "SourceCreate",
         "type": "object"
       },
+      "SourceTitles": {
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "items": {
+              "pattern": "^[0-9a-fA-F-]{36}$",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "SourceTitles",
+        "type": "object"
+      },
       "Turn": {
         "additionalProperties": false,
         "properties": {
@@ -4806,6 +4825,67 @@
         },
         "summary": "Source Create",
         "x-action": "source.create",
+        "x-subject": null
+      }
+    },
+    "/internal/sources/titles": {
+      "post": {
+        "description": "Document titles are sealed (D41 step 6): the API asks here for the ones it shows.",
+        "operationId": "source_titles_internal_sources_titles_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceTitles"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Source Titles Internal Sources Titles Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Source Titles",
+        "x-action": "source.titles",
         "x-subject": null
       }
     },

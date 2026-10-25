@@ -13,7 +13,7 @@ from typing import Any
 
 import psycopg
 
-from app.capture.sealed_chunks import Fields, Sealer, row_key, turn_key
+from app.capture.sealed_chunks import Fields, Sealer, row_key, seal_source_title, turn_key
 from app.platform import one
 
 
@@ -68,11 +68,26 @@ def seal_turns(cur: psycopg.Cursor[Any], tenant_id: str, limit: int) -> int:
     return len(rows)
 
 
+def seal_document_titles(cur: psycopg.Cursor[Any], tenant_id: str, limit: int) -> int:
+    """Seals up to `limit` readable document titles (D41 step 6 part 4a). Erased titles ('') hold nothing."""
+    if Fields(cur, tenant_id, "sources").keys is None:
+        return 0
+    cur.execute("""SELECT id::text AS id, title FROM sources WHERE tenant_id = %s AND title_sealed IS NULL AND title <> ''
+                    ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED""", (tenant_id, limit))
+    rows = cur.fetchall()
+    for r in rows:
+        stored = seal_source_title(cur, tenant_id, r["id"], r["title"])
+        cur.execute("UPDATE sources SET title = NULL, title_sealed = %s, sealed_key = %s WHERE tenant_id = %s AND id = %s AND title_sealed IS NULL",
+                    (stored["title_sealed"], stored["sealed_key"], tenant_id, r["id"]))
+    return len(rows)
+
+
 def still_readable(cur: psycopg.Cursor[Any], tenant_id: str) -> dict[str, int]:
-    """How many chunks and interview turns of the company are still readable (erased turns hold nothing)."""
+    """How many chunks, interview turns and document titles of the company are still readable (erased ones hold nothing)."""
     cur.execute(
-        """SELECT (SELECT count(*) FROM chunks WHERE tenant_id = %s AND text_sealed IS NULL)::int AS chunks,
-                  (SELECT count(*) FROM interview_turns WHERE tenant_id = %s AND question_sealed IS NULL AND erased_at IS NULL)::int AS turns""",
-        (tenant_id, tenant_id))
+        """SELECT (SELECT count(*) FROM chunks WHERE tenant_id = %(t)s AND text_sealed IS NULL)::int AS chunks,
+                  (SELECT count(*) FROM interview_turns WHERE tenant_id = %(t)s AND question_sealed IS NULL AND erased_at IS NULL)::int AS turns,
+                  (SELECT count(*) FROM sources WHERE tenant_id = %(t)s AND title_sealed IS NULL AND title <> '')::int AS document_titles""",
+        {"t": tenant_id})
     row = one(cur)
-    return {"chunks": int(row["chunks"]), "turns": int(row["turns"])}
+    return {"chunks": int(row["chunks"]), "turns": int(row["turns"]), "document_titles": int(row["document_titles"])}

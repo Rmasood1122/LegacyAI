@@ -195,6 +195,26 @@ def open_item_title(fields: Fields, row: dict[str, Any], id_column: str = "id") 
     return row
 
 
+# Step 6 (part 4a): a document's title, bound to "source:<id>" in table sources. The aliases differ from an item
+# title's on purpose: a row can carry both.
+def source_title_columns(alias: str) -> str:
+    """The columns a reader selects from sources (alias `alias`) to open the title with open_source_title()."""
+    return f"{alias}.title, {alias}.title_sealed AS source_title_sealed, {alias}.sealed_key AS source_title_key"
+
+
+def seal_source_title(cur: psycopg.Cursor[Any], tenant_id: str, source_id: str, title: str) -> dict[str, Any]:
+    """The values for title, title_sealed and sealed_key of a document."""
+    readable, sealed, key_id = Fields(cur, tenant_id, "sources").seal(f"source:{source_id}", "title", title)
+    return {"title": readable, "title_sealed": sealed, "sealed_key": key_id}
+
+
+def open_source_title(fields: Fields, row: dict[str, Any], id_column: str = "id") -> dict[str, Any]:
+    """Replaces the title columns of `row` by the opened title ('' once erased). `fields` is for table sources."""
+    row["title"] = fields.open(f"source:{row[id_column]}", "title", row.get("title"), row.pop("source_title_sealed", None),
+                               row.pop("source_title_key", None)) or ""
+    return row
+
+
 def conflict_key(item_id: str, other_item_id: str) -> str:
     return f"conflict:{item_id}:{other_item_id}"
 

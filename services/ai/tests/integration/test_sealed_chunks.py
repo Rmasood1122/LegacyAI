@@ -116,13 +116,16 @@ def test_a_company_that_switches_its_key_off_can_neither_add_nor_read_content_an
         source = company_document(db, world, embedder, MANUAL)
         assert {r["sealed_key"] for r in stored(admin, "c.source_id = %s", (source,))} == {"company:1"}
         assert search(db, world.tenant_id, embedder, "drift eliminators") != []
+        ctx = world.ctx("owner", "source.create")
+        src = ingest.create_source(db, ctx, title="Another", department_id=None, sensitivity=1, contributor_person_id=None,
+                                   company_document=True, storage_budget_bytes=10**12)
         local.disable("acme")                               # the company switches its key off
         keys.forget(world.tenant_id)                        # (otherwise within 5 minutes)
         with pytest.raises(KeyUnavailable):
             search(db, world.tenant_id, embedder, "drift eliminators")
-        ctx = world.ctx("owner", "source.create")
-        src = ingest.create_source(db, ctx, title="Another", department_id=None, sensitivity=1, contributor_person_id=None,
-                                   company_document=True, storage_budget_bytes=10**12)
+        with pytest.raises(KeyUnavailable):                 # a new document's title is sealed too (D41 step 6)
+            ingest.create_source(db, ctx, title="Yet another", department_id=None, sensitivity=1, contributor_person_id=None,
+                                 company_document=True, storage_budget_bytes=10**12)
         with pytest.raises(KeyUnavailable):
             ingest.process_upload(db, ctx, embedder, src["id"], b"More notes on the tower.", "text/plain", 10**12, time.monotonic() + 60)
         assert admin.execute("SELECT count(*) AS n FROM content_data_keys WHERE tenant_id = %s", (world.tenant_id,)).fetchone()["n"] == 0

@@ -18,7 +18,7 @@ import psycopg
 from app.ai_gateway import Caller, DataBlock, Embedder, Gateway, InterviewQuestionOutput
 from app.capture.gaps import gap_report
 from app.capture.redaction import redact
-from app.capture.sealed_chunks import Fields, Sealer, row_key, turn_key
+from app.capture.sealed_chunks import Fields, Sealer, new_row_id, row_key, seal_source_title, turn_key
 from app.platform import Database, ServiceContext, one, write_audit
 
 FOLLOW_UPS_PER_TOPIC = 2
@@ -103,11 +103,13 @@ def accept(db: Database, ctx: ServiceContext, interview_id: str, gateway: Gatewa
             raise InterviewRefused("consent_missing", 422)
         cur.execute("SELECT department_id::text AS department_id FROM people WHERE tenant_id = %s AND id = %s", (ctx.tenant_id, ctx.person_id))
         dept = (cur.fetchone() or {}).get("department_id")
+        source_id = new_row_id(cur)
+        title = seal_source_title(cur, ctx.tenant_id, source_id, f"Interview: {iv['job_role']}"[:200])     # sealed (D41 step 6)
         cur.execute(
-            """INSERT INTO sources (tenant_id, kind, title, department_id, sensitivity, owner_person_id, consent_id, uploaded_by_card_id, status)
-               VALUES (%s, 'interview', %s, %s, 1, %s, %s, %s, 'ready') RETURNING id::text AS id""",
-            (ctx.tenant_id, f"Interview: {iv['job_role']}"[:200], dept, ctx.person_id, consent["id"], ctx.card_id))
-        source_id = one(cur)["id"]
+            """INSERT INTO sources (id, tenant_id, kind, title, title_sealed, sealed_key, department_id, sensitivity, owner_person_id, consent_id,
+                                    uploaded_by_card_id, status)
+               VALUES (%s, %s, 'interview', %s, %s, %s, %s, 1, %s, %s, %s, 'ready')""",
+            (source_id, ctx.tenant_id, title["title"], title["title_sealed"], title["sealed_key"], dept, ctx.person_id, consent["id"], ctx.card_id))
         cur.execute("UPDATE interviews SET status = 'active', source_id = %s, consent_id = %s WHERE tenant_id = %s AND id = %s",
                     (source_id, consent["id"], ctx.tenant_id, interview_id))
         question, kind, topic_id = _next_question(cur, ctx, iv, gateway, caller, item_spec, topic_spec, follow_up=False, last_topic=None)

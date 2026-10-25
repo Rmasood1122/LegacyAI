@@ -72,6 +72,11 @@ def marker_hits(admin: psycopg.Connection[dict[str, Any]], tenant: str, marker: 
                                    WHERE tenant_id = %s AND title_sealed IS NOT NULL""", (tenant,)).fetchall():
             if marker in (titles.open(f"item:{i['id']}", "title", None, i["title_sealed"], i["sealed_key"]) or ""):
                 hits.append("knowledge_items.title_sealed")
+        documents = Fields(cur, tenant, "sources")
+        for d in admin.execute("SELECT id::text AS id, title_sealed, sealed_key FROM sources WHERE tenant_id = %s AND title_sealed IS NOT NULL",
+                               (tenant,)).fetchall():
+            if marker in (documents.open(f"source:{d['id']}", "title", None, d["title_sealed"], d["sealed_key"]) or ""):
+                hits.append("sources.title_sealed")
         quotes = Fields(cur, tenant, "knowledge_item_conflicts")
         for c in admin.execute("""SELECT item_id::text AS a, other_item_id::text AS b, item_value_sealed, other_value_sealed, sealed_key
                                     FROM knowledge_item_conflicts WHERE tenant_id = %s AND sealed_key IS NOT NULL""", (tenant,)).fetchall():

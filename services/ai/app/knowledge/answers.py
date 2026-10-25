@@ -25,9 +25,11 @@ from app.capture import (
     load_approved,
     new_row_id,
     open_item_title,
+    open_source_title,
     redact,
     retrieve,
     retrieve_in_memory,
+    source_title_columns,
 )
 from app.knowledge.conflicts import check as check_conflicts
 from app.platform import Database, ServiceContext, one, write_audit
@@ -120,9 +122,11 @@ def _titles(cur: Any, tenant_id: str, rows: list[dict[str, Any]], spec: Any) -> 
     source_ids = [r["source_id"] for r in rows if r["source_id"]]
     item_ids = [r["knowledge_item_id"] for r in rows if r["knowledge_item_id"]]
     source_titles: dict[str, str] = {}
+    documents = Fields(cur, tenant_id, "sources")       # document titles are sealed from D41 step 6 on
     if source_ids:
-        cur.execute("SELECT id::text AS id, title FROM sources WHERE tenant_id = %s AND id = ANY(%s::uuid[])", (tenant_id, source_ids))
-        source_titles = {r["id"]: r["title"] for r in cur.fetchall()}
+        cur.execute(f"SELECT s.id::text AS id, {source_title_columns('s')} FROM sources s WHERE s.tenant_id = %s AND s.id = ANY(%s::uuid[])",
+                    (tenant_id, source_ids))
+        source_titles = {r["id"]: open_source_title(documents, dict(r))["title"] for r in cur.fetchall()}
     item_titles: dict[str, str] = {}
     provenance: dict[str, list[dict[str, str]]] = {i: [] for i in item_ids}
     if item_ids:
@@ -133,7 +137,7 @@ def _titles(cur: Any, tenant_id: str, rows: list[dict[str, Any]], spec: Any) -> 
         # Sources behind an item are named only if THIS reader may read them (docs/phase2/03).
         where, params = condition(spec, "sources", tenant_id)
         cur.execute(
-            f"""SELECT DISTINCT i.id::text AS item_id, s.id::text AS source_id, s.title
+            f"""SELECT DISTINCT i.id::text AS item_id, s.id::text AS source_id, {source_title_columns("s")}
                   FROM knowledge_items i
                   JOIN knowledge_versions v ON v.tenant_id = i.tenant_id AND v.id = i.current_version_id
                   JOIN citations ci ON ci.tenant_id = i.tenant_id AND ci.subject_type = 'knowledge_version' AND ci.subject_id = v.id
@@ -142,7 +146,7 @@ def _titles(cur: Any, tenant_id: str, rows: list[dict[str, Any]], spec: Any) -> 
                  WHERE i.tenant_id = %s AND i.id = ANY(%s::uuid[]) AND s.status = 'ready' AND {where}""",
             [tenant_id, item_ids, *params])
         for r in cur.fetchall():
-            provenance[r["item_id"]].append({"source_id": r["source_id"], "title": r["title"]})
+            provenance[r["item_id"]].append({"source_id": r["source_id"], "title": open_source_title(documents, dict(r), "source_id")["title"]})
     for r in rows:
         if r["kind"] == "item":
             out[r["id"]] = ("item", r["knowledge_item_id"], item_titles.get(r["knowledge_item_id"], ""), provenance.get(r["knowledge_item_id"], []))

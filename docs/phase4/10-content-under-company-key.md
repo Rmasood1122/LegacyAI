@@ -1,6 +1,6 @@
 # Documents and knowledge under the company's key — design (decision D41, 2026-10-24)
 
-> **Status: steps 2 to 4b, the first part of step 5 and parts 1 to 3 of step 6 built (2026-10-25).** The AI service locks documents, items'
+> **Status: steps 2 to 4b, the first part of step 5 and parts 1 to 4a of step 6 built (2026-10-25).** The AI service locks documents, items'
 > texts and interview turns with the company's key when they are saved (`services/ai/app/platform/sealing.py`,
 > `services/ai/app/capture/sealed_chunks.py`), answers questions with the in-memory search
 > (`services/ai/app/capture/memory_search.py`, `search_cache.py`), and the housekeeping command locks what was saved
@@ -198,8 +198,16 @@ which unlocks a company's content into memory for a few minutes while it is bein
      stay readable. Every scenario screen opens them for the request only; the list a learner may run is sorted by
      job role and title after opening. Erasure and retention empty both forms. The parts of an approved scenario still
      cannot change; sealing an old one (the housekeeping job) is the one exception the database allows.
-   - Still to do: document titles, topic names and descriptions, which the API reads itself (part 4: needs a choice,
-     see below).
+   - **6 part 4a, built 2026-10-25: document titles.** A document's title is stored sealed (`sources.title_sealed`,
+     bound to "source:<id>"). The API login lost its right to the column (SELECT is now every other column; it never
+     inserted documents, so INSERT went). The document list and page ask the AI service
+     (`/internal/sources/titles`, action `source.titles`, also for a machine's key), which names only documents the
+     caller may read; without the AI service those two requests fail (503/502) rather than show no or wrong titles.
+     The AI service's own screens (item provenance, citations, the knowledge map) open them. Erasure empties both
+     forms. Older titles are sealed by housekeeping job 6. A company whose own key is switched off can no longer even
+     create a document entry (its title cannot be sealed).
+   - Still to do: topic names and descriptions (part 4b: the API creates, edits, lists and de-duplicates topics itself,
+     so this moves those into the AI service and replaces the unique index on the name by a keyed hash).
 7. **Key off and key destroyed, end to end:**
    - the answers people see;
    - the operator's runbook;
@@ -262,13 +270,14 @@ The questions as they were put:
    the company not used for the longest is dropped first and rebuilt on its next question. Proposed warning above
    50,000 chunks per company (the first question then waits about 15 s on this machine).
 
-## Open choice for step 6 part 4 (not decided)
+## Choice for step 6 part 4 (decided 2026-10-25: through the AI service)
 
 Document titles (`sources.title`), topic names and descriptions (`topics.name`, `description`) are read and written by
 the API itself, for lists and settings screens, and only the AI service can open sealed content. Either those screens
 ask the AI service for the words (more calls, slower lists, the AI service becomes needed for screens that work
 without it today), or the API is given its own way to open them (a second service that can use every company's key),
-or these short labels stay readable and are named as such to customers. To be put to the founder before part 4.
+or these short labels stay readable and are named as such to customers. **The founder chose the first (2026-10-25):**
+the screens ask the AI service; they are a little slower and do not work while the AI service is down.
 
 ## Confirmed by the founder (2026-10-24: the recommended defaults)
 
