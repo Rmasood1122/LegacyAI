@@ -32,6 +32,7 @@ from app.platform import (
     ConfigError,
     ContentKeys,
     Database,
+    KeyUnavailable,
     Logger,
     ReplayGuard,
     ServiceContext,
@@ -40,6 +41,7 @@ from app.platform import (
     key_service_from,
     load_settings,
     token_id,
+    use_content_keys,
     verify_service_token,
     write_audit,
 )
@@ -263,6 +265,8 @@ class Services:
         self.search = SearchCache(max_bytes=settings.search_memory_bytes, log=logger) if settings.search_engine == "memory" else None
         # content keys (D41 step 4b): the company's own key, or the platform's content key
         self.content_keys = ContentKeys(key_service_from(settings.key_service, settings.local_key_bytes()), settings.platform_content_key)
+        if settings.platform_content_key is not None:
+            use_content_keys(self.content_keys)   # new content is sealed from now on (D41 step 4b); required in production
 
 
 def build_provider(settings: Settings) -> ChatProvider:
@@ -338,6 +342,14 @@ def create_app(services: Services | None = None) -> FastAPI:
     @app.exception_handler(ConfigError)
     def _config_error(request: Request, exc: ConfigError) -> JSONResponse:
         return JSONResponse({"error": "not_configured"}, status_code=503)   # fail closed; the reason is not echoed
+
+    @app.exception_handler(KeyUnavailable)
+    def _key_unavailable(request: Request, exc: KeyUnavailable) -> JSONResponse:
+        # The company's key (or the platform's content key) cannot be used: switched off, permission taken back, or the
+        # key service cannot be reached. Nothing is read or written; the key service's own message is never echoed.
+        if "s" in state:
+            state["s"].log.warn("content key unavailable", path=request.url.path)
+        return JSONResponse({"error": "company_key_unavailable"}, status_code=503)
 
     for cls in (ingest.CaptureRefused, items.ItemRefused, interviews.InterviewRefused, topics.TopicRefused, quality.QualityRefused,
                 graph.GraphRefused, Refused):

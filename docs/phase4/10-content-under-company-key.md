@@ -132,7 +132,16 @@ which unlocks a company's content into memory for a few minutes while it is bein
      Cloud KMS software key in the platform's project, usable only by the AI service (the founder's choice of
      2026-10-25; about USD 0.06 a month, read from https://cloud.google.com/kms/pricing that day). Keys are named
      "company:<version>" or "platform:<version>"; each sealed value will store its key name. Nothing is sealed yet.
-   - 4b part 2: seal chunks on write, read both forms. Part 3: interview turns and knowledge versions.
+   - **4b part 2, built 2026-10-25: chunks are stored sealed.** Document pieces, interview answers' search copies and
+     verified items' search copies are written with their text and vector sealed (`chunks.text_sealed`,
+     `embedding_sealed`, the key name in `sealed_key`); the readable columns stay empty. Each value is bound to its
+     company, column and the chunk's natural key ("source:<id>:<ordinal>" or "item:<id>"). Chunks written before stay
+     readable and are read as before; a chunk is never both. The search, the answer step (which now computes the
+     similarity itself) and topic suggestions open sealed chunks in memory. A company whose key is off gets
+     "company_key_unavailable" (503) and nothing new is written. Production refuses to start without a platform
+     content key. Limits: the SQL fallback (`SEARCH_ENGINE=sql`) finds only readable chunks; the database migration
+     cannot be rolled back once a chunk is sealed.
+   - 4b part 3: interview turns and knowledge versions.
 5. **The background job** that seals existing rows. Then empty the readable columns. A migration refuses to drop
    them early.
 6. **The rest of the content columns:**

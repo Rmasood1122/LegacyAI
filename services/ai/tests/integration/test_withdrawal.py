@@ -12,10 +12,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.ai_gateway import FakeEmbedder, FakeProvider
-from app.capture import ingest, retrieve
+from app.capture import ingest
 from app.main import Services, create_app
 from app.platform import Database, Logger
-from tests.conftest import World, give_consent, make_settings, mint, needs_db, tenant_filter
+from tests.conftest import World, give_consent, make_settings, mint, needs_db
+from tests.integration.helpers import chunk_texts, search
 
 pytestmark = [pytest.mark.db, needs_db]
 
@@ -51,6 +52,9 @@ def marker_hits(admin: psycopg.Connection[dict[str, Any]], tenant: str, marker: 
                           (tenant, f"%{marker}%")).fetchone()["n"]
         if n:
             hits.append(f"{col['table_name']}.{col['column_name']}")
+    # sealed chunks (decision D41) cannot be searched in SQL: open them and look inside too
+    if any(marker in c["text"] for c in chunk_texts(admin, "c.tenant_id = %s AND c.text_sealed IS NOT NULL", (tenant,))):
+        hits.append("chunks.text_sealed")
     return hits
 
 
@@ -66,12 +70,11 @@ def erase(db: Database, world: World, consent: str) -> dict[str, Any]:
 def test_withdrawn_material_is_gone_from_search_at_once_and_erased_after(db: Database, world: World, embedder: FakeEmbedder,
                                                                        admin: psycopg.Connection[dict[str, Any]]) -> None:
     consent, source, marker = plant(db, world, embedder, admin)
+    assert search(db, world.tenant_id, embedder, "boiler relief valve") != []      # found before (so "gone" below means something)
     withdraw(admin, world, consent)
     # step 1, same transaction as the withdrawal: hidden
     assert admin.execute("SELECT status FROM sources WHERE id = %s", (source,)).fetchone()["status"] == "withdrawn"
-    with db.tenant_tx(world.tenant_id) as cur:
-        assert retrieve(cur, tenant_id=world.tenant_id, spec=tenant_filter(world.tenant_id), question="boiler relief valve",
-                        embedder=embedder) == []
+    assert search(db, world.tenant_id, embedder, "boiler relief valve") == []
     # step 2: erased
     out = erase(db, world, consent)
     assert out["withdrawal_status"] == "completed" and out["sources_erased"] == 1
@@ -88,9 +91,7 @@ def test_a_legal_hold_keeps_the_material_hidden_but_not_erased(db: Database, wor
     assert erase(db, world, consent)["withdrawal_status"] == "held"
     assert admin.execute("SELECT status FROM sources WHERE id = %s", (source,)).fetchone()["status"] == "withdrawn"
     assert marker_hits(admin, world.tenant_id, marker) != []           # kept, because of the hold
-    with db.tenant_tx(world.tenant_id) as cur:
-        assert retrieve(cur, tenant_id=world.tenant_id, spec=tenant_filter(world.tenant_id), question="boiler relief valve",
-                        embedder=embedder) == []
+    assert search(db, world.tenant_id, embedder, "boiler relief valve") == []
 
 
 def test_withdrawing_a_renewed_consent_also_covers_material_given_under_the_earlier_one(

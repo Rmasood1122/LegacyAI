@@ -9,10 +9,10 @@ import psycopg
 import pytest
 
 from app.ai_gateway import FakeEmbedder
-from app.capture import ingest, retrieve
+from app.capture import ingest
 from app.platform import Database
 from tests.conftest import World, give_consent, needs_db, tenant_filter
-from tests.integration.helpers import company_document
+from tests.integration.helpers import chunk_texts, company_document, search
 from tests.pdfs import make_pdf
 
 pytestmark = [pytest.mark.db, needs_db]
@@ -25,17 +25,18 @@ MANUAL = ("Pump P-7 start-up. Before starting pump P-7, open valve V2 fully. "
 def test_a_company_document_becomes_searchable_and_is_redacted(db: Database, world: World, embedder: FakeEmbedder,
                                                               admin: psycopg.Connection[dict[str, Any]]) -> None:
     source_id = company_document(db, world, embedder, MANUAL)
-    rows = admin.execute("SELECT text, status, embedding IS NOT NULL AS has_vector FROM chunks WHERE source_id = %s", (source_id,)).fetchall()
+    rows = chunk_texts(admin, "c.source_id = %s", (source_id,))
     assert rows and all(r["status"] == "active" and r["has_vector"] for r in rows)
+    # stored sealed (decision D41): no readable text or vector in the row, and the words are not in its bytes
+    stored = admin.execute("SELECT text, embedding, text_sealed, embedding_sealed, sealed_key FROM chunks WHERE source_id = %s", (source_id,)).fetchall()
+    assert all(r["text"] is None and r["embedding"] is None and r["sealed_key"] == "platform:1" for r in stored)
+    assert all(b"valve" not in bytes(r["text_sealed"]) and b"Pump" not in bytes(r["text_sealed"]) for r in stored)
     joined = " ".join(r["text"] for r in rows)
     assert "dana.lee@corp.test" not in joined and "555-1234" not in joined
     assert "[EMAIL_1]" in joined and "[PHONE_1]" in joined
     findings = admin.execute("SELECT entity_type FROM redaction_findings WHERE source_id = %s", (source_id,)).fetchall()
     assert {f["entity_type"] for f in findings} >= {"EMAIL", "PHONE"}
-    with db.tenant_tx(world.tenant_id) as cur:
-        found = retrieve(cur, tenant_id=world.tenant_id, spec=tenant_filter(world.tenant_id), question="how do I start pump P-7",
-                         embedder=embedder)
-    assert found, "the ready document must be found"
+    assert search(db, world.tenant_id, embedder, "how do I start pump P-7"), "the ready document must be found"
 
 
 def test_the_uploaded_file_itself_is_stored_nowhere(db: Database, world: World, embedder: FakeEmbedder,
@@ -72,11 +73,10 @@ def test_embedding_resumes_and_pending_chunks_are_never_searched(db: Database, w
     text = "\n\n".join(f"Section {i}. The synthetic chiller loop {i} is flushed every quarter by the day shift." for i in range(60))
     out = ingest.process_upload(db, ctx, embedder, src["id"], text.encode(), "text/plain", 10**12, time.monotonic() - 1)  # no time left
     assert out["status"] == "processing"
-    with db.tenant_tx(world.tenant_id) as cur:
-        assert retrieve(cur, tenant_id=world.tenant_id, spec=tenant_filter(world.tenant_id), question="chiller loop flushed",
-                        embedder=embedder) == []
+    assert search(db, world.tenant_id, embedder, "chiller loop flushed") == []
     done = ingest.continue_embedding(db, world.tenant_id, world.people["owner"].card_id, src["id"], embedder, time.monotonic() + 60)
     assert done["status"] == "ready" and done["chunk_count"] > 0
+    assert search(db, world.tenant_id, embedder, "chiller loop flushed") != []      # searchable once ready
 
 
 def test_a_duplicate_is_reported_only_to_someone_who_may_read_the_original(db: Database, world: World, embedder: FakeEmbedder) -> None:

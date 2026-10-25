@@ -588,6 +588,26 @@ companies without a key of their own.
 - Measured locally: 7 database tests, 4 new unit tests, settings tests; the whole AI suite passes (349).
 - **Not done or proven:** nothing is locked yet (parts 2 and 3); no Google Cloud account or real key was used.
 
+## Step 19 — Document pieces are stored locked (2026-10-25)
+
+Details: `10-content-under-company-key.md`, step 4b part 2; decision D41.
+
+- From now on, every new document piece, interview answer copy and verified-item copy is stored locked with the
+  company's content key: the database holds no readable text and no readable vector for them. Pieces stored before
+  stay readable until step 5 locks them; both kinds are searched and used for answers.
+- A locked piece only opens in its own place: copied to another piece or company, it does not open; the database also
+  refuses to change a document piece's locked text.
+- If a company switches its own key off: its content can no longer be searched or added, and the service says so
+  ("company_key_unavailable") instead of failing silently.
+- The AI service now refuses to start in production without the platform content key. **Deploy this version only
+  together with the Terraform change of step 18** (it sets that key).
+- Measured locally: the whole AI suite runs with locking on (353 passed; the one failure is a PostgreSQL 16 quirk of
+  the test machine, GitHub uses 18). 5 new tests plus checks in 5 existing ones; with locking switched off, 3 of them
+  fail as they should. The evaluation gives the same numbers with locking on (refusals, 63 of 63 citations valid,
+  0 leaks).
+- **Not done or proven:** interview transcripts and knowledge versions are still readable (part 3); old pieces are
+  still readable (step 5); the old database search (`SEARCH_ENGINE=sql`) cannot search locked pieces.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

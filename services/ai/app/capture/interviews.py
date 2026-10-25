@@ -14,11 +14,11 @@ from dataclasses import dataclass
 from typing import Any
 
 import psycopg
-from pgvector import HalfVector
 
 from app.ai_gateway import Caller, DataBlock, Embedder, Gateway, InterviewQuestionOutput
 from app.capture.gaps import gap_report
 from app.capture.redaction import redact
+from app.capture.sealed_chunks import Sealer, row_key
 from app.platform import Database, ServiceContext, one, write_audit
 
 FOLLOW_UPS_PER_TOPIC = 2
@@ -193,12 +193,18 @@ def answer_turn(db: Database, ctx: ServiceContext, interview_id: str, answer_tex
         cur.execute("SELECT department_id::text AS d, sensitivity FROM sources WHERE tenant_id = %s AND id = %s", (ctx.tenant_id, iv["source_id"]))
         src = one(cur)
         vector = embedder.embed([text], "document")[0]
+        sealer = Sealer(cur, ctx.tenant_id)      # the search copy is sealed with the company's content key (D41)
+        key = row_key(kind="source", source_id=iv["source_id"], ordinal=int(turn["ordinal"]), knowledge_item_id=None)
+        body = sealer.text_columns(key, text[:2000])
+        vec = sealer.vector_columns(key, vector, body["sealed_key"])
         cur.execute(
-            """INSERT INTO chunks (tenant_id, kind, source_id, ordinal, text, token_estimate, embedding, embedding_model, department_id,
-                                   sensitivity, owner_person_id, redaction_count, low_confidence_redactions, status, interview_turn_id)
-               VALUES (%s, 'source', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'active', %s) RETURNING id::text AS id""",
-            (ctx.tenant_id, iv["source_id"], int(turn["ordinal"]), text[:2000], max(1, len(text) // 4), HalfVector(vector), embedder.model_id,
-             src["d"], src["sensitivity"], ctx.person_id, len(redacted.findings), redacted.low_confidence_count > 0, turn["id"]))
+            """INSERT INTO chunks (tenant_id, kind, source_id, ordinal, text, text_sealed, sealed_key, token_estimate, embedding, embedding_sealed,
+                                   embedding_model, department_id, sensitivity, owner_person_id, redaction_count, low_confidence_redactions,
+                                   status, interview_turn_id)
+               VALUES (%s, 'source', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'active', %s) RETURNING id::text AS id""",
+            (ctx.tenant_id, iv["source_id"], int(turn["ordinal"]), body["text"], body["text_sealed"], body["sealed_key"], max(1, len(text) // 4),
+             vec["embedding"], vec["embedding_sealed"], embedder.model_id, src["d"], src["sensitivity"], ctx.person_id, len(redacted.findings),
+             redacted.low_confidence_count > 0, turn["id"]))
         chunk_id = one(cur)["id"]
 
         item_id, cost = on_answer(cur, SavedAnswer(interview_id, iv["consent_id"], chunk_id, text))
