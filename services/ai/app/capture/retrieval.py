@@ -13,6 +13,7 @@ from pgvector import HalfVector
 
 from app.ai_gateway import Embedder
 from app.capture.filters import condition
+from app.capture.memory_search import CompanyIndex, Entry
 
 CANDIDATES = 12
 
@@ -28,11 +29,7 @@ class Candidate:
     similarity: float
 
 
-def retrieve(cur: psycopg.Cursor[Any], *, tenant_id: str, spec: Any, question: str, embedder: Embedder,
-             contributor_person_id: str | None = None, items_only: bool = False, limit: int = CANDIDATES) -> list[Candidate]:
-    where, params = condition(spec, "chunks", tenant_id)
-    if where == "FALSE":
-        return []
+def _narrowing(contributor_person_id: str | None, items_only: bool) -> tuple[str, list[Any]]:
     extra = ""
     extra_params: list[Any] = []
     if contributor_person_id is not None:   # ask-the-expert narrows further; it can never widen the filter
@@ -40,6 +37,15 @@ def retrieve(cur: psycopg.Cursor[Any], *, tenant_id: str, spec: Any, question: s
         extra_params.append(contributor_person_id)
     if items_only:
         extra += " AND c.kind = 'item' AND c.verification_status IN ('verified', 'corrected')"
+    return extra, extra_params
+
+
+def retrieve(cur: psycopg.Cursor[Any], *, tenant_id: str, spec: Any, question: str, embedder: Embedder,
+             contributor_person_id: str | None = None, items_only: bool = False, limit: int = CANDIDATES) -> list[Candidate]:
+    where, params = condition(spec, "chunks", tenant_id)
+    if where == "FALSE":
+        return []
+    extra, extra_params = _narrowing(contributor_person_id, items_only)
     vector = HalfVector(embedder.embed([question], "query")[0])
     sql = f"""
         WITH visible AS MATERIALIZED (
@@ -70,6 +76,38 @@ def retrieve(cur: psycopg.Cursor[Any], *, tenant_id: str, spec: Any, question: s
     return [Candidate(id=r["id"], kind=r["kind"], source_id=r["source_id"], knowledge_item_id=r["knowledge_item_id"],
                       verification_status=r["verification_status"], score=float(r["score"]), similarity=float(r["similarity"]))
             for r in cur.fetchall()]
+
+
+def load_index(cur: psycopg.Cursor[Any], *, tenant_id: str, model_id: str) -> CompanyIndex:
+    """Every active chunk of one company, for the in-memory search (D41 step 3). No access filter here: the index is
+    the company's, and each search is limited to what the filter lets that person see (retrieve_in_memory)."""
+    cur.execute(
+        """SELECT c.id::text AS id, c.kind, c.text, c.embedding, c.source_id::text AS source_id,
+                  c.knowledge_item_id::text AS knowledge_item_id, c.verification_status
+             FROM chunks c
+            WHERE c.tenant_id = %s AND c.status = 'active' AND c.embedding_model = %s""",
+        [tenant_id, model_id])
+    return CompanyIndex(Entry(id=r["id"], kind=r["kind"], text=r["text"], vector=r["embedding"].to_numpy(), source_id=r["source_id"],
+                              knowledge_item_id=r["knowledge_item_id"], verification_status=r["verification_status"])
+                        for r in cur.fetchall())
+
+
+def retrieve_in_memory(cur: psycopg.Cursor[Any], index: CompanyIndex, *, tenant_id: str, spec: Any, question: str, embedder: Embedder,
+                       contributor_person_id: str | None = None, items_only: bool = False, limit: int = CANDIDATES) -> list[Candidate]:
+    """retrieve(), with the ranking done in memory. The access filter is still SQL on readable labels: only the ids it
+    returns are searched. Not used for answers yet (D41 step 3: compared and measured first)."""
+    where, params = condition(spec, "chunks", tenant_id)
+    if where == "FALSE":
+        return []
+    extra, extra_params = _narrowing(contributor_person_id, items_only)
+    cur.execute(
+        f"""SELECT c.id::text AS id FROM chunks c
+             WHERE c.tenant_id = %s AND c.status = 'active' AND c.embedding_model = %s AND {where}{extra}""",
+        [tenant_id, embedder.model_id, *params, *extra_params])
+    visible = [r["id"] for r in cur.fetchall()]
+    hits = index.search(question, embedder.embed([question], "query")[0], visible, limit)
+    return [Candidate(id=h.id, kind=h.kind, source_id=h.source_id, knowledge_item_id=h.knowledge_item_id,
+                      verification_status=h.verification_status, score=h.score, similarity=h.similarity) for h in hits]
 
 
 def load_approved(cur: psycopg.Cursor[Any], *, tenant_id: str, spec: Any, approved_ids: list[str],

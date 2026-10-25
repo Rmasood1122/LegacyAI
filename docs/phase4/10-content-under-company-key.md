@@ -1,7 +1,9 @@
 # Documents and knowledge under the company's key — design (decision D41, 2026-10-24)
 
-> **Status: step 2 of 7 built (2026-10-24).** The AI service can lock and unlock content with the company's key
-> (`services/ai/app/platform/sealing.py`, 12 tests), but nothing uses it yet: content is still stored readable. This design answers the gap named in
+> **Status: steps 2 and 3 of 7 built (2026-10-24).** The AI service can lock and unlock content with the company's key
+> (`services/ai/app/platform/sealing.py`), and search a company in memory (`services/ai/app/capture/memory_search.py`).
+> Neither is used for answers yet: content is still stored readable and searched in SQL. Step 3's measurements are
+> below, **waiting for the founder's decision** before the search switches over. This design answers the gap named in
 > `08-bring-your-own-key.md` ("documents and knowledge are not covered") and splits the work into steps that can each
 > be built, tested and merged on their own. The founder confirmed the three choices at the end on 2026-10-24.
 
@@ -117,6 +119,7 @@ which unlocks a company's content into memory for a few minutes while it is bein
    - compare its rankings with today's SQL on the synthetic companies (the acceptance test above);
    - measure memory and time at 1k / 10k / 50k chunks.
    - Switch over only if the results are accepted.
+   - **Built and measured 2026-10-24; not switched on.** Results in "Step 3: what was measured" below.
 4. **Seal on write** for chunks, interview turns and knowledge versions. Read both forms.
 5. **The background job** that seals existing rows. Then empty the readable columns. A migration refuses to drop
    them early.
@@ -130,6 +133,56 @@ which unlocks a company's content into memory for a few minutes while it is bein
    - documentation for customers.
 
 Only after step 7 may anyone promise "your documents under your key".
+
+## Step 3: what was measured (2026-10-24)
+
+How: `services/ai/eval/search_compare.py` and `eval/search_measure.py`, run on a cloud test machine (x86_64, 4 CPUs,
+PostgreSQL 16 with pgvector 0.8.1; production and CI use PostgreSQL 18). Synthetic data only. GitHub runs both tools on
+every change (the 1,000 and 10,000 sizes), so the numbers are re-measured there too.
+
+**1. Same answers on the fictional Northfield company** (13 documents, 16 chunks, 90 questions, asked as its reviewer):
+
+| | SQL search (today) | in-memory search |
+|---|---|---|
+| The same 5 chunks on top | — | **90 of 90 questions** (with the real local model and with the test stand-in) |
+| The same first chunk | — | 90 of 90 |
+| A correct source document in the top 5 (48 questions that have one), real local model | 48 | 48 |
+| Same, test stand-in vectors | 44 | 44 |
+| Median time per question | 3.2 ms | 1.0 ms |
+
+Limit of this result: 16 chunks is very small, so agreement is easy. It shows the two searches behave alike here, not
+that they will on real documents.
+
+**2. Larger synthetic companies** (texts of random words from the Northfield documents, random vectors; 50 questions):
+
+| Chunks | Memory held | Memory while building | First question (load + build) | SQL search, per question (median / slowest 5 %) | In-memory search, per question | Same chunks in the top 5 |
+|---|---|---|---|---|---|---|
+| 1,000 | 2.5 MB | 6 MB | 0.26 s | 195 ms / 269 ms | 4 ms / 6 ms | 2.8 of 5 |
+| 10,000 | 25 MB | 60 MB | 2.9 s | 2.1 s / 2.4 s | 31 ms / 43 ms | 2.5 of 5 |
+| 50,000 | 125 MB | 303 MB | 15.3 s | 9.9 s / 12.2 s | 126 ms / 161 ms | 2.3 of 5 |
+
+(The in-memory times include the SQL query that applies the access filter.)
+
+What the last column means: on random text there is no right answer, so the column shows how much the change of word
+scoring (BM25 instead of PostgreSQL's ts_rank_cd) moves the order, not which is better. A separate check at 1,000
+chunks found the **meaning** search identical (the same top 20 in 50 of 50 questions) and the **same chunks matching the
+words** (50 of 50); only the order of the word matches differs.
+
+**3. Other checks:**
+- Word splitting: the 127 ignored words are PostgreSQL's own list; stems equal PostgreSQL's for 419 of 421 words of
+  the documents (different: "emergency", "interval"; each search stems questions and texts the same way, so matching
+  still works).
+- Access: the permission-leakage suite runs its 16 attack groups against the new search too: 128 searches, 0 leaks.
+  With the filter deliberately broken, the same test reports 2,084 leaks (so the test can fail).
+- Not measured: real documents, a real company's size, several companies held at once, the production machine.
+
+**Decision for the founder** (before step 4 switches answers to this search):
+1. Switch answers to the in-memory search? The results above say it finds the same things on the test company and is
+   about 45 to 80 times faster than today's SQL search at 1,000 to 50,000 chunks; word ranking order changes on large
+   companies.
+2. A memory limit for the AI service: proposed **1 GB for all companies' indexes together** (about 400,000 chunks);
+   the company not used for the longest is dropped first and rebuilt on its next question. Proposed warning above
+   50,000 chunks per company (the first question then waits about 15 s on this machine).
 
 ## Confirmed by the founder (2026-10-24: the recommended defaults)
 

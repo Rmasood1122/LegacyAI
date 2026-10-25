@@ -115,6 +115,10 @@ jobs:
         run: EVIDENCE='passed|failed|^leakage:|^redaction-golden:|^sizes:' bash ../../scripts/ci-run.sh "AI service tests" python -m pytest -q -p no:cacheprovider
       - name: Evaluation with the FAKE provider ($0) - checks the evaluation runs end to end; its numbers say nothing about a real model
         run: EVIDENCE='^eval:' bash ../../scripts/ci-run.sh "evaluation (fake provider)" python -m eval.run --provider fake --embedder fake --out eval/out/fake.json
+      - name: In-memory search compared with the SQL search (decision D41, step 3; fake vectors, synthetic company)
+        run: EVIDENCE='^search-compare:' bash ../../scripts/ci-run.sh "search compare" python -m eval.search_compare --embedder fake --out eval/out/search-compare-fake.json
+      - name: In-memory search measured at 1,000 and 10,000 synthetic chunks, with the SQL search on the same rows (D41 step 3)
+        run: EVIDENCE='^sizes:' bash ../../scripts/ci-run.sh "search measure" python -m eval.search_measure --sizes 1000,10000 --db --out eval/out/search-measure.json
       - name: Internal contract file matches the code (contracts/ai-internal.openapi.json)
         run: EVIDENCE='^ai-contract:' bash ../../scripts/ci-run.sh "internal contract" python -m app.contract --check
       - name: Dependency vulnerability audit (Python)

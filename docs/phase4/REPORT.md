@@ -541,6 +541,21 @@ Details: `10-content-under-company-key.md`, step 2; decision D41.
 - **Not done or proven:** no Google Cloud account, project or key was used. Search, sealing on write and moving old
   content are steps 3 to 5.
 
+## Step 16 — Content under the company's key, part 3: search in memory, compared and measured (2026-10-24)
+
+Details: `10-content-under-company-key.md`, "Step 3: what was measured"; decision D41.
+
+- The AI service can now search one company in memory: meaning (vectors) and words (BM25 with the Snowball stemmer),
+  merged as today. The access filter stays in SQL; nothing outside it is ranked or returned.
+- **Not switched on.** Answers still use today's SQL search, until the founder decides on the numbers.
+- Measured: on the fictional Northfield company the two searches give the same top 5 for all 90 questions. On large
+  synthetic companies the in-memory search is about 45 to 80 times faster, holds 25 MB per 10,000 chunks, and the first
+  question waits 0.3 s / 2.9 s / 15 s at 1,000 / 10,000 / 50,000 chunks. The word ranking order changes on large
+  companies.
+- Tests: 7 new unit tests; the permission-leakage suite now also attacks the new search (128 searches, 0 leaks).
+- Two libraries: `snowballstemmer` 3.1.1 (new) and `numpy` 2.4.6 (already installed, now pinned).
+- **Not done or proven:** real documents, several companies at once, the production machine.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in
