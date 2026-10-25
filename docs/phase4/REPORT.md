@@ -556,6 +556,22 @@ Details: `10-content-under-company-key.md`, "Step 3: what was measured"; decisio
 - Two libraries: `snowballstemmer` 3.1.1 (new) and `numpy` 2.4.6 (already installed, now pinned).
 - **Not done or proven:** real documents, several companies at once, the production machine.
 
+## Step 17 — Answers use the in-memory search (2026-10-25)
+
+Details: `10-content-under-company-key.md`, step 4a; decision D41. The founder chose the switch, the 1 GB limit, the
+warning above 50,000 chunks and a 2 GB machine.
+
+- Each company's search index is kept in the AI service's memory for at most 5 minutes, and rebuilt as soon as the
+  company's text changes: the database counts every change per company (a trigger), whoever made it.
+- All companies together: at most 1 GB; the company not asked for the longest is dropped first. A company bigger than
+  the whole limit is still searched, just not kept. Above 50,000 chunks a warning is logged (counts only).
+- The AI service's machine goes from 1 GB to 2 GB in Terraform. **The founder applies it**; until then, keep
+  `SEARCH_MEMORY_MB` low (for example 256) or `SEARCH_ENGINE=sql`.
+- Measured locally: the whole AI test suite and the evaluation now run on the new search. The evaluation gives the
+  same numbers as on the SQL search (refusals, citations 63 of 63 valid, 0 leaks). 6 new tests; with the database
+  counter switched off, 2 of them fail as they should.
+- **Not done or proven:** content is still stored readable (step 4b); the 2 GB machine is not applied; real companies.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

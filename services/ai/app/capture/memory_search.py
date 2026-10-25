@@ -24,6 +24,7 @@ from __future__ import annotations
 import functools
 import math
 import re
+import sys
 from array import array
 from collections import Counter
 from collections.abc import Iterable, Sequence
@@ -175,6 +176,14 @@ class CompanyIndex:
     def nbytes(self) -> int:
         """The arrays of the index, in bytes (the per-chunk ids and the word dictionary come on top)."""
         return int(self.matrix.nbytes + self.docs.nbytes + self.counts.nbytes + self.starts.nbytes + self.lengths.nbytes)
+
+    def size_estimate(self) -> int:
+        """All the index holds, in bytes: the arrays plus the Python objects (ids, labels, the word dictionary).
+        Within a few per cent of what tracemalloc measures (eval/search_measure.py prints both)."""
+        objects = sys.getsizeof(self.meta) + sys.getsizeof(self.position) + sys.getsizeof(self.term_id)
+        objects += sum(sys.getsizeof(m) + sum(sys.getsizeof(x) for x in m if x is not None) for m in self.meta)
+        objects += sum(sys.getsizeof(t) for t in self.term_id) + 32 * len(self.term_id)   # the small ints are shared
+        return self.nbytes() + objects
 
     def _postings(self, term: str) -> tuple[np.ndarray, np.ndarray]:
         t = self.term_id.get(term)

@@ -403,11 +403,13 @@ resource "google_cloud_run_v2_service" "ai" {
         container_port = 8080
       }
 
-      # Memory: redaction model + PDF parsing + local embedding model. ASSUMPTION until measured (docs/phase2/01).
+      # Memory: redaction model + PDF parsing + local embedding model (ASSUMPTION until measured, docs/phase2/01), plus
+      # the companies' search indexes: at most 1 GB together (SEARCH_MEMORY_MB, decision D41 step 4a; the founder chose
+      # 1 GB and a 2 GB machine on 2026-10-25). Request-based billing: memory is paid only while a request is handled.
       resources {
         limits = {
           cpu    = "1"
-          memory = "1Gi"
+          memory = "2Gi"
         }
         cpu_idle          = true
         startup_cpu_boost = false
@@ -425,6 +427,11 @@ resource "google_cloud_run_v2_service" "ai" {
       env {
         name  = "AI_KILL_SWITCH"
         value = var.ai_kill_switch ? "true" : "false"
+      }
+      env {
+        # all companies' in-memory search indexes together (decision D41, step 4a); must stay well below the machine's memory
+        name  = "SEARCH_MEMORY_MB"
+        value = "1024"
       }
       env {
         name = "SERVICE_TOKEN_KEY"

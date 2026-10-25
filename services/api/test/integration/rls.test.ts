@@ -234,7 +234,7 @@ describe('cross-tenant access attempts (as the app role, in SQL)', () => {
 // added here on purpose - and pass the search-path rule below.
 const OUR_FUNCTIONS = [
   'ai_usage_ledger_guard', 'api_keys_guard', 'app_current_tenant', 'audit_field', 'audit_log_chain', 'audit_log_reject_change',
-  'audit_write', 'cards_enforce_lifecycle', 'cards_register_directory', 'chunks_count', 'chunks_guard',
+  'audit_write', 'cards_enforce_lifecycle', 'cards_register_directory', 'chunks_count', 'chunks_guard', 'chunks_search_version',
   'citations_guard', 'company_data_keys_guard', 'consent_is_valid', 'consents_guard', 'consents_hide_on_withdrawal', 'erase_version', 'expert_questions_guard',
   'interviews_guard', 'invoices_guard', 'knowledge_items_end_conflicts', 'knowledge_items_guard', 'knowledge_items_outbox', 'knowledge_items_touch_scenarios', 'knowledge_versions_immutable',
   'purge_login_attempts', 'quiz_attempts_guard', 'quiz_items_guard', 'relabel', 'resolve_card', 'resolve_sso_company', 'review_tasks_guard',
@@ -242,7 +242,10 @@ const OUR_FUNCTIONS = [
   'sso_connections_guard', 'topics_delete_guard', 'topics_guard', 'webhook_endpoints_guard',
 ];
 const OUR_DEFINER_FUNCTIONS = [
-  'audit_log_chain', 'audit_write', 'cards_register_directory', 'chunks_count', 'consents_hide_on_withdrawal', 'erase_version',
+  'audit_log_chain', 'audit_write', 'cards_register_directory', 'chunks_count',
+  // chunks_search_version: the same reason as chunks_count - every change of a chunk, from any session, moves the
+  // company's search version (decision D41, step 4a), which no application role may write itself
+  'chunks_search_version', 'consents_hide_on_withdrawal', 'erase_version',
   // knowledge_items_end_conflicts: runs with the owner's rights so that a consent withdrawal recorded from any
   // session also removes the conflict excerpts of the items it hides (same reason as consents_hide_on_withdrawal)
   // knowledge_items_touch_scenarios: the same reason - a withdrawal or a re-labelling recorded from any session also

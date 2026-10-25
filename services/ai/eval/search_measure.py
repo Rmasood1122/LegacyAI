@@ -101,7 +101,7 @@ def in_memory(n: int, seed: int) -> dict[str, Any]:
         index.search(q, v, ids, 12)
         times.append((time.perf_counter() - t0) * 1000)
     return {"chunks": n, "build_ms": round(build_ms), "index_mb": round((current - before) / 2**20, 1), "build_peak_mb": round((peak - before) / 2**20, 1),
-            "arrays_mb": round(index.nbytes() / 2**20, 1), "question_ms_p50": pct(times, 0.5), "question_ms_p95": pct(times, 0.95)}
+            "arrays_mb": round(index.nbytes() / 2**20, 1), "estimate_mb": round(index.size_estimate() / 2**20, 1), "question_ms_p50": pct(times, 0.5), "question_ms_p95": pct(times, 0.95)}
 
 
 def with_database(n: int, seed: int) -> dict[str, Any]:
@@ -161,7 +161,7 @@ def main() -> None:
     for n in (int(s) for s in args.sizes.split(",")):
         m = in_memory(n, args.seed)
         result["memory"].append(m)
-        print(f"sizes: {n} chunks in memory: index {m['index_mb']} MB (peak while building {m['build_peak_mb']} MB), built in {m['build_ms']} ms; "
+        print(f"sizes: {n} chunks in memory: index {m['index_mb']} MB (estimated by the service: {m['estimate_mb']} MB; peak while building {m['build_peak_mb']} MB), built in {m['build_ms']} ms; "
               f"per question p50 {m['question_ms_p50']} ms, p95 {m['question_ms_p95']} ms ({machine})")
         if args.db:
             d = with_database(n, args.seed)

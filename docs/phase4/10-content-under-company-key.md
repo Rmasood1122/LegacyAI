@@ -1,9 +1,9 @@
 # Documents and knowledge under the company's key — design (decision D41, 2026-10-24)
 
-> **Status: steps 2 and 3 of 7 built (2026-10-24).** The AI service can lock and unlock content with the company's key
-> (`services/ai/app/platform/sealing.py`), and search a company in memory (`services/ai/app/capture/memory_search.py`).
-> Neither is used for answers yet: content is still stored readable and searched in SQL. Step 3's measurements are
-> below, **waiting for the founder's decision** before the search switches over. This design answers the gap named in
+> **Status: steps 2, 3 and 4a of 7 built (2026-10-25).** The AI service can lock and unlock content with the company's
+> key (`services/ai/app/platform/sealing.py`) and answers questions with the in-memory search
+> (`services/ai/app/capture/memory_search.py`, `search_cache.py`). Content is still stored readable: locking it when it
+> is saved is step 4b. This design answers the gap named in
 > `08-bring-your-own-key.md` ("documents and knowledge are not covered") and splits the work into steps that can each
 > be built, tested and merged on their own. The founder confirmed the three choices at the end on 2026-10-24.
 
@@ -120,7 +120,13 @@ which unlocks a company's content into memory for a few minutes while it is bein
    - measure memory and time at 1k / 10k / 50k chunks.
    - Switch over only if the results are accepted.
    - **Built and measured 2026-10-24; not switched on.** Results in "Step 3: what was measured" below.
-4. **Seal on write** for chunks, interview turns and knowledge versions. Read both forms.
+4. **Seal on write** for chunks, interview turns and knowledge versions. Read both forms. Done in two parts:
+   - **4a, built 2026-10-25: answers use the in-memory search.** Each company's index is kept at most 5 minutes and
+     rebuilt as soon as its chunks change (a per-company change count kept by a database trigger,
+     `tenant_usage_counters.search_version`). All indexes together: at most 1 GB (`SEARCH_MEMORY_MB`), the company
+     not asked for the longest dropped first. A warning is logged above 50,000 chunks in one company.
+     `SEARCH_ENGINE=sql` switches back to the database search until step 5 removes it.
+   - 4b: seal on write, read both forms.
 5. **The background job** that seals existing rows. Then empty the readable columns. A migration refuses to drop
    them early.
 6. **The rest of the content columns:**
@@ -176,7 +182,11 @@ words** (50 of 50); only the order of the word matches differs.
   With the filter deliberately broken, the same test reports 2,084 leaks (so the test can fail).
 - Not measured: real documents, a real company's size, several companies held at once, the production machine.
 
-**Decision for the founder** (before step 4 switches answers to this search):
+**The founder's decision (2026-10-25):** switch (built as step 4a); 1 GB for all indexes together; a warning above
+50,000 chunks per company; and a 2 GB machine for the AI service, because its 1 GB machine could not also hold 1 GB of
+indexes (Terraform changed; the founder applies it).
+
+The questions as they were put:
 1. Switch answers to the in-memory search? The results above say it finds the same things on the test company and is
    about 45 to 80 times faster than today's SQL search at 1,000 to 50,000 chunks; word ranking order changes on large
    companies.

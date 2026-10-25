@@ -48,6 +48,8 @@ class Settings:
     storage_budget_bytes: int
     log_level: str
     db_pool_max: int
+    search_engine: Literal["memory", "sql"] = "memory"
+    search_memory_bytes: int = 1024 * 1024 * 1024
 
 
 def _bundle(env: dict[str, str]) -> dict[str, str]:
@@ -107,6 +109,18 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     if budget < 10 * 1024 * 1024 or not 1 <= pool_max <= 20:
         raise ConfigError("STORAGE_BUDGET_BYTES or DB_POOL_MAX out of range")
 
+    # Search in memory (decision D41, step 4a; the founder's choice of 2026-10-25: 1 GB for all companies together).
+    # SEARCH_ENGINE=sql is the fallback to the database search until it is removed.
+    search_engine = merged.get("SEARCH_ENGINE", "memory")
+    if search_engine not in ("memory", "sql"):
+        raise ConfigError("SEARCH_ENGINE must be memory or sql")
+    try:
+        search_mb = int(merged.get("SEARCH_MEMORY_MB", "1024"))
+    except ValueError as exc:
+        raise ConfigError("SEARCH_MEMORY_MB must be a whole number") from exc
+    if not 64 <= search_mb <= 16384:
+        raise ConfigError("SEARCH_MEMORY_MB must be between 64 and 16384")
+
     return Settings(
         environment=environment,  # type: ignore[arg-type]
         database_url=Secret(need("DATABASE_URL")),
@@ -119,4 +133,6 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         storage_budget_bytes=budget,
         log_level=merged.get("LOG_LEVEL", "info"),
         db_pool_max=pool_max,
+        search_engine=search_engine,  # type: ignore[arg-type]
+        search_memory_bytes=search_mb * 1024 * 1024,
     )

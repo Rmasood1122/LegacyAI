@@ -5,7 +5,25 @@ from app.capture.filters import company_wide, condition, grants_something, named
 from app.capture.memory_search import CompanyIndex
 from app.capture.redaction import Finding, Redacted, redact
 from app.capture.retrieval import Candidate, load_approved, load_index, retrieve, retrieve_in_memory
+from app.capture.search_cache import SEARCH_CACHE, SearchCache
 from app.capture.withdrawal import consent_family
 
-__all__ = ["Candidate", "CompanyIndex", "Finding", "Redacted", "company_wide", "condition", "consent_family", "grants_something", "load_approved",
-           "load_index", "named", "redact", "retrieve", "retrieve_in_memory", "topic_condition"]
+__all__ = [
+           "SEARCH_CACHE",
+           "Candidate",
+           "CompanyIndex",
+           "Finding",
+           "Redacted",
+           "SearchCache",
+           "company_wide",
+           "condition",
+           "consent_family",
+           "grants_something",
+           "load_approved",
+           "load_index",
+           "named",
+           "redact",
+           "retrieve",
+           "retrieve_in_memory",
+           "topic_condition",
+]

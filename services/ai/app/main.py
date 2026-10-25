@@ -25,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.ai_gateway import Caller, ChatProvider, Embedder, FakeProvider, Gateway, load_prices, load_prompts, make_embedder
 from app.ai_gateway.remote import AnthropicProvider, OpenAIProvider
-from app.capture import ingest, interviews, topics, withdrawal
+from app.capture import SearchCache, ingest, interviews, topics, withdrawal
 from app.capture.gaps import gap_report
 from app.knowledge import analytics, answers, expert, graph, items, quality, readiness, reads, scenarios, upkeep
 from app.platform import (
@@ -258,6 +258,7 @@ class Services:
         self.log = logger
         self.gateway = Gateway(db, provider, load_prompts(), load_prices(), logger, env_kill_switch=settings.ai_kill_switch)
         self.replay = ReplayGuard()
+        self.search = SearchCache(max_bytes=settings.search_memory_bytes, log=logger) if settings.search_engine == "memory" else None
 
 
 def build_provider(settings: Settings) -> ChatProvider:
@@ -401,7 +402,7 @@ def create_app(services: Services | None = None) -> FastAPI:
     @app.post("/internal/knowledge/candidates")
     def ask_candidates(body: Question, ctx: Annotated[ServiceContext, Depends(token("knowledge.candidates"))]) -> dict[str, Any]:
         s = svc()
-        return {"candidates": answers.candidate_ids(s.db, ctx, s.embedder, body.question, body.expert_person_id)}
+        return {"candidates": answers.candidate_ids(s.db, ctx, s.embedder, body.question, body.expert_person_id, search=s.search)}
 
     @app.post("/internal/knowledge/answer")
     def ask_answer(body: Question, ctx: Annotated[ServiceContext, Depends(token("knowledge.answer"))]) -> dict[str, Any]:
