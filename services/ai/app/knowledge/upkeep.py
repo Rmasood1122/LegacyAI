@@ -3,7 +3,7 @@
 `platform.housekeeping` does the general sweep and knows nothing about conflicts or feedback; the steps that belong
 to this module are handed to it here, so each rule is written once, in the module that owns it.
 
-After the sweep, the rows written readable before decision D41 step 4b are sealed (step 5): batches of SEAL_BATCH
+After the sweep, the rows written readable before decision D41 step 4b (step 5) and step 6 part 1 are sealed: batches of SEAL_BATCH
 per kind, each batch its own transaction, for at most SEAL_SECONDS, so one call stays short and the rest is done by
 the next call. The answer says how much was sealed and how much is still readable.
 """
@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from typing import Any
 
 from app.capture import seal_chunks, seal_turns, still_readable
-from app.knowledge import item_conflicts, items, quality, scenario_erasure, scenarios
+from app.knowledge import item_conflicts, items, quality, scenario_erasure, scenarios, sealed_questions
 from app.platform import Database, KeyUnavailable, housekeeping
 
 SEAL_BATCH = 200
@@ -37,17 +38,22 @@ def run(db: Database, tenant_id: str) -> dict[str, int]:
 
 def seal_existing(db: Database, tenant_id: str, *, batch: int = SEAL_BATCH, seconds: float = SEAL_SECONDS,
                   clock: Callable[[], float] = time.monotonic) -> dict[str, int]:
-    """Seals readable chunks, knowledge versions and interview turns of ONE company (D41 step 5). When the company's
-    key cannot be used (switched off, permission taken back), nothing is sealed and `seal_key_unavailable` is 1; the
-    rows stay as they are until the key is back. Without content keys (development) nothing is sealed."""
-    sealed = {"chunks": 0, "versions": 0, "turns": 0}
+    """Seals readable chunks, knowledge versions and interview turns (D41 step 5), and questions asked, questions to
+    experts and readers' comments (step 6 part 1), of ONE company. When the company's key cannot be used (switched off,
+    permission taken back), nothing is sealed and `seal_key_unavailable` is 1; the rows stay as they are until the key
+    is back. Without content keys (development) nothing is sealed."""
+    steps: dict[str, Callable[[Any, str, int], int]] = {
+        "chunks": seal_chunks, "versions": items.seal_existing_versions, "turns": seal_turns,
+        "questions": sealed_questions.seal_answer_logs, "expert_questions": sealed_questions.seal_expert_questions,
+        "feedback": sealed_questions.seal_feedback,
+    }
+    sealed = dict.fromkeys(steps, 0)
     unavailable = 0
     until = clock() + seconds
     try:
         while True:
             with db.tenant_tx(tenant_id) as cur:
-                now = {"chunks": seal_chunks(cur, tenant_id, batch), "versions": items.seal_existing_versions(cur, tenant_id, batch),
-                       "turns": seal_turns(cur, tenant_id, batch)}
+                now = {kind: step(cur, tenant_id, batch) for kind, step in steps.items()}
             for kind, n in now.items():
                 sealed[kind] += n
             if sum(now.values()) == 0 or clock() >= until:
@@ -57,5 +63,6 @@ def seal_existing(db: Database, tenant_id: str, *, batch: int = SEAL_BATCH, seco
     with db.tenant_tx(tenant_id) as cur:
         left = still_readable(cur, tenant_id)
         left["versions"] = items.versions_still_readable(cur, tenant_id)
+        left.update(sealed_questions.still_readable(cur, tenant_id))
     return {**{f"sealed_{k}": v for k, v in sealed.items()}, **{f"readable_{k}": v for k, v in left.items()},
             "seal_key_unavailable": unavailable}

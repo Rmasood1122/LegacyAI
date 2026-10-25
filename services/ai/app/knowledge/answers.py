@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.ai_gateway import AnswerOutput, Caller, DataBlock, Embedder, Gateway
-from app.capture import SEARCH_CACHE, SearchCache, condition, load_approved, redact, retrieve, retrieve_in_memory
+from app.capture import SEARCH_CACHE, Fields, SearchCache, answer_key, condition, load_approved, new_row_id, redact, retrieve, retrieve_in_memory
 from app.knowledge.conflicts import check as check_conflicts
 from app.platform import Database, ServiceContext, one, write_audit
 
@@ -268,12 +268,15 @@ def _search_only(result: AnswerResult, top: list[dict[str, Any]], named: dict[st
 def _finish(db: Database, ctx: ServiceContext, question_redacted: str, expert_person_id: str | None, result: AnswerResult,
             started: float) -> AnswerResult:
     with db.tenant_tx(ctx.tenant_id) as cur:
+        # the question is stored sealed with the company's content key (D41 step 6), bound to this answer log
+        log_id = new_row_id(cur)
+        readable, sealed, key_id = Fields(cur, ctx.tenant_id, "answer_logs").seal(answer_key(log_id), "question", question_redacted[:500] or "-")
         cur.execute(
-            """INSERT INTO answer_logs (tenant_id, card_id, question_redacted, expert_person_id, outcome, reason, confidence, candidates,
-                   approved, policy_disagreements, claims_valid, claims_rejected, fabricated_citation, prompt_version, ledger_id, latency_ms,
-                   conflict_found_by, contains_unverified_sources)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s, %s, 'answer@v1', %s, %s, %s, %s) RETURNING id::text AS id""",
-            (ctx.tenant_id, ctx.card_id, question_redacted[:500] or "-", expert_person_id, result.outcome, result.reason, result.confidence,
+            """INSERT INTO answer_logs (id, tenant_id, card_id, question_redacted, question_sealed, sealed_key, expert_person_id, outcome, reason,
+                   confidence, candidates, approved, policy_disagreements, claims_valid, claims_rejected, fabricated_citation, prompt_version,
+                   ledger_id, latency_ms, conflict_found_by, contains_unverified_sources)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s, %s, 'answer@v1', %s, %s, %s, %s) RETURNING id::text AS id""",
+            (log_id, ctx.tenant_id, ctx.card_id, readable, sealed, key_id, expert_person_id, result.outcome, result.reason, result.confidence,
              result.candidates, result.approved, result.claims_valid, result.claims_rejected, result.fabricated, result.ledger_id,
              int((time.monotonic() - started) * 1000), result.conflict_found_by if result.reason == "sources_conflict" else None,
              result.outcome == "answered" and any(c.verification_status not in ("verified", "corrected") for c in result.citations)))

@@ -10,7 +10,7 @@ from typing import Any
 
 import psycopg
 
-from app.capture import redact
+from app.capture import Fields, expert_question_key, new_row_id, redact
 from app.knowledge.items import ItemRefused, _settings, create_item
 from app.platform import Database, ServiceContext, one, write_audit
 
@@ -26,11 +26,15 @@ def create_question(db: Database, ctx: ServiceContext, *, expert_person_id: str,
         cur.execute("SELECT expert_question_expiry_days, review_sla_days FROM knowledge_settings WHERE tenant_id = %s", (ctx.tenant_id,))
         row = cur.fetchone()
         expiry, sla = (int(row["expert_question_expiry_days"]), int(row["review_sla_days"])) if row else (30, 5)
+        # stored sealed with the company's content key (D41 step 6), bound to this question
+        question_id = new_row_id(cur)
+        readable, sealed, key_id = Fields(cur, ctx.tenant_id, "expert_questions").seal(expert_question_key(question_id), "question",
+                                                                                       redact(question).text[:1000] or "-")
         cur.execute(
-            """INSERT INTO expert_questions (tenant_id, asked_by_card_id, expert_person_id, owner_person_id, question_redacted, department_id,
-                                             sensitivity, expires_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, now() + make_interval(days => %s)) RETURNING id::text AS id, status, expires_at""",
-            (ctx.tenant_id, ctx.card_id, expert_person_id, expert_person_id, redact(question).text[:1000] or "-", department_id,
+            """INSERT INTO expert_questions (id, tenant_id, asked_by_card_id, expert_person_id, owner_person_id, question_redacted,
+                                             question_sealed, sealed_key, department_id, sensitivity, expires_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now() + make_interval(days => %s)) RETURNING id::text AS id, status, expires_at""",
+            (question_id, ctx.tenant_id, ctx.card_id, expert_person_id, expert_person_id, readable, sealed, key_id, department_id,
              sensitivity, expiry))
         q = one(cur)
         cur.execute(

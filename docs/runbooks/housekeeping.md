@@ -80,17 +80,19 @@ second time.
 
 ## Locking older content (decision D41, step 5)
 
-Since 2026-10-25, documents, item texts and interview questions and answers are stored locked with the company's
-key. What was saved before is still stored readable. Job 6 locks it, a little at a time: per company and run at most
-200 document pieces, 200 item versions and 200 interview turns per round, rounds for at most 8 seconds.
+Since 2026-10-25, documents, item texts, interview questions and answers, the questions people ask, questions to
+experts and readers' comments are stored locked with the company's key. What was saved before is still stored
+readable. Job 6 locks it, a little at a time: per company and run at most 200 rows of each kind per round, rounds for
+at most 8 seconds.
 
 1. Run the command as usual. In the output, under `knowledge`:
-   - `sealed_chunks`, `sealed_versions`, `sealed_turns`: how many were locked in this run (all companies together);
-   - `readable_chunks`, `readable_versions`, `readable_turns`: how many are still readable after this run;
+   - `sealed_chunks`, `sealed_versions`, `sealed_turns`, `sealed_questions`, `sealed_expert_questions`,
+     `sealed_feedback`: how many were locked in this run (all companies together);
+   - `readable_` with the same six names: how many are still readable after this run;
    - `seal_key_unavailable`: how many companies were skipped because their key cannot be used right now (switched
      off, permission taken back, or the key service did not answer). Their content stays as it is; nothing is half
      done. It is tried again on the next run.
-2. Run it again until the three `readable_` numbers are 0. Running it more often is harmless: a locked row is never
+2. Run it again until all `readable_` numbers are 0. Running it more often is harmless: a locked row is never
    locked twice, and each run only does a bounded amount of work.
 3. A company with its own key that is switched off is never locked with another key: its readable rows stay
    readable until the key works again. Tell the company if `seal_key_unavailable` stays above 0.

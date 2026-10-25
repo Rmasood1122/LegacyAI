@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.capture import redact
+from app.capture import Fields, answer_key, feedback_key, redact
 from app.platform import Database, ServiceContext, housekeeping, one, write_audit
 
 VERDICTS = ("helpful", "unhelpful", "wrong")
@@ -45,9 +45,24 @@ ANSWER_COUNTERS: dict[str, str] = {
 }
 FEEDBACK_COUNTERS = tuple(f"feedback_{v}" for v in VERDICTS)
 
-_FEEDBACK_COLUMNS = """f.id::text AS id, f.answer_log_id::text AS answer_id, f.verdict, f.comment_redacted AS comment, f.question_shared,
-                       f.created_at, CASE WHEN f.question_shared THEN l.question_redacted END AS question, l.outcome, l.reason, l.confidence,
-                       l.contains_unverified_sources"""
+# The question is selected only where its reader chose to share it; comment and question may be sealed (D41 step 6) and
+# are opened by _opened() for this request only.
+_FEEDBACK_COLUMNS = """f.id::text AS id, f.answer_log_id::text AS answer_id, f.card_id::text AS feedback_card_id, f.verdict,
+                       f.comment_redacted AS comment, f.comment_sealed, f.sealed_key AS comment_key, f.question_shared, f.created_at,
+                       CASE WHEN f.question_shared THEN l.question_redacted END AS question,
+                       CASE WHEN f.question_shared THEN l.question_sealed END AS question_sealed,
+                       CASE WHEN f.question_shared THEN l.sealed_key END AS question_key,
+                       l.outcome, l.reason, l.confidence, l.contains_unverified_sources"""
+
+
+def _opened(cur: Any, tenant_id: str, row: dict[str, Any]) -> dict[str, Any]:
+    out = dict(row)
+    card = out.pop("feedback_card_id")
+    out["comment"] = Fields(cur, tenant_id, "answer_feedback").open(feedback_key(out["answer_id"], card), "comment", out["comment"],
+                                                                    out.pop("comment_sealed"), out.pop("comment_key"))
+    out["question"] = Fields(cur, tenant_id, "answer_logs").open(answer_key(out["answer_id"]), "question", out["question"],
+                                                                 out.pop("question_sealed"), out.pop("question_key"))
+    return out
 
 
 class QualityRefused(Exception):
@@ -76,7 +91,7 @@ def _read_own(cur: Any, ctx: ServiceContext, answer_id: str, *, lock: bool = Fal
              WHERE f.tenant_id = %s AND f.answer_log_id = %s AND f.card_id = %s{" FOR UPDATE OF f" if lock else ""}""",
         (ctx.tenant_id, answer_id, ctx.card_id))
     row = cur.fetchone()
-    return dict(row) if row else None
+    return _opened(cur, ctx.tenant_id, row) if row else None
 
 
 def _close_task(cur: Any, tenant_id: str, answer_id: str, resolution: str) -> None:
@@ -96,12 +111,16 @@ def put_feedback(db: Database, ctx: ServiceContext, answer_id: str, verdict: str
     with db.tenant_tx(ctx.tenant_id) as cur:
         _own_answer(cur, ctx, answer_id)
         before = _read_own(cur, ctx, answer_id, lock=True)
+        # the comment is stored sealed with the company's content key (D41 step 6), bound to this reader's opinion on this answer
+        readable, sealed, key_id = (Fields(cur, ctx.tenant_id, "answer_feedback").seal(feedback_key(answer_id, ctx.card_id), "comment", cleaned)
+                                    if cleaned is not None else (None, None, None))
         cur.execute(
-            """INSERT INTO answer_feedback (tenant_id, answer_log_id, card_id, verdict, comment_redacted, question_shared)
-               VALUES (%s, %s, %s, %s, %s, %s)
+            """INSERT INTO answer_feedback (tenant_id, answer_log_id, card_id, verdict, comment_redacted, comment_sealed, sealed_key, question_shared)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                ON CONFLICT (tenant_id, answer_log_id, card_id)
-               DO UPDATE SET verdict = EXCLUDED.verdict, comment_redacted = EXCLUDED.comment_redacted, question_shared = EXCLUDED.question_shared,
-                             created_at = now()""", (ctx.tenant_id, answer_id, ctx.card_id, verdict, cleaned, bool(share_question)))
+               DO UPDATE SET verdict = EXCLUDED.verdict, comment_redacted = EXCLUDED.comment_redacted, comment_sealed = EXCLUDED.comment_sealed,
+                             sealed_key = EXCLUDED.sealed_key, question_shared = EXCLUDED.question_shared, created_at = now()""",
+            (ctx.tenant_id, answer_id, ctx.card_id, verdict, readable, sealed, key_id, bool(share_question)))
         was_wrong = before is not None and before["verdict"] == "wrong"
         if verdict == "wrong" and not was_wrong:
             # Only a CHANGE to "wrong" opens a task: saying "wrong" again does not reopen one a reviewer dismissed.
@@ -207,6 +226,6 @@ def list_feedback(db: Database, ctx: ServiceContext, *, verdict: str | None, lim
                   FROM answer_feedback f JOIN answer_logs l ON l.tenant_id = f.tenant_id AND l.id = f.answer_log_id
                  WHERE f.tenant_id = %s AND (%s::text IS NULL OR f.verdict = %s) AND (%s::uuid IS NULL OR f.id < %s::uuid)
                  ORDER BY f.id DESC LIMIT %s""", (ctx.tenant_id, verdict, verdict, before, before, limit + 1))
-        rows = [dict(r) for r in cur.fetchall()]
+        rows = [_opened(cur, ctx.tenant_id, r) for r in cur.fetchall()]
     page = [_public(r) for r in rows[:limit]]
     return {"items": page, "next_cursor": page[-1]["id"] if len(rows) > limit and page else None}

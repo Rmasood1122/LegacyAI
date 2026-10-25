@@ -1,6 +1,6 @@
 # Documents and knowledge under the company's key — design (decision D41, 2026-10-24)
 
-> **Status: steps 2 to 4b and the first part of step 5 built (2026-10-25).** The AI service locks documents, items'
+> **Status: steps 2 to 4b, the first part of step 5 and the first part of step 6 built (2026-10-25).** The AI service locks documents, items'
 > texts and interview turns with the company's key when they are saved (`services/ai/app/platform/sealing.py`,
 > `services/ai/app/capture/sealed_chunks.py`), answers questions with the in-memory search
 > (`services/ai/app/capture/memory_search.py`, `search_cache.py`), and the housekeeping command locks what was saved
@@ -166,6 +166,15 @@ which unlocks a company's content into memory for a few minutes while it is bein
 6. **The rest of the content columns:**
    - titles, topic names (uniqueness then by keyed hash), quiz, scenarios, feedback, conflict excerpts, questions;
    - exports unseal what they export.
+   - **6 part 1, built 2026-10-25: questions and feedback.** The question a person asks (`answer_logs`), a question
+     put to an expert (`expert_questions`) and a reader's comment on an answer (`answer_feedback`) are stored sealed
+     (`question_sealed` / `comment_sealed`, key name in `sealed_key`), bound to "answer:<id>", "expert_question:<id>"
+     and "feedback:<answer id>:<card id>". The row id is taken from the database before the insert so the value can
+     be bound to it. Only the AI service reads these columns. Older rows are sealed by housekeeping job 6 like the
+     others (an answer log through `seal_answer_log()`, since the AI service may not change a log). The text of an
+     expert question can no longer be changed at all (the database refuses it), only sealed or erased.
+   - Still to do: knowledge item titles and conflict excerpts (part 2); quiz and scenario texts (part 3); document
+     titles, topic names and descriptions, which the API reads itself (part 4: needs a choice, see below).
 7. **Key off and key destroyed, end to end:**
    - the answers people see;
    - the operator's runbook;
@@ -227,6 +236,14 @@ The questions as they were put:
 2. A memory limit for the AI service: proposed **1 GB for all companies' indexes together** (about 400,000 chunks);
    the company not used for the longest is dropped first and rebuilt on its next question. Proposed warning above
    50,000 chunks per company (the first question then waits about 15 s on this machine).
+
+## Open choice for step 6 part 4 (not decided)
+
+Document titles (`sources.title`), topic names and descriptions (`topics.name`, `description`) are read and written by
+the API itself, for lists and settings screens, and only the AI service can open sealed content. Either those screens
+ask the AI service for the words (more calls, slower lists, the AI service becomes needed for screens that work
+without it today), or the API is given its own way to open them (a second service that can use every company's key),
+or these short labels stay readable and are named as such to customers. To be put to the founder before part 4.
 
 ## Confirmed by the founder (2026-10-24: the recommended defaults)
 
