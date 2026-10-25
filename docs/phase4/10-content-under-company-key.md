@@ -1,6 +1,6 @@
 # Documents and knowledge under the company's key — design (decision D41, 2026-10-24)
 
-> **Status: steps 2 to 4b, the first part of step 5 and parts 1, 2 and 3a of step 6 built (2026-10-25).** The AI service locks documents, items'
+> **Status: steps 2 to 4b, the first part of step 5 and parts 1 to 3 of step 6 built (2026-10-25).** The AI service locks documents, items'
 > texts and interview turns with the company's key when they are saved (`services/ai/app/platform/sealing.py`,
 > `services/ai/app/capture/sealed_chunks.py`), answers questions with the in-memory search
 > (`services/ai/app/capture/memory_search.py`, `search_cache.py`), and the housekeeping command locks what was saved
@@ -191,8 +191,15 @@ which unlocks a company's content into memory for a few minutes while it is bein
      be edited (sealing an old one is not an edit). Older rows are sealed by housekeeping job 6.
    - Found, not fixed (reported): when an item is erased, its readiness questions are only retired, not emptied, so
      the words of an erased item can remain in a question (sealed from now on, but still stored). A separate change.
-   - Still to do: scenario texts (part 3b); document titles, topic names and descriptions, which the API reads itself
-     (part 4: needs a choice, see below).
+   - **6 part 3b, built 2026-10-25: scenario texts and answers.** A scenario's title and situation (each sealed,
+     "scenario:<id>"; separate because erasure empties the situation and keeps the title), a step's question and its
+     expected points (each sealed, "scenario_step:<id>"; separate so that what a learner is shown never needs the
+     points opened), and a learner's answer with its grading ("scenario_answer:<id>"). The job role, labels and scores
+     stay readable. Every scenario screen opens them for the request only; the list a learner may run is sorted by
+     job role and title after opening. Erasure and retention empty both forms. The parts of an approved scenario still
+     cannot change; sealing an old one (the housekeeping job) is the one exception the database allows.
+   - Still to do: document titles, topic names and descriptions, which the API reads itself (part 4: needs a choice,
+     see below).
 7. **Key off and key destroyed, end to end:**
    - the answers people see;
    - the operator's runbook;

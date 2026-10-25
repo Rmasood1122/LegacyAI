@@ -15,11 +15,27 @@ from app.ai_gateway import FakeEmbedder, Gateway
 from app.capture import Fields
 from app.knowledge import items, scenario_erasure, scenarios, upkeep
 from app.knowledge.items import ItemRefused
+from app.knowledge.scenario_words import open_step, step_columns
 from app.platform import Database
 from tests.conftest import World, needs_db, tenant_filter
 from tests.integration.helpers import verified_item
 
 pytestmark = [pytest.mark.db, needs_db]
+
+
+def stored_steps(admin: psycopg.Connection[dict[str, Any]], tenant_id: str, scenario_id: str) -> list[dict[str, Any]]:
+    """A scenario's steps as stored, with question and expected points OPENED (sealed from D41 step 6 on)."""
+    rows = admin.execute(f"""SELECT st.id::text AS step_id, st.position, {step_columns("st")}, st.prompt_sealed IS NOT NULL AS has_prompt_sealed,
+                                    st.rubric_sealed IS NOT NULL AS has_rubric_sealed, st.erased_at IS NOT NULL AS erased
+                               FROM scenario_steps st WHERE st.scenario_id = %s ORDER BY st.position""", (scenario_id,)).fetchall()
+    with admin.cursor() as cur:
+        steps = Fields(cur, tenant_id, "scenario_steps")
+        out = []
+        for r in rows:
+            row = dict(r)
+            sealed = {"prompt_sealed": row.pop("has_prompt_sealed"), "rubric_sealed": row.pop("has_rubric_sealed")}
+            out.append({**open_step(steps, row), **sealed})
+        return out
 
 ROLE = "Filler operator"
 POINT_A = "Stop the filler at once"
@@ -263,9 +279,10 @@ def test_a_withdrawn_item_hides_the_scenario_at_once_and_its_words_go_only_with_
     run = scenarios.start_attempt(db, world.ctx("learner", "scenario.start", approved=[sid]), sid)
     admin.execute("UPDATE knowledge_items SET status = 'withdrawn' WHERE id = %s", (first,))      # what the consent-withdrawal trigger does
     # step 1 (the trigger; also all that happens under a LEGAL HOLD): retired, flagged, runs ended - nothing blanked
-    sc = admin.execute("SELECT status, flag_reason, situation, erased_at IS NOT NULL AS erased FROM scenarios WHERE id = %s", (sid,)).fetchone()
-    assert (sc["status"], sc["flag_reason"], sc["erased"]) == ("retired", "item_withdrawn", False) and sc["situation"] != ""
-    kept = admin.execute("SELECT rubric FROM scenario_steps WHERE scenario_id = %s ORDER BY position", (sid,)).fetchall()
+    sc = admin.execute("""SELECT status, flag_reason, situation, situation_sealed IS NOT NULL AS situation_sealed, erased_at IS NOT NULL AS erased
+                            FROM scenarios WHERE id = %s""", (sid,)).fetchone()
+    assert (sc["status"], sc["flag_reason"], sc["erased"], sc["situation_sealed"]) == ("retired", "item_withdrawn", False, True)   # kept, sealed
+    kept = stored_steps(admin, world.tenant_id, sid)
     assert kept[0]["rubric"] == [POINT_A]                                                          # held material is kept ...
     assert admin.execute("SELECT status FROM scenario_attempts WHERE id = %s", (run["id"],)).fetchone()["status"] == "expired"
     # ... but nobody gets it from the service while it is hidden: not the reviewers, not the learner's old run
@@ -281,10 +298,10 @@ def test_a_withdrawn_item_hides_the_scenario_at_once_and_its_words_go_only_with_
     # step 2 (the erasure step of the same request when there is no hold; later, when a hold is released)
     with db.tenant_tx(world.tenant_id) as cur:
         assert scenario_erasure.erase_for_items(cur, world.tenant_id, [first]) == 1
-    sc = admin.execute("SELECT status, situation, erased_at IS NOT NULL AS erased FROM scenarios WHERE id = %s", (sid,)).fetchone()
-    assert (sc["status"], sc["situation"], sc["erased"]) == ("retired", "", True)
-    steps = admin.execute("SELECT position, prompt, rubric, erased_at IS NOT NULL AS erased FROM scenario_steps WHERE scenario_id = %s ORDER BY position",
-                          (sid,)).fetchall()
+    sc = admin.execute("SELECT status, situation, situation_sealed, erased_at IS NOT NULL AS erased FROM scenarios WHERE id = %s", (sid,)).fetchone()
+    assert (sc["status"], sc["situation"], sc["situation_sealed"], sc["erased"]) == ("retired", "", None, True)   # both forms gone
+    steps = stored_steps(admin, world.tenant_id, sid)
+    assert (steps[0]["prompt_sealed"], steps[0]["rubric_sealed"]) == (False, False)            # nothing sealed is left of the erased step
     assert (steps[0]["prompt"], steps[0]["rubric"], steps[0]["erased"]) == ("", [], True)          # the step tied to the withdrawn item
     assert steps[1]["rubric"] == [POINT_B] and steps[1]["erased"] is False                         # the other step keeps its words
     hits = admin.execute("SELECT count(*) AS n FROM scenario_steps WHERE scenario_id = %s AND (prompt LIKE %s OR rubric::text LIKE %s)",
@@ -298,7 +315,7 @@ def test_a_withdrawn_item_hides_the_scenario_at_once_and_its_words_go_only_with_
     # HIDDEN IS NOT ERASED: the second item is withdrawn later, under a legal hold (so no erasure step runs). The
     # scenario was erased once already, and must be hidden AGAIN while the second step's words are still there.
     admin.execute("UPDATE knowledge_items SET status = 'withdrawn' WHERE id = %s", (second,))
-    assert admin.execute("SELECT rubric FROM scenario_steps WHERE scenario_id = %s AND position = 2", (sid,)).fetchone()["rubric"] == [POINT_B]
+    assert stored_steps(admin, world.tenant_id, sid)[1]["rubric"] == [POINT_B]
     with pytest.raises(ItemRefused) as hidden_again:
         scenarios.get_scenario(db, reviewer, sid)
     assert hidden_again.value.status == 404
@@ -387,8 +404,9 @@ def test_retention_removes_what_learners_wrote_after_grading_keeps_the_scores_an
     assert scenarios.submit_attempt(db, learner, graded["id"], gateway, world.caller("learner"))["status"] == "graded"
     assert scenarios.submit_attempt(db, learner, waiting["id"], None, None)["status"] == "submitted"
 
-    def words(run_id: str) -> int:
-        return int(admin.execute("SELECT count(*) AS n FROM scenario_answers WHERE attempt_id = %s AND answer_text IS NOT NULL", (run_id,)).fetchone()["n"])
+    def words(run_id: str) -> int:      # in either form: answers are stored sealed (D41 step 6)
+        return int(admin.execute("""SELECT count(*) AS n FROM scenario_answers WHERE attempt_id = %s
+                                       AND (answer_text IS NOT NULL OR answer_sealed IS NOT NULL)""", (run_id,)).fetchone()["n"])
 
     upkeep.run(db, world.tenant_id)
     assert (words(graded["id"]), words(waiting["id"])) == (2, 2)                  # nothing is old enough yet
@@ -402,7 +420,8 @@ def test_retention_removes_what_learners_wrote_after_grading_keeps_the_scores_an
     upkeep.run(db, world.tenant_id)
     assert words(graded["id"]) == 0                                               # the words are gone ...
     kept = admin.execute("""SELECT count(*) AS answers, count(final_score) AS scores, count(text_removed_at) AS marked,
-                                   count(ai_rubric_result) AS model_details FROM scenario_answers WHERE attempt_id = %s""", (graded["id"],)).fetchone()
+                                   count(ai_rubric_result) + count(rubric_result_sealed) AS model_details
+                              FROM scenario_answers WHERE attempt_id = %s""", (graded["id"],)).fetchone()
     assert (kept["answers"], kept["scores"], kept["marked"], kept["model_details"]) == (2, 2, 2, 0)   # ... the rows and scores stay, and are marked
     assert words(waiting["id"]) == 2                                              # a step that waits for a person is never emptied
     # the reader is told, and no point is shown as "not met"

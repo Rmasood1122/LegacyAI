@@ -704,6 +704,22 @@ Details: `10-content-under-company-key.md`, step 6 part 3a; decision D41.
   item's words can stay in a question. Reported for a separate change.
 - **Not done or proven:** scenario texts (part 3b); document titles, topic names and descriptions (part 4).
 
+## Step 25 — Scenario texts and answers are stored locked (2026-10-25)
+
+Details: `10-content-under-company-key.md`, step 6 part 3b; decision D41.
+
+- A scenario's title and situation, each step's question and expected points, and what a learner wrote with what the
+  grading model said about it are now stored locked with the company's content key. Every scenario screen opens them
+  for that request only. The question and the expected points of a step are locked separately, so the learner's view
+  of a step still never opens the expected points. Older ones are locked by the housekeeping command (also for an
+  approved scenario: locking is the one change its parts allow). Erasure and the retention setting empty both forms.
+- Measured locally: 3 new tests (stored locked and shown opened on the reviewer's and the learner's screens; older
+  rows locked by housekeeping and still shown, the scenario still approved; the parts of an approved scenario still
+  cannot change). Without the code change the first 2 fail; the third also holds on the old code. 2 existing tests now
+  open the locked words (including the erasure and retention checks). Whole AI suite: 372 passed; the 1 failure is the
+  known one of this machine (an id function stand-in that is not time-ordered). The evaluation gives the same numbers.
+- **Not done or proven:** document titles, topic names and descriptions (part 4, which needs the founder's choice).
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

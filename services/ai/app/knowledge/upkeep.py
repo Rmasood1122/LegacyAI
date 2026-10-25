@@ -15,7 +15,7 @@ from collections.abc import Callable
 from typing import Any
 
 from app.capture import seal_chunks, seal_turns, still_readable
-from app.knowledge import item_conflicts, items, quality, scenario_erasure, scenarios, sealed_questions, sealed_quiz, sealed_titles
+from app.knowledge import item_conflicts, items, quality, scenario_erasure, scenarios, sealed_questions, sealed_quiz, sealed_scenarios, sealed_titles
 from app.platform import Database, KeyUnavailable, housekeeping
 
 SEAL_BATCH = 200
@@ -38,9 +38,9 @@ def run(db: Database, tenant_id: str) -> dict[str, int]:
 
 def seal_existing(db: Database, tenant_id: str, *, batch: int = SEAL_BATCH, seconds: float = SEAL_SECONDS,
                   clock: Callable[[], float] = time.monotonic) -> dict[str, int]:
-    """Seals readable chunks, knowledge versions and interview turns (D41 step 5), and questions asked, questions to
-    experts and readers' comments (step 6 part 1), item titles and the words stored conflicts quote (step 6 part 2), readiness
-    questions and learners' answers (step 6 part 3a), of ONE company. When the company's key cannot be used (switched off,
+    """Seals readable chunks, knowledge versions and interview turns (D41 step 5), and (step 6) questions asked,
+    questions to experts, readers' comments, item titles, the words stored conflicts quote, readiness questions and
+    answers, and scenario texts and answers, of ONE company. When the company's key cannot be used (switched off,
     permission taken back), nothing is sealed and `seal_key_unavailable` is 1; the rows stay as they are until the key
     is back. Without content keys (development) nothing is sealed."""
     steps: dict[str, Callable[[Any, str, int], int]] = {
@@ -49,6 +49,8 @@ def seal_existing(db: Database, tenant_id: str, *, batch: int = SEAL_BATCH, seco
         "feedback": sealed_questions.seal_feedback,
         "titles": sealed_titles.seal_item_titles, "conflicts": sealed_titles.seal_conflicts,
         "quiz_questions": sealed_quiz.seal_questions, "quiz_answers": sealed_quiz.seal_answers,
+        "scenarios": sealed_scenarios.seal_scenarios, "scenario_steps": sealed_scenarios.seal_steps,
+        "scenario_answers": sealed_scenarios.seal_answers,
     }
     sealed = dict.fromkeys(steps, 0)
     unavailable = 0
@@ -69,5 +71,6 @@ def seal_existing(db: Database, tenant_id: str, *, batch: int = SEAL_BATCH, seco
         left.update(sealed_questions.still_readable(cur, tenant_id))
         left.update(sealed_titles.still_readable(cur, tenant_id))
         left.update(sealed_quiz.still_readable(cur, tenant_id))
+        left.update(sealed_scenarios.still_readable(cur, tenant_id))
     return {**{f"sealed_{k}": v for k, v in sealed.items()}, **{f"readable_{k}": v for k, v in left.items()},
             "seal_key_unavailable": unavailable}

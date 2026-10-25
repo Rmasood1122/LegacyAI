@@ -109,7 +109,9 @@ def test_old_rows_are_sealed_in_batches_still_open_and_are_still_found(db: Datab
         "sealed_questions": 0, "sealed_expert_questions": 0, "sealed_feedback": 0,
         "readable_questions": 0, "readable_expert_questions": 0, "readable_feedback": 0,
         "sealed_titles": 0, "sealed_conflicts": 0, "readable_titles": 0, "readable_conflicts": 0,
-        "sealed_quiz_questions": 0, "sealed_quiz_answers": 0, "readable_quiz_questions": 0, "readable_quiz_answers": 0}
+        "sealed_quiz_questions": 0, "sealed_quiz_answers": 0, "readable_quiz_questions": 0, "readable_quiz_answers": 0,
+        "sealed_scenarios": 0, "sealed_scenario_steps": 0, "sealed_scenario_answers": 0,
+        "readable_scenarios": 0, "readable_scenario_steps": 0, "readable_scenario_answers": 0}
 
 
 def test_one_call_is_bounded_and_the_next_one_goes_on(db: Database, world: World, embedder: FakeEmbedder, gateway: Gateway,
