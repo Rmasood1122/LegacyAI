@@ -17,6 +17,8 @@ puremagic==2.2.0
 PyYAML==6.0.3
 presidio-analyzer==2.2.364
 spacy==3.8.16
+# spaCy's hash tables. Held at 3.0.13: 3.0.14 (2026-10-24) makes spaCy 3.8.16 fail to load its model (OverflowError).
+preshed==3.0.13
 en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
 fastembed==0.8.1
 onnxruntime==1.30.0
