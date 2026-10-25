@@ -608,6 +608,21 @@ Details: `10-content-under-company-key.md`, step 4b part 2; decision D41.
 - **Not done or proven:** interview transcripts and knowledge versions are still readable (part 3); old pieces are
   still readable (step 5); the old database search (`SEARCH_ENGINE=sql`) cannot search locked pieces.
 
+## Step 20 — Knowledge versions and interview transcripts are stored locked (2026-10-25)
+
+Details: `10-content-under-company-key.md`, step 4b part 3; decision D41.
+
+- Every new version of a knowledge item, and every new interview question and answer, is stored locked with the
+  company's content key. Older ones stay readable until step 5.
+- Versions still cannot be changed; erasing one when consent is withdrawn now empties the locked form too.
+- Measured locally: the whole AI suite runs with locking on (356 passed on a fresh database; the one failure is the
+  PostgreSQL 16 quirk of the test machine). 3 new tests and stronger checks in 2 existing ones (the interview test
+  opens the locked question and answer; the withdrawal test now looks inside locked versions and interview turns).
+  With locking off, the new checks fail as they should. The evaluation gives the same numbers, including interviews
+  and test questions.
+- **Not done or proven:** titles, topic names, quiz and scenario texts, feedback, conflict excerpts and questions to
+  experts are still readable (step 6); older rows are still readable (step 5).
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

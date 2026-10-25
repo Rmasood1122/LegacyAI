@@ -18,7 +18,7 @@ import psycopg
 from app.ai_gateway import Caller, DataBlock, Embedder, Gateway, InterviewQuestionOutput
 from app.capture.gaps import gap_report
 from app.capture.redaction import redact
-from app.capture.sealed_chunks import Sealer, row_key
+from app.capture.sealed_chunks import Fields, Sealer, row_key, turn_key
 from app.platform import Database, ServiceContext, one, write_audit
 
 FOLLOW_UPS_PER_TOPIC = 2
@@ -111,18 +111,30 @@ def accept(db: Database, ctx: ServiceContext, interview_id: str, gateway: Gatewa
         cur.execute("UPDATE interviews SET status = 'active', source_id = %s, consent_id = %s WHERE tenant_id = %s AND id = %s",
                     (source_id, consent["id"], ctx.tenant_id, interview_id))
         question, kind, topic_id = _next_question(cur, ctx, iv, gateway, caller, item_spec, topic_spec, follow_up=False, last_topic=None)
-        cur.execute("""INSERT INTO interview_turns (tenant_id, interview_id, ordinal, topic_id, question_text, question_kind, prompt_version)
-                       VALUES (%s, %s, 1, %s, %s, %s, %s)""",
-                    (ctx.tenant_id, interview_id, topic_id, question, kind, "interview_question@v1" if kind != "template" else None))
+        _insert_question(cur, ctx.tenant_id, interview_id, 1, topic_id, question, kind)
         write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="capture:interview_started", reason_code="INTERVIEW_STARTED",
                     resource_type="interview", resource_id=interview_id, request_id=ctx.request_id, details={"interview_id": interview_id})
     return TurnResult(interview_id, "active", question, 0, None)
 
 
+def _insert_question(cur: psycopg.Cursor[Any], tenant_id: str, interview_id: str, ordinal: int, topic_id: str | None, question: str,
+                     kind: str) -> None:
+    """A new turn: the question is sealed with the company's content key (D41); the answer is sealed later with the same key."""
+    readable, sealed, key_id = Fields(cur, tenant_id, "interview_turns").seal(turn_key(interview_id, ordinal), "question", question)
+    cur.execute("""INSERT INTO interview_turns (tenant_id, interview_id, ordinal, topic_id, question_text, question_sealed, sealed_key,
+                                                question_kind, prompt_version)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (tenant_id, interview_id, ordinal, topic_id, readable, sealed, key_id, kind,
+                 "interview_question@v1" if kind != "template" else None))
+
+
 def _own_answers(cur: psycopg.Cursor[Any], tenant_id: str, interview_id: str) -> list[str]:
-    cur.execute("""SELECT answer_text FROM interview_turns WHERE tenant_id = %s AND interview_id = %s AND answer_text IS NOT NULL
-                     AND erased_at IS NULL ORDER BY ordinal DESC LIMIT %s""", (tenant_id, interview_id, EARLIER_ANSWERS_IN_PROMPT))
-    return [r["answer_text"] for r in reversed(cur.fetchall())]
+    cur.execute("""SELECT ordinal, answer_text, answer_sealed, sealed_key FROM interview_turns
+                    WHERE tenant_id = %s AND interview_id = %s AND answered_at IS NOT NULL AND erased_at IS NULL
+                    ORDER BY ordinal DESC LIMIT %s""", (tenant_id, interview_id, EARLIER_ANSWERS_IN_PROMPT))
+    fields = Fields(cur, tenant_id, "interview_turns")
+    return [fields.open(turn_key(interview_id, r["ordinal"]), "answer", r["answer_text"], r["answer_sealed"], r["sealed_key"]) or ""
+            for r in reversed(cur.fetchall())]
 
 
 def _next_question(cur: psycopg.Cursor[Any], ctx: ServiceContext, iv: dict[str, Any], gateway: Gateway | None, caller: Caller | None,
@@ -180,16 +192,22 @@ def answer_turn(db: Database, ctx: ServiceContext, interview_id: str, answer_tex
         cur.execute("SELECT consent_is_valid(%s, %s, 'own_words', now()) AS ok", (ctx.tenant_id, ctx.person_id))
         if not one(cur)["ok"]:
             raise InterviewRefused("consent_missing", 422)
-        cur.execute("""SELECT id::text AS id, ordinal, topic_id::text AS topic_id, question_kind FROM interview_turns
-                        WHERE tenant_id = %s AND interview_id = %s AND answer_text IS NULL ORDER BY ordinal DESC LIMIT 1 FOR UPDATE""",
+        cur.execute("""SELECT id::text AS id, ordinal, topic_id::text AS topic_id, question_kind, sealed_key FROM interview_turns
+                        WHERE tenant_id = %s AND interview_id = %s AND answered_at IS NULL ORDER BY ordinal DESC LIMIT 1 FOR UPDATE""",
                     (ctx.tenant_id, interview_id))
         turn = cur.fetchone()
         if turn is None:
             raise InterviewRefused("no_open_question")
         redacted = redact(answer_text)          # BEFORE anything is stored
         text = redacted.text[:4000] or "-"
-        cur.execute("UPDATE interview_turns SET answer_text = %s, answered_at = now() WHERE tenant_id = %s AND id = %s",
-                    (text, ctx.tenant_id, turn["id"]))
+        if turn["sealed_key"] is not None:      # sealed with the key its question was sealed with (D41)
+            _, sealed_answer, _ = Fields(cur, ctx.tenant_id, "interview_turns").seal(turn_key(interview_id, int(turn["ordinal"])), "answer", text,
+                                                                                     key_id=turn["sealed_key"])
+            cur.execute("UPDATE interview_turns SET answer_sealed = %s, answered_at = now() WHERE tenant_id = %s AND id = %s",
+                        (sealed_answer, ctx.tenant_id, turn["id"]))
+        else:                                   # a question asked before step 4b: its answer stays readable like it (step 5 seals both)
+            cur.execute("UPDATE interview_turns SET answer_text = %s, answered_at = now() WHERE tenant_id = %s AND id = %s",
+                        (text, ctx.tenant_id, turn["id"]))
         cur.execute("SELECT department_id::text AS d, sensitivity FROM sources WHERE tenant_id = %s AND id = %s", (ctx.tenant_id, iv["source_id"]))
         src = one(cur)
         vector = embedder.embed([text], "document")[0]
@@ -227,10 +245,7 @@ def answer_turn(db: Database, ctx: ServiceContext, interview_id: str, answer_tex
         question, kind, topic_id = _next_question(cur, ctx, iv, gateway, caller, item_spec, topic_spec, follow_up, turn["topic_id"])
         if follow_up and kind == "template":
             kind = "follow_up"
-        cur.execute("""INSERT INTO interview_turns (tenant_id, interview_id, ordinal, topic_id, question_text, question_kind, prompt_version)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                    (ctx.tenant_id, interview_id, int(turn["ordinal"]) + 1, topic_id, question, kind,
-                     "interview_question@v1" if kind != "template" else None))
+        _insert_question(cur, ctx.tenant_id, interview_id, int(turn["ordinal"]) + 1, topic_id, question, kind)
         write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="capture:interview_turn", reason_code="TURN_ANSWERED",
                     resource_type="interview", resource_id=interview_id, request_id=ctx.request_id,
                     details={"interview_id": interview_id, "count": turn_count, **({"item_id": item_id} if item_id else {})})
@@ -265,9 +280,14 @@ def read(db: Database, ctx: ServiceContext, interview_id: str) -> dict[str, Any]
         out = dict(iv)
         for k in ("created_at", "last_turn_at", "completed_at"):
             out[k] = out[k].isoformat() if out[k] else None
-        cur.execute("""SELECT ordinal, topic_id::text AS topic_id, question_text, question_kind, answer_text, answered_at, erased_at
+        cur.execute("""SELECT ordinal, topic_id::text AS topic_id, question_text, question_sealed, question_kind, answer_text, answer_sealed,
+                              sealed_key, answered_at, erased_at
                          FROM interview_turns WHERE tenant_id = %s AND interview_id = %s ORDER BY ordinal""", (ctx.tenant_id, interview_id))
-        out["turns"] = [{"ordinal": t["ordinal"], "topic_id": t["topic_id"], "question": t["question_text"], "kind": t["question_kind"],
-                         "answer": t["answer_text"], "answered_at": t["answered_at"].isoformat() if t["answered_at"] else None,
+        fields = Fields(cur, ctx.tenant_id, "interview_turns")     # sealed turns opened for this reader only (D41)
+        out["turns"] = [{"ordinal": t["ordinal"], "topic_id": t["topic_id"],
+                         "question": fields.open(turn_key(interview_id, t["ordinal"]), "question", t["question_text"], t["question_sealed"], t["sealed_key"]),
+                         "kind": t["question_kind"],
+                         "answer": fields.open(turn_key(interview_id, t["ordinal"]), "answer", t["answer_text"], t["answer_sealed"], t["sealed_key"]),
+                         "answered_at": t["answered_at"].isoformat() if t["answered_at"] else None,
                          "erased": t["erased_at"] is not None} for t in cur.fetchall()]
     return out

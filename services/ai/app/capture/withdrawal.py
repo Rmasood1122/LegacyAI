@@ -50,7 +50,8 @@ def erase_sources(cur: psycopg.Cursor[Any], tenant_id: str, consent_id: str) -> 
     cur.execute("DELETE FROM chunks WHERE tenant_id = %s AND source_id = ANY(%s::uuid[])", (tenant_id, source_ids))   # citations cascade
     cur.execute("UPDATE sources SET title = '' WHERE tenant_id = %s AND id = ANY(%s::uuid[])", (tenant_id, source_ids))
     cur.execute(
-        """UPDATE interview_turns t SET question_text = '', answer_text = CASE WHEN t.answer_text IS NULL THEN NULL ELSE '' END, erased_at = now()
+        """UPDATE interview_turns t SET question_text = '', question_sealed = NULL, answer_sealed = NULL, sealed_key = NULL,
+                  answer_text = CASE WHEN t.answered_at IS NULL THEN NULL ELSE '' END, erased_at = now()
              FROM interviews iv
             WHERE iv.tenant_id = t.tenant_id AND iv.id = t.interview_id AND iv.tenant_id = %s AND iv.source_id = ANY(%s::uuid[])
               AND t.erased_at IS NULL""", (tenant_id, source_ids))

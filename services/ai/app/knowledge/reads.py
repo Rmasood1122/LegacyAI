@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.capture import condition, topic_condition
+from app.capture import VERSION_TEXT, Fields, condition, topic_condition, version_text
 from app.knowledge import item_conflicts
 from app.knowledge.items import ItemRefused, item_topics
 from app.platform import Database, ServiceContext, one, write_audit
@@ -72,9 +72,11 @@ def get_item(db: Database, ctx: ServiceContext, item_id: str) -> dict[str, Any]:
         if item is None:
             raise ItemRefused("not_found", 404)
         item = _iso(dict(item), "verified_at", "stale_after", "updated_at")
-        cur.execute("""SELECT id::text AS id, version_no, body, change_kind, author_person_id::text AS author_person_id, erased_at, created_at
-                         FROM knowledge_versions WHERE tenant_id = %s AND item_id = %s ORDER BY version_no""", (ctx.tenant_id, item_id))
-        versions = [_iso(dict(v), "erased_at", "created_at") for v in cur.fetchall()]
+        cur.execute(f"""SELECT v.id::text AS id, v.version_no, v.change_kind, v.author_person_id::text AS author_person_id, v.erased_at,
+                                v.created_at, {VERSION_TEXT}
+                           FROM knowledge_versions v WHERE v.tenant_id = %s AND v.item_id = %s ORDER BY v.version_no""", (ctx.tenant_id, item_id))
+        fields = Fields(cur, ctx.tenant_id, "knowledge_versions")     # sealed texts opened for this reader only (D41)
+        versions = [_iso({**dict(v), "body": version_text(fields, v)}, "erased_at", "created_at") for v in cur.fetchall()]
         swhere, sparams = condition(ctx.filter, "sources", ctx.tenant_id)
         cur.execute(
             f"""SELECT DISTINCT s.id::text AS source_id, s.title, c.page_from, c.page_to

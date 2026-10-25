@@ -8,7 +8,7 @@ import psycopg
 import pytest
 
 from app.ai_gateway import FakeEmbedder, FakeProvider, Gateway
-from app.capture import interviews, topics
+from app.capture import Fields, interviews, topics, turn_key
 from app.capture.gaps import gap_report
 from app.knowledge import items, readiness
 from app.platform import Database
@@ -82,8 +82,16 @@ def test_an_interview_needs_consent_and_turns_answers_into_candidates(db: Databa
     assert turn.turn_count == 1 and turn.next_question and turn.candidate_item_id
     item = admin.execute("SELECT status, origin, ai_extracted FROM knowledge_items WHERE id = %s", (turn.candidate_item_id,)).fetchone()
     assert (item["status"], item["origin"], item["ai_extracted"]) == ("in_review", "interview", True)
-    stored = admin.execute("SELECT answer_text FROM interview_turns WHERE interview_id = %s AND ordinal = 1", (interview,)).fetchone()
-    assert "Ruth Okafor" not in stored["answer_text"]             # redacted before it was stored
+    stored = admin.execute("""SELECT tenant_id::text AS tenant_id, question_text, question_sealed, answer_text, answer_sealed, sealed_key
+                                FROM interview_turns WHERE interview_id = %s AND ordinal = 1""", (interview,)).fetchone()
+    # the turn is stored sealed (decision D41): no readable question or answer, and the words are not in its bytes
+    assert stored["question_text"] is None and stored["answer_text"] is None and stored["sealed_key"] == "platform:1"
+    assert b"furnace" not in bytes(stored["answer_sealed"])
+    with admin.cursor() as cur:
+        fields = Fields(cur, stored["tenant_id"], "interview_turns")
+        stored["answer_text"] = fields.open(turn_key(interview, 1), "answer", None, stored["answer_sealed"], stored["sealed_key"])
+        assert fields.open(turn_key(interview, 1), "question", None, stored["question_sealed"], stored["sealed_key"]) == started.next_question
+    assert "Ruth Okafor" not in stored["answer_text"] and "purge the furnace" in stored["answer_text"]   # redacted before it was stored
     # the answer's search copy is stored sealed (decision D41) and opens to the redacted answer
     copy = chunk_texts(admin, "c.interview_turn_id = (SELECT id FROM interview_turns WHERE interview_id = %s AND ordinal = 1)", (interview,))
     assert len(copy) == 1 and copy[0]["sealed"] and copy[0]["has_vector"] and copy[0]["text"] == stored["answer_text"]
