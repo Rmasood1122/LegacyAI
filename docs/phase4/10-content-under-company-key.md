@@ -1,6 +1,6 @@
 # Documents and knowledge under the company's key — design (decision D41, 2026-10-24)
 
-> **Status: steps 2 to 4b, the first part of step 5, parts 1 to 4a and the first half of part 4b of step 6 built (2026-10-25).** The AI service locks documents, items'
+> **Status: steps 2 to 4b, the first part of step 5, parts 1 to 4 of step 6 built (2026-10-25).** The AI service locks documents, items'
 > texts and interview turns with the company's key when they are saved (`services/ai/app/platform/sealing.py`,
 > `services/ai/app/capture/sealed_chunks.py`), answers questions with the in-memory search
 > (`services/ai/app/capture/memory_search.py`, `search_cache.py`), and the housekeeping command locks what was saved
@@ -216,9 +216,16 @@ which unlocks a company's content into memory for a few minutes while it is bein
      the AI service the list, creating and changing fail (503/502). The API login lost every right to `name` and
      `description` and can no longer insert or change topics; the AI login may now add an active topic a person made
      (the database still refuses one without the card that made it) and change name, description and status.
-   - Still to do (part 4b, second half): store topic names and descriptions sealed, replace the unique index on the
-     name by a keyed hash, open them in the AI service's own screens (gap report, readiness report, knowledge map,
-     an item's topics) and seal older ones in housekeeping.
+   - **6 part 4b, second half, built 2026-10-25: topic names and descriptions are stored sealed** (`name_sealed`,
+     `description_sealed`, bound to "topic:<id>"). A name stays unique per company in any case: `name_hash` is a keyed
+     fingerprint of the name in lower case (HMAC-SHA256 with a key derived from the content key for that one column,
+     `sealing.fingerprint`), unique per company; a new or changed name is compared with the readable names and with the
+     fingerprints under every key the company's topics use, while one writer at a time holds the company's topic-name
+     lock. The old unique index on `lower(name)` keeps covering the rows still readable. The gap report, the readiness
+     report, the knowledge map, an item's topics and the interview's topic open them; lists are sorted by name after
+     opening. Older names are sealed by housekeeping job 6 (`sealed_topics` / `readable_topics`). Limit: the
+     fingerprint uses Python's lower case and the readable index PostgreSQL's; they agree for ordinary letters, not
+     necessarily for every rare character.
 7. **Key off and key destroyed, end to end:**
    - the answers people see;
    - the operator's runbook;

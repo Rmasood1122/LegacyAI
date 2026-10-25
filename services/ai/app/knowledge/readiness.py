@@ -18,7 +18,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from app.ai_gateway import Caller, DataBlock, Gateway, QuizGenerateOutput, QuizGradeOutput
-from app.capture import VERSION_TEXT, Fields, new_row_id, version_text
+from app.capture import VERSION_TEXT, Fields, new_row_id, open_topic, topic_text_columns, version_text
 from app.knowledge.items import ItemRefused, _settings, review_settings
 from app.platform import Database, ServiceContext, one, write_audit
 
@@ -439,7 +439,7 @@ def report(db: Database, ctx: ServiceContext, attempt_id: str) -> dict[str, Any]
         if a is None:
             raise ItemRefused("not_found", 404)
         cur.execute(
-            """SELECT tp.id::text AS topic_id, tp.name,
+            f"""SELECT tp.id::text AS topic_id, {topic_text_columns("tp")},
                       (SELECT count(*) FROM knowledge_item_topics kt JOIN knowledge_items i ON i.tenant_id = kt.tenant_id AND i.id = kt.item_id
                         WHERE kt.tenant_id = m.tenant_id AND kt.topic_id = m.topic_id
                           AND i.status IN ('verified', 'corrected') AND i.sensitivity = 0)::int AS released,
@@ -452,9 +452,10 @@ def report(db: Database, ctx: ServiceContext, attempt_id: str) -> dict[str, Any]
                  LEFT JOIN quiz_items q2 ON q2.tenant_id = m.tenant_id AND q2.topic_id = m.topic_id
                  LEFT JOIN quiz_answers qa ON qa.tenant_id = q2.tenant_id AND qa.quiz_item_id = q2.id AND qa.attempt_id = %s
                 WHERE m.tenant_id = %s AND m.job_role = %s
-                GROUP BY tp.id, tp.name, m.tenant_id, m.topic_id ORDER BY tp.name""",
+                GROUP BY tp.id, m.tenant_id, m.topic_id""",
             (attempt_id, ctx.tenant_id, a["job_role"]))
-        rows = cur.fetchall()
+        names = Fields(cur, ctx.tenant_id, "topics")       # topic names are sealed (D41 step 6 part 4b): sorted once opened
+        rows = sorted((open_topic(names, dict(r), "topic_id") for r in cur.fetchall()), key=lambda r: (r["name"], r["topic_id"]))
     minimum = int(s["quiz_min_questions_per_topic"])
     topics, gaps = [], []
     for r in rows:

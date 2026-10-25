@@ -20,7 +20,7 @@ from typing import Any
 import psycopg
 from pgvector import HalfVector
 
-from app.platform import ContentKeys, FieldRef, active_content_keys, open_text, open_vector, seal_text, seal_vector
+from app.platform import ContentKeys, FieldRef, active_content_keys, fingerprint, open_text, open_vector, seal_text, seal_vector
 
 
 def row_key(*, kind: str, source_id: str | None, ordinal: int | None, knowledge_item_id: str | None) -> str:
@@ -145,6 +145,10 @@ class Fields:
             key_id = self._write
         return None, seal_text(self._key(key_id), text, self._ref(row_key, column, key_id)), key_id
 
+    def fingerprint(self, column: str, text: str, key_id: str) -> bytes:
+        """The keyed fingerprint of `text` in `column` under the key `key_id` (equal texts, equal fingerprints)."""
+        return fingerprint(self._key(key_id), text, self._ref("fingerprint", column, key_id))
+
     def open(self, row_key: str, column: str, readable: str | None, sealed: bytes | memoryview | None, key_id: str | None) -> str | None:
         """The text, from whichever form the row holds (None when neither: an unanswered question, say)."""
         if sealed is None:
@@ -213,6 +217,52 @@ def open_source_title(fields: Fields, row: dict[str, Any], id_column: str = "id"
     row["title"] = fields.open(f"source:{row[id_column]}", "title", row.get("title"), row.pop("source_title_sealed", None),
                                row.pop("source_title_key", None)) or ""
     return row
+
+
+# Step 6 (part 4b): a topic's name and description, bound to "topic:<id>" in table topics. Names stay unique per company
+# in any case although they are sealed: name_hash is a keyed fingerprint of the name in lower case, under the key the
+# row is sealed with. Readable rows (written before) keep the database's own rule (unique lower(name)).
+def topic_text_columns(alias: str) -> str:
+    """The columns a reader selects from topics (alias `alias`) to open name and description with open_topic()."""
+    return (f"{alias}.name, {alias}.name_sealed AS topic_name_sealed, {alias}.description, "
+            f"{alias}.description_sealed AS topic_description_sealed, {alias}.sealed_key AS topic_key")
+
+
+def open_topic(fields: Fields, row: dict[str, Any], id_column: str = "id") -> dict[str, Any]:
+    """Replaces the text columns of `row` by the opened name and description. `fields` is for table topics."""
+    key = row.pop("topic_key", None)
+    row["name"] = fields.open(f"topic:{row[id_column]}", "name", row.get("name"), row.pop("topic_name_sealed", None), key) or ""
+    row["description"] = fields.open(f"topic:{row[id_column]}", "description", row.get("description"),
+                                     row.pop("topic_description_sealed", None), key) or ""
+    return row
+
+
+def seal_topic(fields: Fields, topic_id: str, name: str, description: str) -> dict[str, Any]:
+    """The values for name, name_sealed, description, description_sealed, sealed_key and name_hash of a topic."""
+    readable, name_sealed, key_id = fields.seal(f"topic:{topic_id}", "name", name)
+    if key_id is None:
+        return {"name": readable, "name_sealed": None, "description": description, "description_sealed": None, "sealed_key": None,
+                "name_hash": None}
+    _, description_sealed, _ = fields.seal(f"topic:{topic_id}", "description", description, key_id=key_id)
+    return {"name": None, "name_sealed": name_sealed, "description": None, "description_sealed": description_sealed, "sealed_key": key_id,
+            "name_hash": fields.fingerprint("name", name.lower(), key_id)}
+
+
+def topic_name_match(fields: Fields, name: str, alias: str = "tp") -> tuple[str, list[Any]]:
+    """The condition "this topic has the name `name`, in any case", for readable and sealed rows alike: one fingerprint
+    per key the company's topics are sealed with. Hold lock_topic_names() while it decides anything. Without content
+    keys (development and tests that switch them off) only readable names are compared."""
+    if fields.keys is None:
+        return f"lower({alias}.name) = lower(%s)", [name]
+    fields.cur.execute("SELECT DISTINCT sealed_key FROM topics WHERE tenant_id = %s AND sealed_key IS NOT NULL", (fields.tenant_id,))
+    hashes = [fields.fingerprint("name", name.lower(), r["sealed_key"]) for r in fields.cur.fetchall()]
+    return f"(lower({alias}.name) = lower(%s) OR {alias}.name_hash = ANY(%s::bytea[]))", [name, hashes]
+
+
+def lock_topic_names(cur: psycopg.Cursor[Any], tenant_id: str) -> None:
+    """One writer of a company's topic names at a time (until the transaction ends), so a check for a name and the
+    write that follows cannot be overtaken by another request."""
+    cur.execute("SELECT pg_advisory_xact_lock(hashtext('topic-names:' || %s))", (tenant_id,))
 
 
 def conflict_key(item_id: str, other_item_id: str) -> str:

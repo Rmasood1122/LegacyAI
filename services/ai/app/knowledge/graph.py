@@ -18,7 +18,17 @@ import re
 from collections.abc import Callable
 from typing import Any, TypedDict
 
-from app.capture import Fields, condition, item_title_columns, open_item_title, open_source_title, source_title_columns, topic_condition
+from app.capture import (
+    Fields,
+    condition,
+    item_title_columns,
+    open_item_title,
+    open_source_title,
+    open_topic,
+    source_title_columns,
+    topic_condition,
+    topic_text_columns,
+)
 from app.knowledge.reads import CITED_PASSAGE_AND_DOCUMENT, CITES_ITEM_VERSION, readable_document
 from app.platform import Database, ServiceContext, write_audit
 
@@ -92,6 +102,7 @@ class _Reader:
         self.tenant = ctx.tenant_id
         self.titles = Fields(cur, ctx.tenant_id, "knowledge_items")     # item and document titles are sealed from step 6 on (D41)
         self.documents = Fields(cur, ctx.tenant_id, "sources")
+        self.topics = Fields(cur, ctx.tenant_id, "topics")              # topic names too, from step 6 part 4b
         item, self.item_params = condition(ctx.filter, "knowledge_items", ctx.tenant_id)
         # THE definition of an item the caller may see in the map: readable, and not withdrawn. Every item query uses it.
         self.visible_item = f"({item} AND i.status <> 'withdrawn')"
@@ -107,9 +118,12 @@ class _Reader:
         return rows[:limit], len(rows) > limit
 
     def _opened(self, row: dict[str, Any]) -> dict[str, Any]:
-        """An item's or a document's sealed title opened for this caller (rows of other kinds are left as they are)."""
+        """An item's or a document's sealed title, or a topic's sealed name, opened for this caller (rows of other kinds
+        are left as they are)."""
         if "title_key" in row:
             return open_item_title(self.titles, row)
+        if "topic_key" in row:
+            return open_topic(self.topics, row)
         return open_source_title(self.documents, row) if "source_title_key" in row else row
 
     def one(self, sql: str, params: tuple[Any, ...]) -> dict[str, Any] | None:
@@ -119,10 +133,10 @@ class _Reader:
 
     def group(self, name: str, edge_kind: str, sql: str, params: tuple[Any, ...], make: Callable[[dict[str, Any]], Neighbour]) -> Group:
         rows, more = self.capped(sql, params, NEIGHBOURS)
-        if rows and "title" in rows[0]:
-            # items and documents: the database cannot sort sealed titles, so it picks them in id order and they are sorted
-            # by title here
-            rows.sort(key=lambda r: (r["title"], r["id"]))
+        if rows and ("title" in rows[0] or "name" in rows[0]):
+            # items, documents and topics: the database cannot sort sealed titles and names, so it picks them in id order
+            # and they are sorted by title or name here
+            rows.sort(key=lambda r: (r.get("title", r.get("name")), r["id"]))
         return {"group": name, "edge_kind": edge_kind, "truncated": more, "nodes": [make(r) for r in rows]}
 
 
@@ -138,9 +152,9 @@ def _around_item(q: _Reader, node_id: str) -> tuple[Node, list[Group]] | None:
     t = q.tenant
     return node("item", me["id"], me["title"], me["status"]), [
         q.group("topics", "item_topic",
-                f"""SELECT tp.id::text AS id, tp.name, kt.link_source FROM knowledge_item_topics kt
+                f"""SELECT tp.id::text AS id, {topic_text_columns("tp")}, kt.link_source FROM knowledge_item_topics kt
                       JOIN topics tp ON tp.tenant_id = kt.tenant_id AND tp.id = kt.topic_id
-                     WHERE kt.tenant_id = %s AND kt.item_id = %s AND {q.readable_topic} ORDER BY tp.name, tp.id""",
+                     WHERE kt.tenant_id = %s AND kt.item_id = %s AND {q.readable_topic} ORDER BY tp.id""",
                 (t, node_id, *q.topic_params), lambda r: {"node": node("topic", r["id"], r["name"]), "origin": r["link_source"]}),
         q.group("sources", "item_source",
                 f"""SELECT DISTINCT s.id::text AS id, {source_title_columns("s")} FROM knowledge_items i
@@ -157,7 +171,7 @@ def _around_item(q: _Reader, node_id: str) -> tuple[Node, list[Group]] | None:
 
 
 def _around_topic(q: _Reader, node_id: str) -> tuple[Node, list[Group]] | None:
-    me = q.one(f"SELECT tp.id::text AS id, tp.name FROM topics tp WHERE {q.readable_topic} AND tp.id = %s", (*q.topic_params, node_id))
+    me = q.one(f"SELECT tp.id::text AS id, {topic_text_columns('tp')} FROM topics tp WHERE {q.readable_topic} AND tp.id = %s", (*q.topic_params, node_id))
     if me is None:
         return None
     t = q.tenant
@@ -192,9 +206,9 @@ def _around_source(q: _Reader, node_id: str) -> tuple[Node, list[Group]] | None:
 def _around_job_role(q: _Reader, node_id: str) -> tuple[Node, list[Group]] | None:
     """The id of a job role is its name. It exists for a caller only through topics that caller may read."""
     topics = q.group("topics", "job_role_topic",
-                     f"""SELECT tp.id::text AS id, tp.name FROM role_topic_maps m
+                     f"""SELECT tp.id::text AS id, {topic_text_columns("tp")} FROM role_topic_maps m
                            JOIN topics tp ON tp.tenant_id = m.tenant_id AND tp.id = m.topic_id
-                          WHERE m.tenant_id = %s AND m.job_role = %s AND {q.readable_topic} ORDER BY tp.name, tp.id""",
+                          WHERE m.tenant_id = %s AND m.job_role = %s AND {q.readable_topic} ORDER BY tp.id""",
                      (q.tenant, node_id, *q.topic_params), lambda r: {"node": node("topic", r["id"], r["name"]), "origin": None})
     if not topics["nodes"]:
         return None
@@ -241,7 +255,8 @@ def export(db: Database, ctx: ServiceContext) -> dict[str, Any]:
 
         items = take(f"SELECT i.id::text AS id, {item_title_columns('i')}, i.status FROM knowledge_items i WHERE {q.visible_item} ORDER BY i.id",
                      tuple(q.item_params), EXPORT_NODES)
-        topics = take(f"SELECT tp.id::text AS id, tp.name FROM topics tp WHERE {q.readable_topic} ORDER BY tp.id", tuple(q.topic_params), EXPORT_NODES)
+        topics = take(f"SELECT tp.id::text AS id, {topic_text_columns('tp')} FROM topics tp WHERE {q.readable_topic} ORDER BY tp.id",
+                      tuple(q.topic_params), EXPORT_NODES)
         item_ids = [r["id"] for r in items]
         topic_ids = [r["id"] for r in topics]
         sources = take(

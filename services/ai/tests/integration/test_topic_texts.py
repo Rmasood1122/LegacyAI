@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.ai_gateway import FakeEmbedder, FakeProvider
-from app.capture import topics
+from app.capture import Fields, open_topic, topic_text_columns, topics
 from app.capture.topics import TopicRefused
 from app.main import Services, create_app
 from app.platform import Database, Logger
@@ -21,8 +21,14 @@ pytestmark = [pytest.mark.db, needs_db]
 
 
 def stored(admin: psycopg.Connection[dict[str, Any]], topic_id: str) -> dict[str, Any]:
-    return admin.execute("""SELECT name, description, status, origin, created_by_card_id::text AS card, embedding IS NOT NULL AS embedded
-                              FROM topics WHERE id = %s""", (topic_id,)).fetchone()
+    """What the database holds, with name and description opened (they are stored sealed from step 6 part 4b on)."""
+    with admin.cursor() as cur:
+        row = cur.execute(f"""SELECT tp.id::text AS id, tp.tenant_id::text AS tenant, {topic_text_columns("tp")}, tp.status, tp.origin,
+                                     tp.created_by_card_id::text AS card, tp.embedding IS NOT NULL AS embedded FROM topics tp WHERE tp.id = %s""",
+                          (topic_id,)).fetchone()
+        opened = open_topic(Fields(cur, row.pop("tenant"), "topics"), dict(row))
+    opened.pop("id")
+    return opened
 
 
 def test_a_topic_made_by_a_person_is_active_has_its_vector_and_a_name_is_used_once(

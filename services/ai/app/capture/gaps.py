@@ -12,6 +12,7 @@ from typing import Any
 import psycopg
 
 from app.capture.filters import condition
+from app.capture.sealed_chunks import Fields, open_topic, topic_text_columns
 
 THIN_BELOW = 2
 
@@ -37,7 +38,7 @@ def gap_report(cur: psycopg.Cursor[Any], *, tenant_id: str, job_role: str, item_
     item_where, item_params = condition(item_spec, "knowledge_items", tenant_id)
     topic_where, topic_params = condition(topic_spec, "topics", tenant_id)
     cur.execute(
-        f"""SELECT tp.id::text AS topic_id, tp.name, m.required, m.importance,
+        f"""SELECT tp.id::text AS topic_id, {topic_text_columns("tp")}, m.required, m.importance,
                    count(i.id) FILTER (WHERE i.status IN ('verified', 'corrected') AND (i.stale_after IS NULL OR i.stale_after > now())) AS fresh,
                    count(i.id) FILTER (WHERE i.status = 'stale' OR (i.status IN ('verified', 'corrected') AND i.stale_after <= now())) AS stale,
                    count(i.id) FILTER (WHERE i.status IN ('candidate', 'in_review')) AS unverified,
@@ -47,10 +48,11 @@ def gap_report(cur: psycopg.Cursor[Any], *, tenant_id: str, job_role: str, item_
               LEFT JOIN knowledge_item_topics kt ON kt.tenant_id = m.tenant_id AND kt.topic_id = m.topic_id
               LEFT JOIN knowledge_items i ON i.tenant_id = kt.tenant_id AND i.id = kt.item_id AND {item_where}
              WHERE m.tenant_id = %s AND m.job_role = %s
-             GROUP BY tp.id, tp.name, m.required, m.importance""",
+             GROUP BY tp.id, m.required, m.importance""",
         [*topic_params, *item_params, tenant_id, job_role])
+    names = Fields(cur, tenant_id, "topics")          # topic names are sealed from D41 step 6 part 4b on
     out = []
-    for r in cur.fetchall():
+    for r in [open_topic(names, dict(row), "topic_id") for row in cur.fetchall()]:
         fresh, stale, unverified, contributors = int(r["fresh"]), int(r["stale"]), int(r["unverified"]), int(r["contributors"])
         if fresh == 0 and stale == 0:
             label = "unverified" if unverified else "uncovered"

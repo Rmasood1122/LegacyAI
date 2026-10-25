@@ -22,12 +22,12 @@ ROLE = "Boiler operator"
 
 def topic(db: Database, world: World, embedder: FakeEmbedder, admin: psycopg.Connection[dict[str, Any]], name: str, description: str,
           importance: int = 3) -> str:
-    """What the API does for an admin (create the topic, map it to the role), then the embedding step here."""
-    tid = str(admin.execute("""INSERT INTO topics (tenant_id, name, description, origin, status, sensitivity)
-                               VALUES (%s, %s, %s, 'admin', 'active', 0) RETURNING id""", (world.tenant_id, name, description)).fetchone()["id"])
+    """What an admin does: this service creates the topic (stored sealed, with its embedding; D41 step 6 part 4b), the
+    API maps it to the role."""
+    tid = str(topics.create(db, world.ctx("owner", "topic.create"), embedder, name=name, description=description, department_id=None,
+                            sensitivity=0)["id"])
     admin.execute("INSERT INTO role_topic_maps (tenant_id, job_role, topic_id, required, importance) VALUES (%s, %s, %s, true, %s)",
                   (world.tenant_id, ROLE, tid, importance))
-    topics.embed(db, world.ctx("owner", "topic.embed"), embedder, tid)
     return tid
 
 
