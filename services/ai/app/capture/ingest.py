@@ -25,7 +25,17 @@ from app.capture.chunking import chunk_pages
 from app.capture.files import UploadRejected, extract, sniff
 from app.capture.filters import condition
 from app.capture.redaction import Finding, redact
-from app.capture.sealed_chunks import SEALED_COLUMNS, Opener, Sealer, row_key
+from app.capture.sealed_chunks import (
+    SEALED_COLUMNS,
+    Fields,
+    Opener,
+    Sealer,
+    new_row_id,
+    open_source_title,
+    row_key,
+    seal_source_title,
+    source_title_columns,
+)
 from app.platform import Database, ServiceContext, one, write_audit
 
 DEFAULT_CHUNK_QUOTA = 5000
@@ -102,17 +112,35 @@ def create_source(db: Database, ctx: ServiceContext, *, title: str, department_i
                 raise CaptureRefused("consent_missing")
             if contributor_person_id != ctx.person_id:
                 status = "awaiting_confirmation"
+        source_id = new_row_id(cur)
+        stored = seal_source_title(cur, ctx.tenant_id, source_id, safe_title)     # sealed with the company's content key (D41)
         cur.execute(
-            """INSERT INTO sources (tenant_id, kind, title, department_id, sensitivity, owner_person_id, consent_id,
+            """INSERT INTO sources (id, tenant_id, kind, title, title_sealed, sealed_key, department_id, sensitivity, owner_person_id, consent_id,
                                     company_owned_attested_by_card_id, uploaded_by_card_id, status)
-               VALUES (%s, 'document', %s, %s, %s, %s, %s, %s, %s, %s)
-               RETURNING id::text AS id, status, title""",
-            (ctx.tenant_id, safe_title, department_id, sensitivity, contributor_person_id, consent_id,
-             ctx.card_id if company_document else None, ctx.card_id, status))
-        row = one(cur)
+               VALUES (%s, %s, 'document', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               RETURNING id::text AS id, status""",
+            (source_id, ctx.tenant_id, stored["title"], stored["title_sealed"], stored["sealed_key"], department_id, sensitivity, contributor_person_id,
+             consent_id, ctx.card_id if company_document else None, ctx.card_id, status))
+        row = {**one(cur), "title": safe_title}
         write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="capture:source_created", reason_code="SOURCE_CREATED",
                     resource_type="source", resource_id=row["id"], request_id=ctx.request_id, details={"source_id": row["id"]})
     return row
+
+
+MAX_TITLES = 100
+
+
+def source_titles(db: Database, ctx: ServiceContext, source_ids: list[str]) -> dict[str, str]:
+    """The titles of these documents, for the API's document list and page (D41 step 6: the API cannot read them
+    itself). Only documents the caller may read are named (ctx.filter, built for source:read); unknown ids and ids the
+    caller may not read are simply left out, so the answer says nothing about them."""
+    where, params = condition(ctx.filter, "sources", ctx.tenant_id)
+    with db.tenant_tx(ctx.tenant_id) as cur:
+        cur.execute(f"""SELECT s.id::text AS id, {source_title_columns("s")} FROM sources s
+                         WHERE s.tenant_id = %s AND s.id = ANY(%s::uuid[]) AND {where}""",
+                    [ctx.tenant_id, list(source_ids)[:MAX_TITLES], *params])
+        documents = Fields(cur, ctx.tenant_id, "sources")
+        return {r["id"]: open_source_title(documents, dict(r))["title"] for r in cur.fetchall()}
 
 
 def confirm_source(db: Database, ctx: ServiceContext, source_id: str) -> dict[str, Any]:

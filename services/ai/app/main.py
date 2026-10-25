@@ -67,6 +67,10 @@ class SourceCreate(Body):
     company_document: bool = False
 
 
+class SourceTitles(Body):
+    ids: list[Uuid] = Field(max_length=100)
+
+
 class Question(Body):
     question: str = Field(min_length=1, max_length=2000)
     expert_person_id: Uuid | None = None
@@ -372,6 +376,11 @@ def create_app(services: Services | None = None) -> FastAPI:
         return ingest.create_source(s.db, ctx, title=body.title, department_id=body.department_id, sensitivity=body.sensitivity,
                                     contributor_person_id=body.contributor_person_id, company_document=body.company_document,
                                     storage_budget_bytes=s.settings.storage_budget_bytes)
+
+    @app.post("/internal/sources/titles")
+    def source_titles(body: SourceTitles, ctx: Annotated[ServiceContext, Depends(token("source.titles"))]) -> dict[str, Any]:
+        """Document titles are sealed (D41 step 6): the API asks here for the ones it shows."""
+        return {"titles": ingest.source_titles(svc().db, ctx, body.ids)}
 
     @app.post("/internal/sources/{source_id}/confirm")
     def source_confirm(source_id: str, ctx: Annotated[ServiceContext, Depends(token("source.confirm", "source_id"))]) -> dict[str, Any]:

@@ -720,6 +720,29 @@ Details: `10-content-under-company-key.md`, step 6 part 3b; decision D41.
   known one of this machine (an id function stand-in that is not time-ordered). The evaluation gives the same numbers.
 - **Not done or proven:** document titles, topic names and descriptions (part 4, which needs the founder's choice).
 
+## Step 26 — Document titles are stored locked; the API asks the AI service for them (2026-10-25)
+
+Details: `10-content-under-company-key.md`, step 6 part 4a; decision D41 (the founder's choice of 2026-10-25).
+
+- A document's title is now stored locked with the company's content key. The API's database login can no longer
+  read titles at all; the document list and the document page ask the AI service, which names only the documents the
+  caller may read. As chosen: without the AI service, those two requests fail instead of showing titles.
+- The AI service's own screens (where an item comes from, citations in answers, the knowledge map) open titles for
+  the request only. Erasing a document empties its title in both forms. Older titles are locked by housekeeping.
+- A company whose own key is switched off can no longer create a document entry at all (before, it could create
+  the entry but not add content).
+- Measured locally: 2 new AI tests (stored locked; titles given only for documents the caller may read, also to a
+  machine's key, never for another company's or with a malformed filter; older titles locked by housekeeping and
+  still shown on the map) and 4 new API tests (list and page show the AI service's title, never the database's; the AI
+  service is asked for exactly the documents shown with the caller's source:read filter; without it the requests
+  fail; the API login is refused the column). Without the change both AI tests and 3 of the 4 API tests fail (the 4th
+  checks the database right itself). Two existing tests changed on purpose: the list of actions a machine's key may
+  use gains the read-only `source.titles`, and the "switched-off key" test now also expects creating a document to be
+  refused. Whole AI suite: 375 passed. API: unit 790 passed; integration as before (the same card and sign-in timing
+  tests fail on this machine's database). The evaluation gives the same numbers.
+- **Not done or proven:** topic names and descriptions (part 4b); how much slower the document list is with a real
+  AI service was not measured.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

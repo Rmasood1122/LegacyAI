@@ -27,6 +27,7 @@ LEEWAY_SECONDS = 5
 # (listSources, getSource, listTopics, listJobRoles and getRoleTopics are answered by the API from the database.)
 API_KEY_ACTIONS: frozenset[str] = frozenset({
     "knowledge.candidates", "knowledge.answer", "item.list", "item.read", "graph.read", "gap.report",
+    "source.titles",     # the titles of documents a key lists or reads (sealed from D41 step 6 on); read-only
 })
 
 

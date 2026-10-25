@@ -212,7 +212,8 @@ describe('what a request with a key can do', () => {
     const byKey = await withKey(made.key, 'GET', `/v1/sources/${source}`);
     expect(byKey.status, byKey.raw).toBe(200);
     expect(byKey.body.status).toBe('processing');
-    expect(stub.calls).toEqual([]);                                       // nothing was started, nothing was asked
+    // nothing was started: the only call is for the document's title, which the API cannot read itself (D41 step 6)
+    expect(stub.calls.map((c) => c.action)).toEqual(['source.titles']);
     // the same request by a signed-in card continues the work (there is no background worker)
     const byCard = await tenant.owner.get(`/v1/sources/${source}`);
     expect(byCard.status, byCard.raw).toBe(200);

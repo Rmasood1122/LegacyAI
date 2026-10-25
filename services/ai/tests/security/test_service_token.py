@@ -159,7 +159,8 @@ def test_a_token_for_an_api_key_is_accepted_only_for_reading_and_asking() -> Non
     from app.platform.auth import API_KEY_ACTIONS
 
     allowed = set(API_KEY_ACTIONS)
-    assert allowed == {"knowledge.candidates", "knowledge.answer", "item.list", "item.read", "graph.read", "gap.report"}
+    # source.titles: the titles of the documents a key lists or reads, sealed from D41 step 6 on (read-only)
+    assert allowed == {"knowledge.candidates", "knowledge.answer", "item.list", "item.read", "graph.read", "gap.report", "source.titles"}
     actions = _internal_actions()
     assert len(actions) > 40 and allowed <= actions      # the list names real operations, and the scan found them
     key = {"kind": "api_key", "id": str(uuid.uuid4())}

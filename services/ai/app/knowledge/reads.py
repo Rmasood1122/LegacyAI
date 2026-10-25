@@ -6,7 +6,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.capture import VERSION_TEXT, Fields, condition, expert_question_key, item_title_columns, open_item_title, topic_condition, version_text
+from app.capture import (
+    VERSION_TEXT,
+    Fields,
+    condition,
+    expert_question_key,
+    item_title_columns,
+    open_item_title,
+    open_source_title,
+    source_title_columns,
+    topic_condition,
+    version_text,
+)
 from app.knowledge import item_conflicts
 from app.knowledge.items import ItemRefused, item_topics
 from app.knowledge.readiness import open_quiz_answer, open_quiz_content, quiz_answer_columns, quiz_content_columns
@@ -83,12 +94,13 @@ def get_item(db: Database, ctx: ServiceContext, item_id: str) -> dict[str, Any]:
         versions = [_iso({**dict(v), "body": version_text(fields, v)}, "erased_at", "created_at") for v in cur.fetchall()]
         swhere, sparams = condition(ctx.filter, "sources", ctx.tenant_id)
         cur.execute(
-            f"""SELECT DISTINCT s.id::text AS source_id, s.title, c.page_from, c.page_to
+            f"""SELECT DISTINCT s.id::text AS source_id, {source_title_columns("s")}, c.page_from, c.page_to
                   FROM citations ci
                   {CITED_PASSAGE_AND_DOCUMENT}
                  WHERE ci.tenant_id = %s AND {CITES_ITEM_VERSION} AND ci.subject_id = %s AND {readable_document(swhere)}""",
             [ctx.tenant_id, item["current_version_id"], *sparams])
-        provenance = [dict(r) for r in cur.fetchall()]
+        documents = Fields(cur, ctx.tenant_id, "sources")     # document titles sealed from step 6 on (D41)
+        provenance = [open_source_title(documents, dict(r), "source_id") for r in cur.fetchall()]
         # only topics this reader may READ: the token's topic filter (permission topic:read), not the knowledge filter
         twhere, tparams = topic_condition(ctx.topic_filter, ctx.tenant_id)
         topics = item_topics(cur, ctx.tenant_id, item_id, twhere, tparams)

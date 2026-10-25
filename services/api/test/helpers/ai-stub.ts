@@ -46,6 +46,8 @@ const DEFAULTS: Record<string, Answer> = {
   'source.content': () => ({ status: 'ready', failure_code: null, chunk_count: 3, pending_chunks: null, duplicate_of: null }),
   'source.continue': () => ({ status: 'ready', chunk_count: 3 }),
   'source.confirm': (c) => ({ id: c.claims.subject, status: 'awaiting_content' }),
+  // document titles are sealed (D41 step 6): the stand-in names every id it is asked about
+  'source.titles': (c) => ({ titles: Object.fromEntries(((c.body?.ids ?? []) as string[]).map((id) => [id, `Synthetic document ${id.slice(0, 8)}`])) }),
   'source.withdraw': (c) => ({ id: c.claims.subject, status: 'withdrawn', items_withdrawn: 0, items_back_in_review: 0 }),
   'label.change': () => ({ rows: 1 }),
   'knowledge.candidates': () => ({ candidates: [] }),

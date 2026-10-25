@@ -48,7 +48,8 @@ def erase_sources(cur: psycopg.Cursor[Any], tenant_id: str, consent_id: str) -> 
         return 0
     cur.execute("DELETE FROM redaction_findings WHERE tenant_id = %s AND source_id = ANY(%s::uuid[])", (tenant_id, source_ids))
     cur.execute("DELETE FROM chunks WHERE tenant_id = %s AND source_id = ANY(%s::uuid[])", (tenant_id, source_ids))   # citations cascade
-    cur.execute("UPDATE sources SET title = '' WHERE tenant_id = %s AND id = ANY(%s::uuid[])", (tenant_id, source_ids))
+    cur.execute("UPDATE sources SET title = '', title_sealed = NULL, sealed_key = NULL WHERE tenant_id = %s AND id = ANY(%s::uuid[])",
+                (tenant_id, source_ids))
     cur.execute(
         """UPDATE interview_turns t SET question_text = '', question_sealed = NULL, answer_sealed = NULL, sealed_key = NULL,
                   answer_text = CASE WHEN t.answered_at IS NULL THEN NULL ELSE '' END, erased_at = now()
@@ -108,6 +109,6 @@ def withdraw_source(cur: psycopg.Cursor[Any], tenant_id: str, source_id: str) ->
         return False
     cur.execute("DELETE FROM redaction_findings WHERE tenant_id = %s AND source_id = %s", (tenant_id, source_id))
     cur.execute("DELETE FROM chunks WHERE tenant_id = %s AND source_id = %s", (tenant_id, source_id))
-    cur.execute("UPDATE sources SET title = '' WHERE tenant_id = %s AND id = %s", (tenant_id, source_id))
+    cur.execute("UPDATE sources SET title = '', title_sealed = NULL, sealed_key = NULL WHERE tenant_id = %s AND id = %s", (tenant_id, source_id))
     cur.execute("DELETE FROM topics WHERE tenant_id = %s AND status = 'proposed' AND extracted_from_source_id = %s", (tenant_id, source_id))
     return True

@@ -1,12 +1,15 @@
 // Documents (feature 25), cited answers (14, 15, 17) and the verification loop (12).
 import { problems } from '../../../shared/errors.ts';
-import type { ResourceRef } from '../../../shared/policy-types.ts';
+import type { Decision, RequestContext, ResourceRef, Subject } from '../../../shared/policy-types.ts';
 import { decodeIdCursor, encodeCursor, type RouteDef, type Tx } from '../../platform/index.ts';
 import { aiLimits, baseClaims, gatewayRoute, keyGatewayRoute, pick, uuidOrNull, withListFilter, type GatewayDeps } from './common.ts';
+import type { AiServiceClient, TokenClaims } from './client.ts';
 import { chunkRefs, collectionRef, forTopicChange, itemRef, newRef, sourceRef, topicRef } from './resources.ts';
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-const SOURCE_COLUMNS = `id, kind, title, department_id, sensitivity, owner_person_id, status, failure_code, mime, byte_size, page_count,
+// No title: it is sealed (decision D41, step 6) and this login may not read it; the AI service names the documents
+// the caller may read (withTitles below).
+const SOURCE_COLUMNS = `id, kind, department_id, sensitivity, owner_person_id, status, failure_code, mime, byte_size, page_count,
   chunk_count, created_at, ready_at, (company_owned_attested_by_card_id IS NOT NULL) AS company_document,
   (owner_person_id IS NOT NULL AND contributor_confirmed_at IS NULL AND status = 'awaiting_confirmation') AS awaiting_confirmation`;
 const SOURCE_DESCRIPTOR = {
@@ -15,17 +18,33 @@ const SOURCE_DESCRIPTOR = {
 };
 
 interface SourceRow {
-  id: string; kind: string; title: string; department_id: string | null; sensitivity: number; owner_person_id: string | null; status: string;
+  id: string; kind: string; department_id: string | null; sensitivity: number; owner_person_id: string | null; status: string;
   failure_code: string | null; mime: string | null; byte_size: number | null; page_count: number | null; chunk_count: number;
   created_at: Date; ready_at: Date | null; company_document: boolean;
 }
 
-function toApiSource(r: SourceRow): Record<string, unknown> {
+function toApiSource(r: SourceRow, title = ''): Record<string, unknown> {
   return {
-    id: r.id, kind: r.kind, title: r.title, department_id: r.department_id, sensitivity: r.sensitivity, contributor_person_id: r.owner_person_id,
+    id: r.id, kind: r.kind, title, department_id: r.department_id, sensitivity: r.sensitivity, contributor_person_id: r.owner_person_id,
     company_document: r.company_document, status: r.status, failure_code: r.failure_code, mime: r.mime, byte_size: r.byte_size,
     page_count: r.page_count, chunk_count: r.chunk_count, created_at: r.created_at.toISOString(), ready_at: r.ready_at?.toISOString() ?? null,
   };
+}
+
+/** What a caller needs to be told the titles of the documents it reads: who it is, and its source:read filter. */
+async function titleClaims(deps: GatewayDeps, tx: Tx, subject: Subject, decision: Decision, ctx: RequestContext): Promise<TokenClaims> {
+  return { ...baseClaims(subject, decision, ctx), filter: await deps.authorizer.filterSpec(tx, subject, 'source:read', ctx) };
+}
+
+/**
+ * Document titles are sealed (decision D41, step 6; the founder's choice of 2026-10-25): only the AI service can open
+ * them, and it names only documents the caller may read. Called after the transaction, like every AI-service call.
+ * Without the AI service there are no titles, and the request fails with its error (502/503).
+ */
+async function withTitles(ai: AiServiceClient, claims: TokenClaims, ids: string[]): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
+  const r = await ai.call<{ titles: Record<string, string> }>({ path: '/internal/sources/titles', action: 'source.titles', claims, json: { ids } });
+  return new Map(Object.entries(r.titles ?? {}));
 }
 
 async function sourceDetail(tx: Tx, tenantId: string, id: string): Promise<Record<string, unknown>> {
@@ -108,10 +127,10 @@ export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
       }, MAX_UPLOAD_BYTES),
     {
       operationId: 'listSources',
-      kind: 'session-or-key',   // also takes a machine's API key (openapi.yaml: x-api-key)
+      kind: 'gateway-or-key',   // also takes a machine's API key (openapi.yaml: x-api-key); the titles come from the AI service
       listFilter: 'applied',
       policy: { resource: async ({ subject }) => collectionRef('source', subject.tenant_id) },
-      handler: async ({ tx, subject, query, ctx }) => {
+      prepare: async ({ tx, subject, query, ctx, decision }) => {
         const after = decodeIdCursor(query.cursor);
         const filter = await authorizer.filter(tx, subject, 'source:read', SOURCE_DESCRIPTOR, ctx, 4);
         const { rows } = await tx.query<SourceRow>(
@@ -121,7 +140,14 @@ export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
           [query.status ?? null, after, query.limit + 1, ...filter.params]);
         const page = rows.slice(0, query.limit);
         const last = page[page.length - 1];
-        return { body: { items: page.map(toApiSource), next_cursor: rows.length > query.limit && last ? encodeCursor(last.id) : null } };
+        const next = rows.length > query.limit && last ? encodeCursor(last.id) : null;
+        const claims = await titleClaims(deps, tx, subject, decision, ctx);
+        return {
+          call: async () => {
+            const titles = await withTitles(ai, claims, page.map((r) => r.id));
+            return { body: { items: page.map((r) => toApiSource(r, titles.get(r.id))), next_cursor: next } };
+          },
+        };
       },
     },
     {
@@ -131,14 +157,18 @@ export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
       prepare: async ({ tx, subject, decision, ctx, params, resource }) => {
         // A document still being embedded continues on each status request (there is no background worker) - but only
         // for a signed-in card. A machine's key READS: it is told the current status and starts no work.
+        const titles = await titleClaims(deps, tx, subject, decision, ctx);
+        const titled = async (detail: Record<string, unknown>): Promise<Record<string, unknown>> =>
+          ({ ...detail, title: (await withTitles(ai, titles, [params.source_id])).get(params.source_id) ?? '' });
         if ((resource as ResourceRef & { status: string }).status !== 'processing' || subject.kind !== 'card') {
-          return { body: await sourceDetail(tx, subject.tenant_id, params.source_id) };
+          const detail = await sourceDetail(tx, subject.tenant_id, params.source_id);
+          return { call: async () => ({ body: await titled(detail) }) };
         }
         const claims = baseClaims(subject, decision, ctx);
         return {
           call: async ({ withTx }) => {
             await ai.call({ path: `/internal/sources/${params.source_id}/continue`, action: 'source.continue', subject: params.source_id, claims });
-            return { body: await withTx((tx2) => sourceDetail(tx2, subject.tenant_id, params.source_id)) };
+            return { body: await titled(await withTx((tx2) => sourceDetail(tx2, subject.tenant_id, params.source_id))) };
           },
         };
       },
