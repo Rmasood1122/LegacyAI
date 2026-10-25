@@ -29,7 +29,8 @@ printf '%s\n' "$(block "$code" '^resource "google_cloud_run_v2_service_iam_membe
 printf '%s\n' "$(block "$code" '^resource "google_cloud_run_v2_service_iam_member" "ai_invoked_by_api"')" \
   | grep -q 'member *= *"serviceAccount:${google_service_account.api.email}"' || fail "only the API's account may invoke the AI service"
 [ "$(count '^resource "google_cloud_run_v2_service_iam_member" ')" -eq 2 ] || fail "unexpected invoker bindings on the services"
-printf '%s\n' "$ai_block" | grep -Eq 'memory *= *"(512Mi|1Gi)"' || fail "the AI service memory must stay at or below 1Gi"
+# 2Gi since 2026-10-25: the founder's choice, to hold up to 1 GB of companies' search indexes (decision D41, step 4a)
+printf '%s\n' "$ai_block" | grep -Eq 'memory *= *"(512Mi|1Gi|2Gi)"' || fail "the AI service memory must stay at or below 2Gi"
 printf '%s\n' "$ai_block" | grep -Eq 'value *= *var\.ai_provider$' || fail "the AI provider must come from var.ai_provider"
 api_max="$(default_of api_max_instances)"
 case "$api_max" in 1|2|3) ;; *) fail "api_max_instances default must be 1, 2 or 3 (found '$api_max')" ;; esac
@@ -64,4 +65,4 @@ fi
 paid='google_sql_|google_redis_|google_compute_(instance|address|global_address|router|forwarding_rule|backend_service)|google_container_cluster|google_vpc_access_connector|google_logging_project_sink|google_alloydb_|google_memcache_|google_kms_'
 if grep -Eq "resource \"($paid)" ./*.tf; then fail "a resource that costs money while idle was added"; fi
 
-echo "terraform-guardrails: PASS (min 0 x2, max api=$api_max ai=1, request-based billing x2, AI service invokable only by the API, AI memory <= 1Gi, fake AI provider by default, budget alert, $secrets empty secrets, $buckets private buckets with retention, risky flags default to false)"
+echo "terraform-guardrails: PASS (min 0 x2, max api=$api_max ai=1, request-based billing x2, AI service invokable only by the API, AI memory <= 2Gi, fake AI provider by default, budget alert, $secrets empty secrets, $buckets private buckets with retention, risky flags default to false)"

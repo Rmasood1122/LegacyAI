@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.ai_gateway import AnswerOutput, Caller, DataBlock, Embedder, Gateway
-from app.capture import condition, load_approved, redact, retrieve
+from app.capture import SEARCH_CACHE, SearchCache, condition, load_approved, redact, retrieve, retrieve_in_memory
 from app.knowledge.conflicts import check as check_conflicts
 from app.platform import Database, ServiceContext, one, write_audit
 
@@ -82,12 +82,19 @@ class AnswerResult:
         }
 
 
-def candidate_ids(db: Database, ctx: ServiceContext, embedder: Embedder, question: str, expert_person_id: str | None) -> list[dict[str, str]]:
-    """Step 1. Ids and kinds only - no text leaves this function."""
+def candidate_ids(db: Database, ctx: ServiceContext, embedder: Embedder, question: str, expert_person_id: str | None, *,
+                  search: SearchCache | None = SEARCH_CACHE) -> list[dict[str, str]]:
+    """Step 1. Ids and kinds only - no text leaves this function. Searched in memory (decision D41, step 4a), or in
+    SQL when `search` is None (SEARCH_ENGINE=sql, the fallback until the SQL search is removed)."""
     question = redact(question).text
     with db.tenant_tx(ctx.tenant_id) as cur:
-        found = retrieve(cur, tenant_id=ctx.tenant_id, spec=ctx.filter, question=question, embedder=embedder,
-                         contributor_person_id=expert_person_id, items_only=expert_person_id is not None)
+        if search is None:
+            found = retrieve(cur, tenant_id=ctx.tenant_id, spec=ctx.filter, question=question, embedder=embedder,
+                             contributor_person_id=expert_person_id, items_only=expert_person_id is not None)
+        else:
+            index = search.index(cur, tenant_id=ctx.tenant_id, model_id=embedder.model_id)
+            found = retrieve_in_memory(cur, index, tenant_id=ctx.tenant_id, spec=ctx.filter, question=question, embedder=embedder,
+                                       contributor_person_id=expert_person_id, items_only=expert_person_id is not None)
     return [{"id": c.id, "kind": c.kind} for c in found]
 
 
