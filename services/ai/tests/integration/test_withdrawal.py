@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.ai_gateway import FakeEmbedder, FakeProvider
-from app.capture import Fields, ingest, turn_key, version_key
+from app.capture import Fields, conflict_key, ingest, turn_key, version_key
 from app.main import Services, create_app
 from app.platform import Database, Logger
 from tests.conftest import World, give_consent, make_settings, mint, needs_db
@@ -67,6 +67,17 @@ def marker_hits(admin: psycopg.Connection[dict[str, Any]], tenant: str, marker: 
             key = turn_key(t["interview_id"], t["ordinal"])
             if any(marker in (turns.open(key, col, None, t[f"{col}_sealed"], t["sealed_key"]) or "") for col in ("question", "answer")):
                 hits.append("interview_turns.sealed")
+        titles = Fields(cur, tenant, "knowledge_items")
+        for i in admin.execute("""SELECT id::text AS id, title_sealed, sealed_key FROM knowledge_items
+                                   WHERE tenant_id = %s AND title_sealed IS NOT NULL""", (tenant,)).fetchall():
+            if marker in (titles.open(f"item:{i['id']}", "title", None, i["title_sealed"], i["sealed_key"]) or ""):
+                hits.append("knowledge_items.title_sealed")
+        quotes = Fields(cur, tenant, "knowledge_item_conflicts")
+        for c in admin.execute("""SELECT item_id::text AS a, other_item_id::text AS b, item_value_sealed, other_value_sealed, sealed_key
+                                    FROM knowledge_item_conflicts WHERE tenant_id = %s AND sealed_key IS NOT NULL""", (tenant,)).fetchall():
+            if any(marker in (quotes.open(conflict_key(c["a"], c["b"]), col, None, c[f"{col}_sealed"], c["sealed_key"]) or "")
+                   for col in ("item_value", "other_value")):
+                hits.append("knowledge_item_conflicts.sealed")
     return hits
 
 

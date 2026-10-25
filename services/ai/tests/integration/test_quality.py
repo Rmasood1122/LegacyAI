@@ -9,7 +9,7 @@ import psycopg
 import pytest
 
 from app.ai_gateway import FakeEmbedder, FakeProvider, Gateway
-from app.capture import Fields, feedback_key
+from app.capture import Fields, conflict_key, feedback_key
 from app.knowledge import answers, item_conflicts, items, quality, reads, upkeep
 from app.knowledge.quality import QualityRefused
 from app.platform import Database
@@ -64,8 +64,15 @@ def test_the_same_value_in_another_unit_is_answered_and_a_model_reported_conflic
 
 
 def conflict_rows(admin: psycopg.Connection[dict[str, Any]], tenant_id: str) -> list[dict[str, Any]]:
-    return admin.execute("SELECT item_id::text AS a, other_item_id::text AS b, measure, item_value, other_value FROM knowledge_item_conflicts "
-                         "WHERE tenant_id = %s", (tenant_id,)).fetchall()
+    """The stored conflicts, with the quoted words OPENED (they are stored sealed from D41 step 6 on; `sealed` says so)."""
+    rows = admin.execute("""SELECT item_id::text AS a, other_item_id::text AS b, measure, item_value, other_value, item_value_sealed,
+                                   other_value_sealed, sealed_key FROM knowledge_item_conflicts WHERE tenant_id = %s""", (tenant_id,)).fetchall()
+    with admin.cursor() as cur:
+        quotes = Fields(cur, tenant_id, "knowledge_item_conflicts")
+        return [{"a": r["a"], "b": r["b"], "measure": r["measure"], "sealed": r["sealed_key"] is not None and r["item_value"] is None,
+                 "item_value": quotes.open(conflict_key(r["a"], r["b"]), "item_value", r["item_value"], r["item_value_sealed"], r["sealed_key"]),
+                 "other_value": quotes.open(conflict_key(r["a"], r["b"]), "other_value", r["other_value"], r["other_value_sealed"], r["sealed_key"])}
+                for r in rows]
 
 
 def open_tasks(admin: psycopg.Connection[dict[str, Any]], tenant_id: str, kind: str) -> set[str]:
@@ -89,6 +96,7 @@ def test_verified_items_of_one_topic_that_disagree_get_a_task_each_and_lose_it_w
     rows = conflict_rows(admin, world.tenant_id)
     assert len(rows) == 1 and {rows[0]["a"], rows[0]["b"]} == {first, second} and rows[0]["a"] < rows[0]["b"]
     assert rows[0]["measure"] == "pressure" and {rows[0]["item_value"], rows[0]["other_value"]} == {"3.0 bar", "3.2 bar"}
+    assert rows[0]["sealed"]                                                         # stored sealed (D41 step 6)
     assert open_tasks(admin, world.tenant_id, "item_conflict") == {first, second}
     # the item's page names the other item and both values
     seen = reads.get_item(db, world.ctx("reviewer", "item.read", subject=first, topic_filter=tenant_filter(world.tenant_id, action="topic:read")), first)

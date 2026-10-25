@@ -667,6 +667,26 @@ Details: `10-content-under-company-key.md`, step 6 part 1; decision D41.
 - **Not done or proven:** item titles, conflict excerpts, quiz and scenario texts, document titles, topic names and
   descriptions are still readable (step 6 parts 2 to 4).
 
+## Step 23 — Item titles and conflict quotes are stored locked (2026-10-25)
+
+Details: `10-content-under-company-key.md`, step 6 part 2; decision D41.
+
+- The title of every knowledge item, and the two values a stored conflict quotes from two items ("3.0 bar" against
+  "3.2 bar"), are now stored locked with the company's content key. Every screen that names an item opens the
+  title for that request only: the item page, the item list, the knowledge map, citations in answers, scenarios and
+  the other side of a conflict. Older ones are locked by the housekeeping command.
+- Erasing an item (consent withdrawal) empties its title in both forms.
+- One visible change: the database can no longer sort locked titles, so a knowledge-map group with more than 50 items
+  now shows the first 50 by id (sorted by title on the page), not the first 50 by title.
+- Measured locally: 3 new tests (stored locked and shown opened on five screens; older rows locked by housekeeping
+  and still shown; erasure empties a locked title). Without the change all 3 fail. The conflict test now also checks
+  the quoted words are stored locked, and the consent-withdrawal test now looks inside locked titles and quotes for
+  the withdrawn words. Whole AI suite: 365 passed; the 2 failures are known to this machine only (an id function
+  stand-in that is not time-ordered, and a test that needs a freshly reset database, which passes after a reset).
+  The evaluation gives the same numbers as before.
+- **Not done or proven:** quiz and scenario texts, document titles, topic names and descriptions are still readable
+  (step 6 parts 3 and 4).
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in
