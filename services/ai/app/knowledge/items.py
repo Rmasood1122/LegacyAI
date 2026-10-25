@@ -71,6 +71,29 @@ def insert_version(cur: psycopg.Cursor[Any], *, tenant_id: str, item_id: str, ve
     return str(one(cur)["id"])
 
 
+def seal_existing_versions(cur: psycopg.Cursor[Any], tenant_id: str, limit: int) -> int:
+    """D41 step 5: seals up to `limit` versions written readable before step 4b, the same way insert_version() seals
+    a new one, through seal_version() (the only change the database allows a version besides erasing it). Erased
+    versions hold nothing and are left alone. Returns how many were sealed; without content keys, none."""
+    fields = Fields(cur, tenant_id, "knowledge_versions")
+    if fields.keys is None:
+        return 0
+    cur.execute("""SELECT id::text AS id, item_id::text AS item_id, version_no, body FROM knowledge_versions
+                    WHERE tenant_id = %s AND body_sealed IS NULL AND erased_at IS NULL ORDER BY id LIMIT %s""", (tenant_id, limit))
+    sealed = 0
+    for v in cur.fetchall():
+        _, body, key_id = fields.seal(version_key(v["item_id"], int(v["version_no"])), "body", v["body"])
+        cur.execute("SELECT seal_version(%s, %s, %s) AS done", (v["id"], body, key_id))
+        sealed += 1 if one(cur)["done"] else 0
+    return sealed
+
+
+def versions_still_readable(cur: psycopg.Cursor[Any], tenant_id: str) -> int:
+    cur.execute("SELECT count(*)::int AS n FROM knowledge_versions WHERE tenant_id = %s AND body_sealed IS NULL AND erased_at IS NULL",
+                (tenant_id,))
+    return int(one(cur)["n"])
+
+
 def create_item(cur: psycopg.Cursor[Any], *, tenant_id: str, title: str, body: str, origin: str, ai_extracted: bool,
                 department_id: str | None, sensitivity: int, owner_person_id: str | None, consent_id: str | None,
                 created_by_card_id: str | None, author_card_id: str | None, author_person_id: str | None,

@@ -623,6 +623,33 @@ Details: `10-content-under-company-key.md`, step 4b part 3; decision D41.
 - **Not done or proven:** titles, topic names, quiz and scenario texts, feedback, conflict excerpts and questions to
   experts are still readable (step 6); older rows are still readable (step 5).
 
+## Step 21 — Older content is locked by the housekeeping command (2026-10-25)
+
+Details: `10-content-under-company-key.md`, step 5 part 1; `docs/runbooks/housekeeping.md`, "Locking older content";
+decision D41.
+
+- The housekeeping command (`npm run housekeeping`) has a sixth job: for every company it asks the AI service to do
+  its own housekeeping. That part existed but **nothing called it before**, so in a deployment items were never
+  marked stale by a job and old answers were never removed after the company's retention time. Both now happen.
+- The same call locks content saved before step 20: document pieces, item texts and interview turns, at most 200 of
+  each per round and at most 8 seconds per company and run. Each row is locked exactly like a new one and its
+  readable copy is emptied in the same change. The output says how much was locked and how much is still readable.
+- The database allows exactly this change (readable -> locked) and nothing else: not locked -> readable, not a second
+  locking, and the AI service still cannot change a knowledge version except through the two database functions
+  made for it (`erase_version`, now `seal_version`).
+- A company whose key cannot be used is skipped and reported; nothing is half-done.
+- Measured locally: 4 new AI tests (old rows locked in batches of 1, still open to the same words and still found
+  by the search; one call does one batch when given no time; a key that cannot be used locks nothing and changes
+  nothing; the database refuses the other changes) and 3 new API tests (one call per customer company with a token
+  for that company only and no card, person or roles; a failing company is reported and does not stop the others;
+  the job is part of the command). Without the database change 3 of the 4 AI tests fail; without the API change all
+  3 API tests fail. Whole AI suite: 360 passed. API: unit 790 passed; integration as before (the same card and
+  sign-in timing tests fail on this machine's database with and without this change; CI is the reference).
+- **Not done or proven:** nothing schedules the command yet (as before: it must be run by hand); how long locking
+  takes on a real company's data was not measured; the readable columns still exist and `SEARCH_ENGINE=sql` is still
+  there (step 5 part 2, after production shows 0 left); re-locking with the platform's key when a company clears its
+  own key is not built; titles and the other texts of step 6 are still readable.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

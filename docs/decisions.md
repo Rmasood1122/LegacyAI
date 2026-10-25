@@ -332,4 +332,5 @@ CONSEQUENCES:
 - Search (meaning and words) runs per company in memory: vectors as a matrix, words by BM25; the access filter stays in SQL on the readable labels.
 - Not protected: a running compromised AI service, the AI provider during a call, labels and structure.
 - **Confirmed by the founder (2026-10-24, the recommended defaults):** every company's content is sealed, not only BYOK companies; the vectors are sealed too; the costs are accepted after measuring them on test companies first (step 3) and showing the numbers before switching over.
+- **Step 5 part 1 (2026-10-25):** existing rows are sealed by the housekeeping command (job 6), not by a new scheduled worker: it reuses the one command the operator already runs, and the AI service's per-company housekeeping, which until then nothing called. The database allows readable -> sealed only (a flag for source chunks, `seal_version()` for versions) so the job cannot be used to change content. A company whose own key is off is skipped, never sealed with another key.
 

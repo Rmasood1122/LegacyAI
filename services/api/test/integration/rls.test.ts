@@ -238,7 +238,7 @@ const OUR_FUNCTIONS = [
   'citations_guard', 'company_data_keys_guard', 'consent_is_valid', 'consents_guard', 'consents_hide_on_withdrawal', 'content_data_keys_guard', 'erase_version', 'expert_questions_guard',
   'interviews_guard', 'invoices_guard', 'knowledge_items_end_conflicts', 'knowledge_items_guard', 'knowledge_items_outbox', 'knowledge_items_touch_scenarios', 'knowledge_versions_immutable',
   'purge_login_attempts', 'quiz_attempts_guard', 'quiz_items_guard', 'relabel', 'resolve_card', 'resolve_sso_company', 'review_tasks_guard',
-  'scenario_attempts_guard', 'scenario_is_hidden', 'scenario_parts_guard', 'scenarios_guard', 'sources_guard',
+  'scenario_attempts_guard', 'scenario_is_hidden', 'scenario_parts_guard', 'scenarios_guard', 'seal_version', 'sources_guard',
   'sso_connections_guard', 'topics_delete_guard', 'topics_guard', 'webhook_endpoints_guard',
 ];
 const OUR_DEFINER_FUNCTIONS = [
@@ -254,7 +254,10 @@ const OUR_DEFINER_FUNCTIONS = [
   // neither service has a right on the outbox itself (docs/phase4/06)
   'knowledge_items_end_conflicts', 'knowledge_items_guard', 'knowledge_items_outbox', 'knowledge_items_touch_scenarios', 'purge_login_attempts', 'resolve_card',
   // resolve_sso_company: answers, before anyone is signed in, only whether a named company has a live SSO connection
-  'resolve_sso_company', 'sources_guard',
+  'resolve_sso_company',
+  // seal_version: the AI service has no right to change a knowledge version; this seals one readable version of the
+  // caller's own company and nothing else (decision D41, step 5)
+  'seal_version', 'sources_guard',
 ];
 
 describe('SECURITY DEFINER functions cannot be hijacked', () => {

@@ -11,6 +11,9 @@
 //      Both do nothing unless WEBHOOK_DELIVERY / MAIL_SENDER are set.
 //   5. rows that otherwise only grow (ended sessions, used tokens, old rate-limit windows, sent webhooks and e-mails,
 //      old outbox events) are removed.
+//   6. the knowledge service's own housekeeping, for every company: stale items, expired questions and attempts,
+//      answers past the retention time, and sealing content written before decision D41 step 4b (a bounded amount
+//      per company and run; `knowledge.readable_*` says what is left).
 // Nothing schedules this command yet (docs/runbooks/housekeeping.md): someone has to run it.
 //
 //   npm run housekeeping        (npm run cards:sweep-expired is the old name of the same command)
@@ -121,6 +124,34 @@ export async function deliverOutbound(app: App, now: () => Date = () => new Date
   return { ...total, failures };
 }
 
+/**
+ * The knowledge service's housekeeping for every customer company (job 6). Each company by itself: a failure is
+ * printed with the company and the reason, counted, and makes the command end with a non-zero exit code - it does
+ * not stop the others. The service's counts are added up over all companies.
+ */
+export async function sweepKnowledge(app: App, now: Date): Promise<Record<string, number | string[]>> {
+  const tenants = await app.db.withTenantTx(PLATFORM_TENANT_ID, (tx) => listTenants(tx, 10_000, null), { platformScope: true });
+  const counts: Record<string, number> = {};
+  const failures: string[] = [];
+  let companies = 0;
+  let failed = 0;
+  for (const tenant of tenants) {
+    if (tenant.is_platform) continue;
+    try {
+      const done = await app.knowledge.upkeep(tenant.id, `housekeeping-${now.toISOString()}`);
+      companies += 1;
+      for (const [name, n] of Object.entries(done)) if (typeof n === 'number') counts[name] = (counts[name] ?? 0) + n;
+    } catch (err) {
+      failed += 1;
+      const reason = err instanceof Error ? err.message.slice(0, 200) : 'unknown error';
+      if (failures.length < 20) failures.push(`${tenant.id}: ${reason}`);
+      app.log.error({ tenant_id: tenant.id, job: 'knowledge', reason }, 'housekeeping: the knowledge service step failed');
+    }
+  }
+  if (failed > 0) process.exitCode = 1;
+  return { ...counts, companies, failed, failures };
+}
+
 const DAY_MS = 86_400_000;
 
 /**
@@ -163,6 +194,7 @@ export async function runHousekeeping(app: App, now: Date): Promise<Record<strin
     ['billing', () => sweepBilling(app, now)],
     ['outbound', () => deliverOutbound(app)],
     ['purged', () => purgeOldRows(app, now)],
+    ['knowledge', () => sweepKnowledge(app, now)],
   ];
   for (const [name, job] of jobs) {
     try {
