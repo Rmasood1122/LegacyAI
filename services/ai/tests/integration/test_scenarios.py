@@ -12,6 +12,7 @@ import psycopg
 import pytest
 
 from app.ai_gateway import FakeEmbedder, Gateway
+from app.capture import Fields
 from app.knowledge import items, scenario_erasure, scenarios, upkeep
 from app.knowledge.items import ItemRefused
 from app.platform import Database
@@ -430,7 +431,10 @@ def test_a_test_question_is_not_approved_by_whoever_generated_or_last_edited_it(
     with pytest.raises(ItemRefused) as generator:                                # the owner generated it
         readiness.set_question_status(db, world.ctx("owner", "quiz.status"), qid, "approved")
     assert generator.value.code == "second_person_needed"
-    q = admin.execute("SELECT stem, rubric FROM quiz_items WHERE id = %s", (qid,)).fetchone()
+    with admin.cursor() as cur:       # the question's words are stored sealed (D41 step 6): opened here
+        q = readiness.open_quiz_content(Fields(cur, world.tenant_id, "quiz_items"), dict(admin.execute(
+            "SELECT id::text AS id, stem, options, rubric, content_sealed, sealed_key AS content_key FROM quiz_items WHERE id = %s",
+            (qid,)).fetchone()))
     readiness.edit_question(db, world.ctx("expert", "quiz.edit"), qid, q["stem"] + " Explain briefly.", None, None, list(q["rubric"]))
     with pytest.raises(ItemRefused) as editor:                                   # the expert edited it last
         readiness.set_question_status(db, world.ctx("expert", "quiz.status"), qid, "approved")

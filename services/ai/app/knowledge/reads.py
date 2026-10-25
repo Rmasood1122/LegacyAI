@@ -9,6 +9,7 @@ from typing import Any
 from app.capture import VERSION_TEXT, Fields, condition, expert_question_key, item_title_columns, open_item_title, topic_condition, version_text
 from app.knowledge import item_conflicts
 from app.knowledge.items import ItemRefused, item_topics
+from app.knowledge.readiness import open_quiz_answer, open_quiz_content, quiz_answer_columns, quiz_content_columns
 from app.platform import Database, ServiceContext, one, write_audit
 
 # How an item's provenance is read, in ONE place: from a citation (alias ci) to its passage (c) and document (s), and
@@ -115,11 +116,12 @@ def list_quiz_items(db: Database, ctx: ServiceContext, *, status: str | None, li
     limit = max(1, min(limit, PAGE))
     with db.tenant_tx(ctx.tenant_id) as cur:
         cur.execute(
-            f"""SELECT q.id::text AS id, q.topic_id::text AS topic_id, q.knowledge_item_id::text AS knowledge_item_id, q.kind, q.stem, q.options,
-                       q.correct_option, q.rubric, q.status, q.sensitivity, q.approved_at, q.created_at
+            f"""SELECT q.id::text AS id, q.topic_id::text AS topic_id, q.knowledge_item_id::text AS knowledge_item_id, q.kind,
+                       {quiz_content_columns("q")}, q.correct_option, q.status, q.sensitivity, q.approved_at, q.created_at
                   FROM quiz_items q WHERE q.tenant_id = %s AND q.erased_at IS NULL AND {where}{extra} ORDER BY q.id LIMIT %s""",
             [ctx.tenant_id, *params, *extra_params, limit + 1])
-        rows = [_iso(dict(r), "approved_at", "created_at") for r in cur.fetchall()]
+        words = Fields(cur, ctx.tenant_id, "quiz_items")       # sealed from D41 step 6 on, opened for this reader
+        rows = [_iso(open_quiz_content(words, dict(r)), "approved_at", "created_at") for r in cur.fetchall()]
     more = len(rows) > limit
     rows = rows[:limit]
     return {"items": rows, "next_cursor": rows[-1]["id"] if more and rows else None}
@@ -139,12 +141,14 @@ def get_attempt(db: Database, ctx: ServiceContext, attempt_id: str) -> dict[str,
         row = cur.fetchone()
         show = bool(row["show"]) if row else False
         cur.execute(
-            """SELECT qa.id::text AS answer_id, qa.position, q.kind, q.stem, q.options, q.correct_option, qa.option_order, qa.chosen_option,
-                      qa.answer_text, qa.final_score, qa.decided_by
+            f"""SELECT qa.id::text AS answer_id, q.id::text AS question_id, qa.position, q.kind, {quiz_content_columns("q")}, q.correct_option,
+                      qa.option_order, qa.chosen_option, {quiz_answer_columns("qa")}, qa.final_score, qa.decided_by
                  FROM quiz_answers qa JOIN quiz_items q ON q.tenant_id = qa.tenant_id AND q.id = qa.quiz_item_id
                 WHERE qa.tenant_id = %s AND qa.attempt_id = %s ORDER BY qa.position""", (ctx.tenant_id, attempt_id))
         questions = []
-        for r in cur.fetchall():
+        words, answers = Fields(cur, ctx.tenant_id, "quiz_items"), Fields(cur, ctx.tenant_id, "quiz_answers")
+        for raw in cur.fetchall():
+            r = open_quiz_answer(answers, open_quiz_content(words, dict(raw), "question_id"), "answer_id")
             order = r["option_order"]
             shown = [r["options"][i] for i in order] if order and r["options"] else None
             q: dict[str, Any] = {"answer_id": r["answer_id"], "position": r["position"], "kind": r["kind"], "stem": r["stem"],

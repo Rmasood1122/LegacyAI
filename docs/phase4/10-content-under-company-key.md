@@ -1,6 +1,6 @@
 # Documents and knowledge under the company's key — design (decision D41, 2026-10-24)
 
-> **Status: steps 2 to 4b, the first part of step 5 and parts 1 and 2 of step 6 built (2026-10-25).** The AI service locks documents, items'
+> **Status: steps 2 to 4b, the first part of step 5 and parts 1, 2 and 3a of step 6 built (2026-10-25).** The AI service locks documents, items'
 > texts and interview turns with the company's key when they are saved (`services/ai/app/platform/sealing.py`,
 > `services/ai/app/capture/sealed_chunks.py`), answers questions with the in-memory search
 > (`services/ai/app/capture/memory_search.py`, `search_cache.py`), and the housekeeping command locks what was saved
@@ -182,8 +182,17 @@ which unlocks a company's content into memory for a few minutes while it is bein
      label from the check in code and stays readable. Consequence: the database can no longer sort items by title, so
      the knowledge map picks the (at most 50) items of a group in id order and sorts that page by title; with more
      than 50 in a group, which 50 are shown may differ from before. Older rows are sealed by housekeeping job 6.
-   - Still to do: quiz and scenario texts (part 3); document titles, topic names and descriptions, which the API
-     reads itself (part 4: needs a choice, see below).
+   - **6 part 3a, built 2026-10-25: readiness questions and answers.** A question's words (stem, options, expected
+     points) are stored as one sealed value (`quiz_items.content_sealed`, bound to "quiz_item:<id>"); a learner's
+     answer and what the grading model said about it are sealed per answer (`quiz_answers.answer_sealed`,
+     `rubric_result_sealed`, one key per row, bound to "quiz_answer:<id>"). The kind, the index of the correct option,
+     scores and labels stay readable. The reviewer's question list, starting and handing in a test, grading and the
+     learner's view open them for the request only. Retention empties both forms. An approved question still cannot
+     be edited (sealing an old one is not an edit). Older rows are sealed by housekeeping job 6.
+   - Found, not fixed (reported): when an item is erased, its readiness questions are only retired, not emptied, so
+     the words of an erased item can remain in a question (sealed from now on, but still stored). A separate change.
+   - Still to do: scenario texts (part 3b); document titles, topic names and descriptions, which the API reads itself
+     (part 4: needs a choice, see below).
 7. **Key off and key destroyed, end to end:**
    - the answers people see;
    - the operator's runbook;

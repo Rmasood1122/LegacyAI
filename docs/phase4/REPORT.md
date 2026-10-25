@@ -687,6 +687,23 @@ Details: `10-content-under-company-key.md`, step 6 part 2; decision D41.
 - **Not done or proven:** quiz and scenario texts, document titles, topic names and descriptions are still readable
   (step 6 parts 3 and 4).
 
+## Step 24 — Readiness questions and answers are stored locked (2026-10-25)
+
+Details: `10-content-under-company-key.md`, step 6 part 3a; decision D41.
+
+- The words of a readiness question (the question, its four choices, its expected points) and what a learner wrote,
+  with what the grading model said about it, are now stored locked with the company's content key. They are opened
+  only for the screen that needs them: the reviewer's question list, starting and handing in a test, grading, and
+  the learner's own view. Scores, the correct choice's position and labels stay readable. Older ones are locked by
+  the housekeeping command; the retention setting empties the locked answer as it did the readable one.
+- Measured locally: 3 new tests (stored locked and shown opened; older rows locked by housekeeping and still shown;
+  retention empties a locked answer and keeps the score, and an approved question still cannot be changed). Without
+  the code change the first 2 fail; the third also holds on the old code (it guards what must not break). One
+  existing test now opens the locked question. Whole AI suite: 370 passed. The evaluation gives the same numbers.
+- **Found, not fixed:** when an item is erased, its readiness questions are only retired, not emptied, so an erased
+  item's words can stay in a question. Reported for a separate change.
+- **Not done or proven:** scenario texts (part 3b); document titles, topic names and descriptions (part 4).
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in
