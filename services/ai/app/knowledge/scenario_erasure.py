@@ -57,13 +57,15 @@ def prune_answers(cur: psycopg.Cursor[Any], tenant_id: str) -> None:
     cur.execute("SELECT quiz_answer_retention_days FROM knowledge_settings WHERE tenant_id = %s", (tenant_id,))
     row = cur.fetchone()
     days = int(row["quiz_answer_retention_days"]) if row else 365
-    for answers, attempts in (("scenario_answers", "scenario_attempts"), ("quiz_answers", "quiz_attempts")):
-        # table names are the two fixed pairs above, never input
+    # table names and column lists are the fixed entries below, never input; readiness answers may be sealed (D41 step 6)
+    for answers, attempts, sealed in (("scenario_answers", "scenario_attempts", ""),
+                                      ("quiz_answers", "quiz_attempts", ", answer_sealed = NULL, rubric_result_sealed = NULL, sealed_key = NULL")):
+        holds = "x.answer_text IS NOT NULL OR x.ai_rubric_result IS NOT NULL" + (" OR x.sealed_key IS NOT NULL" if sealed else "")
         cur.execute(
-            f"""UPDATE {answers} an SET answer_text = NULL, ai_rubric_result = NULL, text_removed_at = now()
+            f"""UPDATE {answers} an SET answer_text = NULL, ai_rubric_result = NULL{sealed}, text_removed_at = now()
                  WHERE an.tenant_id = %s
                    AND an.id IN (SELECT x.id FROM {answers} x JOIN {attempts} a ON a.tenant_id = x.tenant_id AND a.id = x.attempt_id
-                                  WHERE x.tenant_id = %s AND (x.answer_text IS NOT NULL OR x.ai_rubric_result IS NOT NULL)
+                                  WHERE x.tenant_id = %s AND ({holds})
                                     AND ((a.status = 'graded' AND a.graded_at < now() - make_interval(days => %s))
                                       OR (a.status = 'expired' AND a.expires_at < now() - make_interval(days => %s)))
                                   ORDER BY x.id LIMIT {PRUNE_BATCH})""",

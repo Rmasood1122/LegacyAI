@@ -8,6 +8,7 @@ point by point, and the score is computed in code. A reviewer can override any g
 
 from __future__ import annotations
 
+import json
 import random
 import re
 from datetime import datetime
@@ -17,7 +18,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from app.ai_gateway import Caller, DataBlock, Gateway, QuizGenerateOutput, QuizGradeOutput
-from app.capture import VERSION_TEXT, Fields, version_text
+from app.capture import VERSION_TEXT, Fields, new_row_id, version_text
 from app.knowledge.items import ItemRefused, _settings, review_settings
 from app.platform import Database, ServiceContext, one, write_audit
 
@@ -27,6 +28,52 @@ REPORT_STATEMENT = (
     "Knowledge the company has not released to learners is not counted here.")
 
 _NORM = re.compile(r"[^a-z0-9]+")
+
+# ------------------------------------------------------------------ sealed words (decision D41, step 6 part 3a)
+# A question's words (stem, options, expected points) are stored as ONE sealed JSON value bound to "quiz_item:<id>";
+# a learner's answer and what the grading model said about it are sealed per answer row ("quiz_answer:<id>"), with
+# one key per row. Without content keys they are written readable, as before; reading accepts both forms.
+
+
+def quiz_content_columns(alias: str) -> str:
+    """What a reader selects from quiz_items (alias `alias`) to open the words with open_quiz_content()."""
+    return f"{alias}.stem, {alias}.options, {alias}.rubric, {alias}.content_sealed, {alias}.sealed_key AS content_key"
+
+
+def quiz_answer_columns(alias: str) -> str:
+    """What a reader selects from quiz_answers (alias `alias`) to open the answer with open_quiz_answer()."""
+    return (f"{alias}.answer_text, {alias}.answer_sealed, {alias}.ai_rubric_result, {alias}.rubric_result_sealed, "
+            f"{alias}.sealed_key AS answer_key")
+
+
+def seal_quiz_content(cur: psycopg.Cursor[Any], tenant_id: str, question_id: str, stem: str, options: list[str] | None,
+                      rubric: list[str] | None) -> dict[str, Any]:
+    """The values for stem, options, rubric, content_sealed and sealed_key."""
+    words = json.dumps({"stem": stem, "options": options, "rubric": rubric})
+    _, sealed, key_id = Fields(cur, tenant_id, "quiz_items").seal(f"quiz_item:{question_id}", "content", words)
+    if sealed is None:
+        return {"stem": stem, "options": Jsonb(options) if options is not None else None, "rubric": Jsonb(rubric) if rubric is not None else None,
+                "content_sealed": None, "sealed_key": None}
+    return {"stem": None, "options": None, "rubric": None, "content_sealed": sealed, "sealed_key": key_id}
+
+
+def open_quiz_content(fields: Fields, row: dict[str, Any], id_column: str = "id") -> dict[str, Any]:
+    """Replaces the content columns of `row` by the opened stem, options and rubric. `fields` is for quiz_items."""
+    sealed, key_id = row.pop("content_sealed"), row.pop("content_key")
+    if sealed is not None:
+        words = json.loads(fields.open(f"quiz_item:{row[id_column]}", "content", None, sealed, key_id) or "{}")
+        row.update(stem=words.get("stem"), options=words.get("options"), rubric=words.get("rubric"))
+    return row
+
+
+def open_quiz_answer(fields: Fields, row: dict[str, Any], id_column: str = "id") -> dict[str, Any]:
+    """Replaces the answer columns of `row` by the opened answer_text and ai_rubric_result. `fields` is for quiz_answers."""
+    key, key_id = f"quiz_answer:{row[id_column]}", row.pop("answer_key")
+    row["answer_text"] = fields.open(key, "answer", row.get("answer_text"), row.pop("answer_sealed"), key_id)
+    rubric_sealed = row.pop("rubric_result_sealed")
+    if rubric_sealed is not None:
+        row["ai_rubric_result"] = json.loads(fields.open(key, "rubric_result", None, rubric_sealed, key_id) or "null")
+    return row
 
 
 def norm(text: str) -> str:
@@ -78,14 +125,17 @@ def generate(db: Database, ctx: ServiceContext, gateway: Gateway, caller: Caller
             refused.append({"item_id": item["id"], "reason": reason})
             continue
         with db.tenant_tx(ctx.tenant_id) as cur:
+            qid = new_row_id(cur)
+            words = seal_quiz_content(cur, ctx.tenant_id, qid, parsed.stem, parsed.options if parsed.kind == "mcq" else None,
+                                      parsed.rubric if parsed.kind == "open" else None)
             cur.execute(
-                """INSERT INTO quiz_items (tenant_id, topic_id, knowledge_item_id, knowledge_version_id, kind, stem, options, correct_option, rubric,
-                                           department_id, sensitivity, owner_person_id, prompt_version, written_by_card_id, written_by_person_id)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, 'quiz_generate@v1', %s, %s) RETURNING id::text AS id""",
-                (ctx.tenant_id, item["topic_id"], item["id"], item["version_id"], parsed.kind, parsed.stem,
-                 Jsonb(parsed.options) if parsed.kind == "mcq" else None, parsed.correct_option if parsed.kind == "mcq" else None,
-                 Jsonb(parsed.rubric) if parsed.kind == "open" else None, item["department_id"], item["owner"], ctx.card_id, ctx.person_id))
-            qid = one(cur)["id"]
+                """INSERT INTO quiz_items (id, tenant_id, topic_id, knowledge_item_id, knowledge_version_id, kind, stem, options, correct_option,
+                                           rubric, content_sealed, sealed_key, department_id, sensitivity, owner_person_id, prompt_version,
+                                           written_by_card_id, written_by_person_id)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, 'quiz_generate@v1', %s, %s)""",
+                (qid, ctx.tenant_id, item["topic_id"], item["id"], item["version_id"], parsed.kind, words["stem"], words["options"],
+                 parsed.correct_option if parsed.kind == "mcq" else None, words["rubric"], words["content_sealed"], words["sealed_key"],
+                 item["department_id"], item["owner"], ctx.card_id, ctx.person_id))
             cur.execute(
                 """INSERT INTO review_tasks (tenant_id, kind, subject_type, subject_id, department_id, sensitivity, owner_person_id, priority, due_at)
                    VALUES (%s, 'quiz_item_approval', 'quiz_item', %s, %s, 0, %s, 10, now() + make_interval(days => %s))""",
@@ -149,10 +199,13 @@ def edit_question(db: Database, ctx: ServiceContext, question_id: str, stem: str
             raise ItemRefused(reason, 422)
         if row["status"] == "approved":
             cur.execute("UPDATE quiz_items SET status = 'draft' WHERE tenant_id = %s AND id = %s", (ctx.tenant_id, question_id))
-        cur.execute("""UPDATE quiz_items SET stem = %s, options = %s, correct_option = %s, rubric = %s, edited_by_card_id = %s, edited_by_person_id = %s
+        words = seal_quiz_content(cur, ctx.tenant_id, question_id, stem, options if row["kind"] == "mcq" else None,
+                                  rubric if row["kind"] == "open" else None)
+        cur.execute("""UPDATE quiz_items SET stem = %s, options = %s, correct_option = %s, rubric = %s, content_sealed = %s, sealed_key = %s,
+                              edited_by_card_id = %s, edited_by_person_id = %s
                         WHERE tenant_id = %s AND id = %s""",
-                    (stem, Jsonb(options) if row["kind"] == "mcq" else None, correct_option if row["kind"] == "mcq" else None,
-                     Jsonb(rubric) if row["kind"] == "open" else None, ctx.card_id, ctx.person_id, ctx.tenant_id, question_id))
+                    (words["stem"], words["options"], correct_option if row["kind"] == "mcq" else None, words["rubric"], words["content_sealed"],
+                     words["sealed_key"], ctx.card_id, ctx.person_id, ctx.tenant_id, question_id))
         write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="quiz:edit", reason_code="QUESTION_EDITED",
                     resource_type="quiz_item", resource_id=question_id, request_id=ctx.request_id)
 
@@ -165,13 +218,14 @@ def start_attempt(db: Database, ctx: ServiceContext, job_role: str, seed: int | 
     with db.tenant_tx(ctx.tenant_id) as cur:
         s = _settings_full(cur, ctx.tenant_id)
         cur.execute(
-            """SELECT q.id::text AS id, q.kind, q.stem, q.options,
+            f"""SELECT q.id::text AS id, q.kind, {quiz_content_columns("q")},
                       (SELECT max(a.started_at) FROM quiz_answers qa JOIN quiz_attempts a ON a.tenant_id = qa.tenant_id AND a.id = qa.attempt_id
                         WHERE qa.tenant_id = q.tenant_id AND qa.quiz_item_id = q.id AND a.learner_person_id = %s) AS last_seen
                  FROM quiz_items q JOIN role_topic_maps m ON m.tenant_id = q.tenant_id AND m.topic_id = q.topic_id AND m.job_role = %s
                 WHERE q.tenant_id = %s AND q.status = 'approved' AND q.id = ANY(%s::uuid[])""",
             (ctx.person_id, job_role, ctx.tenant_id, list(ctx.approved)))
-        bank = cur.fetchall()
+        questions_fields = Fields(cur, ctx.tenant_id, "quiz_items")
+        bank = [open_quiz_content(questions_fields, dict(r)) for r in cur.fetchall()]
         if not bank:
             raise ItemRefused("no_questions", 422)
         epoch = datetime.min.replace(tzinfo=None)
@@ -222,10 +276,17 @@ def save_answer(db: Database, ctx: ServiceContext, attempt_id: str, position: in
         cur.execute("SELECT now() > %s AS late", (a["expires_at"],))
         if a["status"] != "in_progress" or one(cur)["late"]:
             raise ItemRefused("attempt_closed")
-        cur.execute("""UPDATE quiz_answers SET chosen_option = %s, answer_text = %s WHERE tenant_id = %s AND attempt_id = %s AND position = %s""",
-                    (chosen, redact(text).text[:4000] if text else None, ctx.tenant_id, attempt_id, position))
-        if cur.rowcount == 0:
+        cur.execute("SELECT id::text AS id FROM quiz_answers WHERE tenant_id = %s AND attempt_id = %s AND position = %s FOR UPDATE",
+                    (ctx.tenant_id, attempt_id, position))
+        row = cur.fetchone()
+        if row is None:
             raise ItemRefused("not_found", 404)
+        cleaned = redact(text).text[:4000] if text else None
+        # stored sealed with the company's content key (D41 step 6), bound to this answer row
+        readable, sealed, key_id = (Fields(cur, ctx.tenant_id, "quiz_answers").seal(f"quiz_answer:{row['id']}", "answer", cleaned)
+                                    if cleaned else (None, None, None))
+        cur.execute("""UPDATE quiz_answers SET chosen_option = %s, answer_text = %s, answer_sealed = %s, sealed_key = %s
+                        WHERE tenant_id = %s AND id = %s""", (chosen, readable, sealed, key_id, ctx.tenant_id, row["id"]))
 
 
 def submit_attempt(db: Database, ctx: ServiceContext, attempt_id: str, gateway: Gateway | None, caller: Caller | None) -> dict[str, Any]:
@@ -240,11 +301,16 @@ def submit_attempt(db: Database, ctx: ServiceContext, attempt_id: str, gateway: 
         except psycopg.errors.CheckViolation as exc:
             raise ItemRefused("attempt_closed") from exc
         cur.execute(
-            """SELECT qa.id::text AS id, qa.option_order, qa.chosen_option, qa.answer_text, q.kind, q.correct_option, q.rubric, q.stem,
-                      q.department_id::text AS department_id, q.owner_person_id::text AS owner
+            f"""SELECT qa.id::text AS id, q.id::text AS question_id, qa.option_order, qa.chosen_option, {quiz_answer_columns("qa")}, q.kind,
+                      q.correct_option, {quiz_content_columns("q")}, q.department_id::text AS department_id, q.owner_person_id::text AS owner
                  FROM quiz_answers qa JOIN quiz_items q ON q.tenant_id = qa.tenant_id AND q.id = qa.quiz_item_id
                 WHERE qa.tenant_id = %s AND qa.attempt_id = %s ORDER BY qa.position""", (ctx.tenant_id, attempt_id))
-        answers = cur.fetchall()
+        questions_fields, answers_fields = Fields(cur, ctx.tenant_id, "quiz_items"), Fields(cur, ctx.tenant_id, "quiz_answers")
+        answers = []
+        for r in cur.fetchall():
+            ans = open_quiz_content(questions_fields, open_quiz_answer(answers_fields, dict(r)), "question_id")
+            ans["answer_key"] = r["answer_key"]       # the row's key: what the model says about the answer is sealed with it too
+            answers.append(ans)
         sla = int(_settings(cur, ctx.tenant_id)["review_sla_days"])
         for ans in answers:
             if ans["kind"] == "mcq":
@@ -316,10 +382,14 @@ def _grade_open(db: Database, ctx: ServiceContext, ans: dict[str, Any], gateway:
                         (ctx.tenant_id, ans["id"]))
             return
         if result is not None:
+            _, sealed, key_id = Fields(cur, ctx.tenant_id, "quiz_answers").seal(f"quiz_answer:{ans['id']}", "rubric_result",
+                                                                                json.dumps(result.points), key_id=ans.get("answer_key"))
             cur.execute(
-                """UPDATE quiz_answers SET ai_score = %s, ai_rubric_result = %s, ai_confidence = %s, final_score = %s, decided_by = 'ai', graded_at = now()
+                """UPDATE quiz_answers SET ai_score = %s, ai_rubric_result = %s, rubric_result_sealed = %s, sealed_key = COALESCE(sealed_key, %s),
+                          ai_confidence = %s, final_score = %s, decided_by = 'ai', graded_at = now()
                     WHERE tenant_id = %s AND id = %s""",
-                (result.score, Jsonb(result.points), result.confidence, result.score, ctx.tenant_id, ans["id"]))
+                (result.score, Jsonb(result.points) if sealed is None else None, sealed, key_id, result.confidence, result.score,
+                 ctx.tenant_id, ans["id"]))
         if needs_a_person(result):
             open_grading_task(cur, ctx.tenant_id, "quiz_answer", ans["id"], ans["department_id"], ans["owner"], sla)
 
