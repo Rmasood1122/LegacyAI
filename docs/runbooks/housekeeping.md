@@ -81,16 +81,17 @@ second time.
 ## Locking older content (decision D41, step 5)
 
 Since 2026-10-25, documents, item texts and titles, interview questions and answers, the questions people ask,
-questions to experts, readers' comments, the words a stored conflict quotes, and readiness questions and answers are
-stored locked with the company's key. What was saved before is still stored
+questions to experts, readers' comments, the words a stored conflict quotes, readiness questions and answers, and
+scenario texts and answers are stored locked with the company's key. What was saved before is still stored
 readable. Job 6 locks it, a little at a time: per company and run at most 200 rows of each kind per round, rounds for
 at most 8 seconds.
 
 1. Run the command as usual. In the output, under `knowledge`:
    - `sealed_chunks`, `sealed_versions`, `sealed_turns`, `sealed_questions`, `sealed_expert_questions`,
-     `sealed_feedback`, `sealed_titles`, `sealed_conflicts`, `sealed_quiz_questions`, `sealed_quiz_answers`: how many
-     were locked in this run (all companies together);
-   - `readable_` with the same ten names: how many are still readable after this run;
+     `sealed_feedback`, `sealed_titles`, `sealed_conflicts`, `sealed_quiz_questions`, `sealed_quiz_answers`,
+     `sealed_scenarios`, `sealed_scenario_steps`, `sealed_scenario_answers`: how many were locked in this run (all
+     companies together);
+   - `readable_` with the same thirteen names: how many are still readable after this run;
    - `seal_key_unavailable`: how many companies were skipped because their key cannot be used right now (switched
      off, permission taken back, or the key service did not answer). Their content stays as it is; nothing is half
      done. It is tried again on the next run.

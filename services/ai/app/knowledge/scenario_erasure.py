@@ -36,10 +36,12 @@ def erase_for_items(cur: psycopg.Cursor[Any], tenant_id: str, item_ids: Sequence
                     WHERE tenant_id = %s AND id = ANY(%s::uuid[]) AND status <> 'retired'""", (tenant_id, affected))
     cur.execute("UPDATE scenario_attempts SET status = 'expired' WHERE tenant_id = %s AND scenario_id = ANY(%s::uuid[]) AND status = 'in_progress'",
                 (tenant_id, affected))
-    cur.execute("""UPDATE scenarios SET situation = '', flag_reason = 'item_withdrawn', erased_at = now(), updated_at = now()
+    # both forms of the words go (sealed from D41 step 6 on); the title stays, as before
+    cur.execute("""UPDATE scenarios SET situation = '', situation_sealed = NULL, flag_reason = 'item_withdrawn', erased_at = now(), updated_at = now()
                     WHERE tenant_id = %s AND id = ANY(%s::uuid[])""", (tenant_id, affected))
     cur.execute(
-        """UPDATE scenario_steps st SET prompt = '', rubric = '[]'::jsonb, erased_at = now()
+        """UPDATE scenario_steps st SET prompt = '', rubric = '[]'::jsonb, prompt_sealed = NULL, rubric_sealed = NULL, sealed_key = NULL,
+                  erased_at = now()
             WHERE st.tenant_id = %s AND st.id IN (SELECT si.step_id FROM scenario_step_items si
                                                    WHERE si.tenant_id = %s AND si.item_id = ANY(%s::uuid[]))""", (tenant_id, tenant_id, ids))
     cur.execute("DELETE FROM scenario_step_items WHERE tenant_id = %s AND item_id = ANY(%s::uuid[])", (tenant_id, ids))
@@ -57,12 +59,12 @@ def prune_answers(cur: psycopg.Cursor[Any], tenant_id: str) -> None:
     cur.execute("SELECT quiz_answer_retention_days FROM knowledge_settings WHERE tenant_id = %s", (tenant_id,))
     row = cur.fetchone()
     days = int(row["quiz_answer_retention_days"]) if row else 365
-    # table names and column lists are the fixed entries below, never input; readiness answers may be sealed (D41 step 6)
-    for answers, attempts, sealed in (("scenario_answers", "scenario_attempts", ""),
-                                      ("quiz_answers", "quiz_attempts", ", answer_sealed = NULL, rubric_result_sealed = NULL, sealed_key = NULL")):
-        holds = "x.answer_text IS NOT NULL OR x.ai_rubric_result IS NOT NULL" + (" OR x.sealed_key IS NOT NULL" if sealed else "")
+    # table names are the two fixed pairs below, never input; the words may be sealed (D41 step 6): both forms go
+    for answers, attempts in (("scenario_answers", "scenario_attempts"), ("quiz_answers", "quiz_attempts")):
+        holds = "x.answer_text IS NOT NULL OR x.ai_rubric_result IS NOT NULL OR x.sealed_key IS NOT NULL"
         cur.execute(
-            f"""UPDATE {answers} an SET answer_text = NULL, ai_rubric_result = NULL{sealed}, text_removed_at = now()
+            f"""UPDATE {answers} an SET answer_text = NULL, ai_rubric_result = NULL, answer_sealed = NULL, rubric_result_sealed = NULL,
+                       sealed_key = NULL, text_removed_at = now()
                  WHERE an.tenant_id = %s
                    AND an.id IN (SELECT x.id FROM {answers} x JOIN {attempts} a ON a.tenant_id = x.tenant_id AND a.id = x.attempt_id
                                   WHERE x.tenant_id = %s AND ({holds})

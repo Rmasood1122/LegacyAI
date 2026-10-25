@@ -17,10 +17,9 @@ from dataclasses import dataclass
 from typing import Any
 
 import psycopg
-from psycopg.types.json import Jsonb
 
 from app.ai_gateway import Caller, DataBlock, Gateway, QuizGenerateOutput
-from app.capture import VERSION_TEXT, Fields, condition, item_title_json, open_item_title, redact, version_text
+from app.capture import VERSION_TEXT, Fields, condition, item_title_json, new_row_id, open_item_title, redact, version_text
 from app.knowledge.items import ItemRefused, review_settings
 from app.knowledge.readiness import (
     LOW_GRADING_CONFIDENCE,
@@ -30,6 +29,19 @@ from app.knowledge.readiness import (
     norm,
     open_grading_task,
     settings_full,
+)
+from app.knowledge.scenario_words import (
+    answer_columns,
+    open_answer,
+    open_scenario,
+    open_step,
+    scenario_columns,
+    scenario_title_columns,
+    seal_answer_text,
+    seal_rubric_result,
+    seal_scenario,
+    seal_step,
+    step_columns,
 )
 from app.platform import Database, ServiceContext, one, write_audit
 
@@ -102,9 +114,12 @@ def _released(cur: psycopg.Cursor[Any], tenant_id: str, item_ids: Sequence[str])
 
 def _write_steps(cur: psycopg.Cursor[Any], tenant_id: str, scenario_id: str, steps: Sequence[Step]) -> None:
     for pos, step in enumerate(steps, start=1):
-        cur.execute("INSERT INTO scenario_steps (tenant_id, scenario_id, position, prompt, rubric) VALUES (%s, %s, %s, %s, %s) RETURNING id::text AS id",
-                    (tenant_id, scenario_id, pos, step.prompt, Jsonb(list(step.rubric))))
-        step_id = one(cur)["id"]
+        step_id = new_row_id(cur)
+        words = seal_step(cur, tenant_id, step_id, step.prompt, list(step.rubric))     # sealed (D41 step 6)
+        cur.execute("""INSERT INTO scenario_steps (id, tenant_id, scenario_id, position, prompt, rubric, prompt_sealed, rubric_sealed, sealed_key)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (step_id, tenant_id, scenario_id, pos, words["prompt"], words["rubric"], words["prompt_sealed"], words["rubric_sealed"],
+                     words["sealed_key"]))
         for item in step.item_ids:
             cur.execute("INSERT INTO scenario_step_items (tenant_id, step_id, item_id) VALUES (%s, %s, %s)", (tenant_id, step_id, item))
 
@@ -127,11 +142,14 @@ def _prepare(cur: psycopg.Cursor[Any], ctx: ServiceContext, title: str, situatio
 def create(db: Database, ctx: ServiceContext, title: str, situation: str, job_role: str, raw_steps: Sequence[dict[str, Any]]) -> dict[str, Any]:
     with db.tenant_tx(ctx.tenant_id) as cur:
         title, situation, steps = _prepare(cur, ctx, title, situation, raw_steps)
+        scenario_id = new_row_id(cur)
+        words = seal_scenario(cur, ctx.tenant_id, scenario_id, title, situation)     # sealed (D41 step 6)
         cur.execute(
-            """INSERT INTO scenarios (tenant_id, title, situation, job_role, owner_person_id, author_card_id, created_by_person_id, created_by_card_id)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id::text AS id""",
-            (ctx.tenant_id, title, situation, job_role, ctx.person_id, ctx.card_id, ctx.person_id, ctx.card_id))
-        scenario_id = one(cur)["id"]
+            """INSERT INTO scenarios (id, tenant_id, title, situation, title_sealed, situation_sealed, sealed_key, job_role, owner_person_id,
+                                      author_card_id, created_by_person_id, created_by_card_id)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (scenario_id, ctx.tenant_id, words["title"], words["situation"], words["title_sealed"], words["situation_sealed"], words["sealed_key"],
+             job_role, ctx.person_id, ctx.card_id, ctx.person_id, ctx.card_id))
         _write_steps(cur, ctx.tenant_id, scenario_id, steps)
         _take_labels(cur, ctx.tenant_id, scenario_id)
         write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="quiz:scenario_write", reason_code="SCENARIO_DRAFTED",
@@ -181,10 +199,12 @@ def update(db: Database, ctx: ServiceContext, scenario_id: str, title: str, situ
         title, situation, steps = _prepare(cur, ctx, title, situation, raw_steps)
         if s["status"] == "approved":
             cur.execute("UPDATE scenarios SET status = 'draft' WHERE tenant_id = %s AND id = %s", (ctx.tenant_id, scenario_id))
+        words = seal_scenario(cur, ctx.tenant_id, scenario_id, title, situation)
         cur.execute(
-            """UPDATE scenarios SET title = %s, situation = %s, job_role = %s, owner_person_id = %s, author_card_id = %s, flag_reason = NULL,
-                      updated_at = now() WHERE tenant_id = %s AND id = %s""",
-            (title, situation, job_role, ctx.person_id, ctx.card_id, ctx.tenant_id, scenario_id))
+            """UPDATE scenarios SET title = %s, situation = %s, title_sealed = %s, situation_sealed = %s, sealed_key = %s, job_role = %s,
+                      owner_person_id = %s, author_card_id = %s, flag_reason = NULL, updated_at = now() WHERE tenant_id = %s AND id = %s""",
+            (words["title"], words["situation"], words["title_sealed"], words["situation_sealed"], words["sealed_key"], job_role, ctx.person_id,
+             ctx.card_id, ctx.tenant_id, scenario_id))
         cur.execute("DELETE FROM scenario_steps WHERE tenant_id = %s AND scenario_id = %s", (ctx.tenant_id, scenario_id))   # the links go with them
         _write_steps(cur, ctx.tenant_id, scenario_id, steps)
         _take_labels(cur, ctx.tenant_id, scenario_id)
@@ -259,12 +279,14 @@ def list_scenarios(db: Database, ctx: ServiceContext, *, status: str | None, lim
     limit = max(1, min(limit, PAGE))
     with db.tenant_tx(ctx.tenant_id) as cur:
         cur.execute(
-            f"""SELECT sc.id::text AS id, sc.title, sc.job_role, sc.status, sc.flag_reason, sc.created_at, sc.updated_at, sc.approved_at,
+            f"""SELECT sc.id::text AS id, {scenario_title_columns("sc")}, sc.job_role, sc.status, sc.flag_reason, sc.created_at, sc.updated_at,
+                       sc.approved_at,
                        (sc.author_card_id = %s OR sc.created_by_card_id = %s OR %s::uuid IN (sc.owner_person_id, sc.created_by_person_id)) AS written_by_me,
                        (SELECT count(*) FROM scenario_steps st WHERE st.tenant_id = sc.tenant_id AND st.scenario_id = sc.id)::int AS steps
                   FROM scenarios sc WHERE sc.tenant_id = %s AND {NOT_HIDDEN} AND {where}{extra} ORDER BY sc.id LIMIT %s""",
             [ctx.card_id, ctx.card_id, ctx.person_id, ctx.tenant_id, *params, *extra_params, limit + 1])
-        rows = [_iso(dict(r), "created_at", "updated_at", "approved_at") for r in cur.fetchall()]
+        texts = Fields(cur, ctx.tenant_id, "scenarios")       # sealed from D41 step 6 on, opened for this reader
+        rows = [_iso(open_scenario(texts, dict(r)), "created_at", "updated_at", "approved_at") for r in cur.fetchall()]
     more = len(rows) > limit
     rows = rows[:limit]
     return {"items": rows, "next_cursor": rows[-1]["id"] if more and rows else None}
@@ -275,7 +297,8 @@ def get_scenario(db: Database, ctx: ServiceContext, scenario_id: str) -> dict[st
     where, params = condition(ctx.filter, "scenarios", ctx.tenant_id)
     with db.tenant_tx(ctx.tenant_id) as cur:
         cur.execute(
-            f"""SELECT sc.id::text AS id, sc.title, sc.situation, sc.job_role, sc.status, sc.flag_reason, sc.created_at, sc.updated_at, sc.approved_at,
+            f"""SELECT sc.id::text AS id, {scenario_columns("sc")}, sc.job_role, sc.status, sc.flag_reason, sc.created_at, sc.updated_at,
+                       sc.approved_at,
                        (sc.author_card_id = %s OR sc.created_by_card_id = %s OR %s::uuid IN (sc.owner_person_id, sc.created_by_person_id)) AS written_by_me,
                        EXISTS (SELECT 1 FROM scenario_attempts a WHERE a.tenant_id = sc.tenant_id AND a.scenario_id = sc.id) AS has_attempts
                   FROM scenarios sc WHERE sc.tenant_id = %s AND sc.id = %s AND {NOT_HIDDEN} AND {where}""",
@@ -283,7 +306,7 @@ def get_scenario(db: Database, ctx: ServiceContext, scenario_id: str) -> dict[st
         row = cur.fetchone()
         if row is None:
             raise ItemRefused("not_found", 404)
-        out = _iso(dict(row), "created_at", "updated_at", "approved_at")
+        out = _iso(open_scenario(Fields(cur, ctx.tenant_id, "scenarios"), dict(row)), "created_at", "updated_at", "approved_at")
         out["steps"] = review_steps(cur, ctx.tenant_id, scenario_id, ctx.approved)
     return out
 
@@ -294,23 +317,26 @@ def review_steps(cur: psycopg.Cursor[Any], tenant_id: str, scenario_id: str, rea
     allowed = set(readable_items)
     titles = Fields(cur, tenant_id, "knowledge_items")      # item titles are sealed from step 6 on (D41): opened only where allowed
     cur.execute(
-        f"""SELECT st.position, st.prompt, st.rubric, st.erased_at IS NOT NULL AS erased,
+        f"""SELECT st.id::text AS step_id, st.position, {step_columns("st")}, st.erased_at IS NOT NULL AS erased,
                   COALESCE((SELECT jsonb_agg(jsonb_build_object('id', i.id::text, {ITEM_TITLE}, 'status', i.status) ORDER BY i.id)
                               FROM scenario_step_items si JOIN knowledge_items i ON i.tenant_id = si.tenant_id AND i.id = si.item_id
                              WHERE si.tenant_id = st.tenant_id AND si.step_id = st.id), '[]'::jsonb) AS items
              FROM scenario_steps st WHERE st.tenant_id = %s AND st.scenario_id = %s ORDER BY st.position""", (tenant_id, scenario_id))
+    steps = Fields(cur, tenant_id, "scenario_steps")
     return [{"position": r["position"], "prompt": r["prompt"], "erased": r["erased"], "rubric": list(r["rubric"] or []),
              "items": [open_item_title(titles, dict(i)) if i["id"] in allowed else {"id": i["id"], "title": None, "status": i["status"]}
                        for i in (r["items"] or [])]}
-            for r in cur.fetchall()]
+            for r in (open_step(steps, dict(raw)) for raw in cur.fetchall())]
 
 
 def learner_steps(cur: psycopg.Cursor[Any], tenant_id: str, scenario_id: str) -> list[dict[str, Any]]:
     """The ONE projection of a scenario's steps for a learner who has not handed in: the place and the question.
     The query does not even select the expected points or the linked items."""
-    cur.execute("SELECT st.position, st.prompt FROM scenario_steps st WHERE st.tenant_id = %s AND st.scenario_id = %s ORDER BY st.position",
+    cur.execute(f"""SELECT st.id::text AS step_id, st.position, {step_columns("st", with_rubric=False)} FROM scenario_steps st
+                     WHERE st.tenant_id = %s AND st.scenario_id = %s ORDER BY st.position""",
                 (tenant_id, scenario_id))
-    return [{"position": r["position"], "prompt": r["prompt"]} for r in cur.fetchall()]
+    steps = Fields(cur, tenant_id, "scenario_steps")
+    return [{"position": r["position"], "prompt": r["prompt"]} for r in (open_step(steps, dict(raw)) for raw in cur.fetchall())]
 
 
 def propose_rubric(db: Database, ctx: ServiceContext, gateway: Gateway, caller: Caller) -> dict[str, Any]:
@@ -342,12 +368,14 @@ def list_offered(db: Database, ctx: ServiceContext) -> dict[str, Any]:
     """What a learner may run: approved scenarios the API checked against THIS learner (ctx.approved). Never the points."""
     with db.tenant_tx(ctx.tenant_id) as cur:
         cur.execute(
-            """SELECT sc.id::text AS id, sc.title, sc.situation, sc.job_role,
+            f"""SELECT sc.id::text AS id, {scenario_columns("sc")}, sc.job_role,
                       (SELECT count(*) FROM scenario_steps st WHERE st.tenant_id = sc.tenant_id AND st.scenario_id = sc.id)::int AS steps
-                 FROM scenarios sc WHERE sc.tenant_id = %s AND sc.status = 'approved' AND sc.id = ANY(%s::uuid[])
-                ORDER BY sc.job_role, sc.title""",
+                 FROM scenarios sc WHERE sc.tenant_id = %s AND sc.status = 'approved' AND sc.id = ANY(%s::uuid[])""",
             (ctx.tenant_id, list(ctx.approved)))
-        return {"items": [dict(r) for r in cur.fetchall()]}
+        texts = Fields(cur, ctx.tenant_id, "scenarios")
+        items = [open_scenario(texts, dict(r)) for r in cur.fetchall()]
+    # sealed titles cannot be sorted by the database: by job role, then title, here
+    return {"items": sorted(items, key=lambda r: (r["job_role"], r["title"] or "", r["id"]))}
 
 
 def start_attempt(db: Database, ctx: ServiceContext, scenario_id: str) -> dict[str, Any]:
@@ -356,10 +384,12 @@ def start_attempt(db: Database, ctx: ServiceContext, scenario_id: str) -> dict[s
     if scenario_id.lower() not in ctx.approved:
         raise ItemRefused("not_found", 404)
     with db.tenant_tx(ctx.tenant_id) as cur:
-        cur.execute("SELECT status, title, situation FROM scenarios WHERE tenant_id = %s AND id = %s FOR SHARE", (ctx.tenant_id, scenario_id))
-        sc = cur.fetchone()
-        if sc is None or sc["status"] != "approved":
+        cur.execute(f"SELECT id::text AS id, status, {scenario_columns('sc')} FROM scenarios sc WHERE tenant_id = %s AND id = %s FOR SHARE",
+                    (ctx.tenant_id, scenario_id))
+        row = cur.fetchone()
+        if row is None or row["status"] != "approved":
             raise ItemRefused("not_found", 404)
+        sc = open_scenario(Fields(cur, ctx.tenant_id, "scenarios"), dict(row))
         cur.execute("""SELECT count(*)::int AS n FROM scenario_attempts WHERE tenant_id = %s AND scenario_id = %s AND learner_person_id = %s
                           AND started_at > now() - interval '1 day'""", (ctx.tenant_id, scenario_id, ctx.person_id))
         if one(cur)["n"] >= MAX_RUNS_PER_DAY:
@@ -396,10 +426,14 @@ def save_answer(db: Database, ctx: ServiceContext, attempt_id: str, position: in
         cur.execute("SELECT now() > %s AS late", (a["expires_at"],))
         if a["status"] != "in_progress" or one(cur)["late"]:
             raise ItemRefused("attempt_closed")
-        cur.execute("UPDATE scenario_answers SET answer_text = %s WHERE tenant_id = %s AND attempt_id = %s AND position = %s",
-                    (redact(text).text[:4000] if text else None, ctx.tenant_id, attempt_id, position))
-        if cur.rowcount == 0:
+        cur.execute("SELECT id::text AS id FROM scenario_answers WHERE tenant_id = %s AND attempt_id = %s AND position = %s FOR UPDATE",
+                    (ctx.tenant_id, attempt_id, position))
+        row = cur.fetchone()
+        if row is None:
             raise ItemRefused("not_found", 404)
+        words = seal_answer_text(cur, ctx.tenant_id, row["id"], redact(text).text[:4000] if text else None)     # sealed (D41 step 6)
+        cur.execute("UPDATE scenario_answers SET answer_text = %s, answer_sealed = %s, sealed_key = %s WHERE tenant_id = %s AND id = %s",
+                    (words["answer_text"], words["answer_sealed"], words["sealed_key"], ctx.tenant_id, row["id"]))
 
 
 def submit_attempt(db: Database, ctx: ServiceContext, attempt_id: str, gateway: Gateway | None, caller: Caller | None) -> dict[str, Any]:
@@ -414,12 +448,17 @@ def submit_attempt(db: Database, ctx: ServiceContext, attempt_id: str, gateway: 
         except psycopg.errors.CheckViolation as exc:
             raise ItemRefused("attempt_closed") from exc
         cur.execute(
-            """SELECT sa.id::text AS id, sa.answer_text, st.prompt, st.rubric, sc.department_id::text AS department_id,
-                      sc.owner_person_id::text AS owner
+            f"""SELECT sa.id::text AS id, st.id::text AS step_id, {answer_columns("sa")}, {step_columns("st")},
+                      sc.department_id::text AS department_id, sc.owner_person_id::text AS owner
                  FROM scenario_answers sa JOIN scenario_steps st ON st.tenant_id = sa.tenant_id AND st.id = sa.step_id
                  JOIN scenarios sc ON sc.tenant_id = st.tenant_id AND sc.id = st.scenario_id
                 WHERE sa.tenant_id = %s AND sa.attempt_id = %s ORDER BY sa.position""", (ctx.tenant_id, attempt_id))
-        answers = cur.fetchall()
+        answer_fields, step_fields = Fields(cur, ctx.tenant_id, "scenario_answers"), Fields(cur, ctx.tenant_id, "scenario_steps")
+        answers = []
+        for r in cur.fetchall():
+            ans = open_step(step_fields, open_answer(answer_fields, dict(r), "id"))
+            ans["answer_key"] = r["answer_key"]       # what the model says about the answer is sealed with the answer's key
+            answers.append(ans)
         sla = int(review_settings(cur, ctx.tenant_id)["review_sla_days"])
         write_audit(cur, tenant_id=ctx.tenant_id, card_id=ctx.card_id, action="quiz:scenario_submit", reason_code="SCENARIO_SUBMITTED",
                     resource_type="scenario_attempt", resource_id=attempt_id, request_id=ctx.request_id)
@@ -433,10 +472,12 @@ def submit_attempt(db: Database, ctx: ServiceContext, attempt_id: str, gateway: 
                             (ctx.tenant_id, ans["id"]))
             elif grade is not None:
                 # as for readiness: the model's grade stands (its confidence is kept and shown); a reviewer can override it
+                result = seal_rubric_result(cur, ctx.tenant_id, ans["id"], grade.points, ans["answer_key"])
                 cur.execute(
-                    """UPDATE scenario_answers SET ai_score = %s, ai_rubric_result = %s, ai_confidence = %s, final_score = %s, decided_by = 'ai',
-                              graded_at = now() WHERE tenant_id = %s AND id = %s""",
-                    (grade.score, Jsonb(grade.points), grade.confidence, grade.score, ctx.tenant_id, ans["id"]))
+                    """UPDATE scenario_answers SET ai_score = %s, ai_rubric_result = %s, rubric_result_sealed = %s, sealed_key = COALESCE(sealed_key, %s),
+                              ai_confidence = %s, final_score = %s, decided_by = 'ai', graded_at = now() WHERE tenant_id = %s AND id = %s""",
+                    (grade.score, result["ai_rubric_result"], result["rubric_result_sealed"], result["sealed_key"], grade.confidence, grade.score,
+                     ctx.tenant_id, ans["id"]))
             # No usable grade (no AI allowed, refused, invalid) or a low-confidence one: a person is asked, through the
             # same kind of task as for a readiness answer, so the run cannot wait unseen.
             if text.strip() and needs_a_person(grade):
@@ -475,8 +516,9 @@ def _gradable(cur: psycopg.Cursor[Any], ctx: ServiceContext, answer_id: str, *, 
     where, params = _results_condition(ctx)
     for_update = " FOR UPDATE OF an" if lock else ""
     cur.execute(
-        f"""SELECT an.id::text AS id, an.attempt_id::text AS attempt_id, an.position, an.answer_text, an.final_score, an.decided_by, an.ai_score,
-                   an.ai_confidence, an.ai_rubric_result, an.text_removed_at, st.prompt, st.rubric, sc.title, sa.status,
+        f"""SELECT an.id::text AS id, an.attempt_id::text AS attempt_id, an.position, {answer_columns("an")}, an.final_score, an.decided_by,
+                   an.ai_score, an.ai_confidence, an.text_removed_at, st.id::text AS step_id, {step_columns("st")}, sc.id::text AS scenario_id,
+                   {scenario_title_columns("sc")}, sa.status,
                    sa.learner_person_id::text AS learner, sa.learner_card_id::text AS learner_card,
                    (an.final_score IS NULL AND sa.status = 'submitted') AS awaiting, ({where}) AS readable
               FROM scenario_answers an JOIN scenario_attempts sa ON sa.tenant_id = an.tenant_id AND sa.id = an.attempt_id
@@ -491,7 +533,10 @@ def _gradable(cur: psycopg.Cursor[Any], ctx: ServiceContext, answer_id: str, *, 
         raise ItemRefused("own_attempt")
     if not (row["awaiting"] or row["readable"]):
         raise ItemRefused("not_found", 404)
-    return dict(row)
+    # opened only after every check above passed (D41 step 6)
+    opened = open_answer(Fields(cur, ctx.tenant_id, "scenario_answers"), dict(row), "id")
+    opened = open_step(Fields(cur, ctx.tenant_id, "scenario_steps"), opened)
+    return open_scenario(Fields(cur, ctx.tenant_id, "scenarios"), opened, "scenario_id")
 
 
 def answer_for_grading(db: Database, ctx: ServiceContext, answer_id: str) -> dict[str, Any]:
@@ -573,25 +618,28 @@ def get_attempt(db: Database, ctx: ServiceContext, attempt_id: str) -> dict[str,
     with db.tenant_tx(ctx.tenant_id) as cur:
         cur.execute(
             f"""SELECT sa.id::text AS id, sa.scenario_id::text AS scenario_id, sa.learner_person_id::text AS learner_person_id, sa.status, sa.started_at,
-                       sa.expires_at, sa.submitted_at, sa.graded_at, sc.title, sc.situation, sc.job_role
+                       sa.expires_at, sa.submitted_at, sa.graded_at, {scenario_columns("sc")}, sc.job_role
                   FROM scenario_attempts sa JOIN scenarios sc ON sc.tenant_id = sa.tenant_id AND sc.id = sa.scenario_id
                  WHERE sa.tenant_id = %s AND sa.id = %s AND {NOT_HIDDEN} AND {where}""",
             [ctx.tenant_id, attempt_id, *params])
         row = cur.fetchone()
         if row is None:
             raise ItemRefused("not_found", 404)
-        a = _iso(dict(row), "started_at", "expires_at", "submitted_at", "graded_at")
+        a = _iso(open_scenario(Fields(cur, ctx.tenant_id, "scenarios"), dict(row), "scenario_id"), "started_at", "expires_at", "submitted_at",
+                 "graded_at")
         show = bool(settings_full(cur, ctx.tenant_id).get("quiz_show_answers_after_grading", False))
         cur.execute(
-            f"""SELECT an.id::text AS answer_id, an.position, st.prompt, st.rubric, an.answer_text, an.final_score, an.decided_by,
-                      an.ai_rubric_result, an.ai_confidence, an.text_removed_at,
+            f"""SELECT an.id::text AS answer_id, an.position, st.id::text AS step_id, {step_columns("st")}, {answer_columns("an")}, an.final_score,
+                      an.decided_by, an.ai_confidence, an.text_removed_at,
                       COALESCE((SELECT jsonb_agg(jsonb_build_object('id', i.id::text, {ITEM_TITLE}) ORDER BY i.id)
                                   FROM scenario_step_items si JOIN knowledge_items i ON i.tenant_id = si.tenant_id AND i.id = si.item_id
                                  WHERE si.tenant_id = an.tenant_id AND si.step_id = an.step_id AND i.status <> 'withdrawn'), '[]'::jsonb) AS items
                  FROM scenario_answers an JOIN scenario_steps st ON st.tenant_id = an.tenant_id AND st.id = an.step_id
                 WHERE an.tenant_id = %s AND an.attempt_id = %s ORDER BY an.position""", (ctx.tenant_id, attempt_id))
         titles = Fields(cur, ctx.tenant_id, "knowledge_items")
-        rows = [{**dict(r), "items": [open_item_title(titles, dict(i)) for i in (r["items"] or [])]} for r in cur.fetchall()]
+        steps, answers = Fields(cur, ctx.tenant_id, "scenario_steps"), Fields(cur, ctx.tenant_id, "scenario_answers")
+        rows = [{**open_answer(answers, open_step(steps, dict(r)), "answer_id"), "items": [open_item_title(titles, dict(i)) for i in (r["items"] or [])]}
+                for r in cur.fetchall()]
     is_learner = ctx.person_id is not None and a["learner_person_id"] == ctx.person_id
     a["scores_released"], a["points_released"] = released(a["status"], is_learner=is_learner, show_points=show)
     a["steps"] = visible_steps(a["status"], is_learner=is_learner, show_points=show, rows=rows, readable_items=ctx.approved)
@@ -608,12 +656,14 @@ def list_attempts(db: Database, ctx: ServiceContext, *, limit: int, before: str 
     limit = max(1, min(limit, PAGE))
     with db.tenant_tx(ctx.tenant_id) as cur:
         cur.execute(
-            f"""SELECT sa.id::text AS id, sa.scenario_id::text AS scenario_id, sc.title, sc.job_role, sa.learner_person_id::text AS learner_person_id,
+            f"""SELECT sa.id::text AS id, sa.scenario_id::text AS scenario_id, {scenario_title_columns("sc")}, sc.job_role,
+                       sa.learner_person_id::text AS learner_person_id,
                        sa.status, sa.started_at, sa.submitted_at, sa.graded_at
                   FROM scenario_attempts sa JOIN scenarios sc ON sc.tenant_id = sa.tenant_id AND sc.id = sa.scenario_id
                  WHERE sa.tenant_id = %s AND {NOT_HIDDEN} AND {where}{extra} ORDER BY sa.id DESC LIMIT %s""",
             [ctx.tenant_id, *params, *extra_params, limit + 1])
-        rows = [_iso(dict(r), "started_at", "submitted_at", "graded_at") for r in cur.fetchall()]
+        texts = Fields(cur, ctx.tenant_id, "scenarios")
+        rows = [_iso(open_scenario(texts, dict(r), "scenario_id"), "started_at", "submitted_at", "graded_at") for r in cur.fetchall()]
     more = len(rows) > limit
     rows = rows[:limit]
     return {"items": rows, "next_cursor": rows[-1]["id"] if more and rows else None}
