@@ -1,6 +1,6 @@
 # Documents and knowledge under the company's key — design (decision D41, 2026-10-24)
 
-> **Status: steps 2 to 4b, the first part of step 5 and parts 1 to 4a of step 6 built (2026-10-25).** The AI service locks documents, items'
+> **Status: steps 2 to 4b, the first part of step 5, parts 1 to 4a and the first half of part 4b of step 6 built (2026-10-25).** The AI service locks documents, items'
 > texts and interview turns with the company's key when they are saved (`services/ai/app/platform/sealing.py`,
 > `services/ai/app/capture/sealed_chunks.py`), answers questions with the in-memory search
 > (`services/ai/app/capture/memory_search.py`, `search_cache.py`), and the housekeeping command locks what was saved
@@ -206,8 +206,19 @@ which unlocks a company's content into memory for a few minutes while it is bein
      The AI service's own screens (item provenance, citations, the knowledge map) open them. Erasure empties both
      forms. Older titles are sealed by housekeeping job 6. A company whose own key is switched off can no longer even
      create a document entry (its title cannot be sealed).
-   - Still to do: topic names and descriptions (part 4b: the API creates, edits, lists and de-duplicates topics itself,
-     so this moves those into the AI service and replaces the unique index on the name by a keyed hash).
+   - **6 part 4b, first half, built 2026-10-25: topic names move into the AI service.** Nothing is sealed yet; this
+     makes the second half possible. Creating, renaming, accepting or retiring a topic (`/internal/topics`,
+     `/internal/topics/{id}/change`, actions `topic.create`, `topic.update`) and the topic half of applying a
+     department template (`/internal/topics/template`, `topic.template`, with the caller's topic:read filter) are done
+     by the AI service, each with the topic's search vector in the same step; the API keeps every permission check,
+     the job-role links and the audit entry. The topic list asks the AI service for the names it shows
+     (`/internal/topics/texts`, `topic.texts`, also for a machine's key), only for topics the caller may read; without
+     the AI service the list, creating and changing fail (503/502). The API login lost every right to `name` and
+     `description` and can no longer insert or change topics; the AI login may now add an active topic a person made
+     (the database still refuses one without the card that made it) and change name, description and status.
+   - Still to do (part 4b, second half): store topic names and descriptions sealed, replace the unique index on the
+     name by a keyed hash, open them in the AI service's own screens (gap report, readiness report, knowledge map,
+     an item's topics) and seal older ones in housekeeping.
 7. **Key off and key destroyed, end to end:**
    - the answers people see;
    - the operator's runbook;

@@ -7,8 +7,9 @@ import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { jwtVerify } from 'jose';
+import pg from 'pg';
 import { INTERNAL_CONTRACT_PATH } from '../../src/modules/knowledge-gateway/index.ts';
-import { testEnv } from './env.ts';
+import { DB_URLS, testEnv } from './env.ts';
 
 export interface StubCall {
   action: string;
@@ -39,6 +40,31 @@ function loadOps(): Op[] {
 
 const id = (): string => randomUUID();
 const now = (): string => new Date().toISOString();
+
+// Topic names and descriptions are written and read only by the AI service (D41 step 6 part 4b). So that API tests
+// can still make and use topics, the stand-in writes them the way the real service does: as the AI service's own
+// database login (whose rights the migrations set), for the company in the token. It does not apply the caller's
+// filter or compute search vectors; the real service is tested for both in services/ai (test_topic_texts.py).
+let aiPool: pg.Pool | null = null;
+async function asAiService<T>(tenantId: string, fn: (q: pg.PoolClient) => Promise<T>): Promise<T> {
+  aiPool ??= new pg.Pool({ connectionString: DB_URLS.ai, max: 2 });
+  const client = await aiPool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+    const out = await fn(client);
+    await client.query('COMMIT');
+    return out;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if ((err as { code?: string }).code === '23505') return new StubError(409, 'duplicate_topic') as T;
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+const TOPIC = `id, name, description, department_id, sensitivity, origin, status, created_at`;
+const MOVES = new Set(['proposed>active', 'active>retired']);
 
 /** Default answers: the smallest valid response of each operation. */
 const DEFAULTS: Record<string, Answer> = {
@@ -107,6 +133,36 @@ const DEFAULTS: Record<string, Answer> = {
   'interview.status': (c) => ({ id: c.claims.subject, status: c.body.status }),
   'gap.report': (c) => ({ job_role: c.body.job_role, topics: [] }),
   'topic.embed': (c) => ({ id: c.claims.subject }),
+  'topic.create': (c) => asAiService(c.claims.tenant_id, async (q) => {
+    const made = await q.query(
+      `INSERT INTO topics (tenant_id, name, description, department_id, sensitivity, origin, status, created_by_card_id)
+       VALUES ($1, $2, $3, $4, $5, 'admin', 'active', $6) ON CONFLICT (tenant_id, lower(name)) DO NOTHING RETURNING ${TOPIC}`,
+      [c.claims.tenant_id, c.body.name, c.body.description, c.body.department_id, c.body.sensitivity, c.claims.card_id]);
+    return made.rows[0] ?? new StubError(409, 'duplicate_topic');
+  }),
+  'topic.update': (c) => asAiService(c.claims.tenant_id, async (q) => {
+    const before = (await q.query('SELECT status FROM topics WHERE id = $1 FOR UPDATE', [c.claims.subject])).rows[0];
+    if (!before) return new StubError(404, 'not_found');
+    if (c.body.status !== null && c.body.status !== before.status && !MOVES.has(`${before.status}>${c.body.status}`)) return new StubError(409, 'illegal_transition');
+    return (await q.query(
+      `UPDATE topics SET name = COALESCE($2, name), description = COALESCE($3, description), status = COALESCE($4, status) WHERE id = $1 RETURNING ${TOPIC}`,
+      [c.claims.subject, c.body.name, c.body.description, c.body.status])).rows[0];
+  }),
+  'topic.template': (c) => asAiService(c.claims.tenant_id, async (q) => {
+    const topics = [];
+    for (const t of c.body.topics as Array<{ key: string; name: string; description: string }>) {
+      const made = await q.query(
+        `INSERT INTO topics (tenant_id, name, description, sensitivity, origin, status, created_by_card_id) VALUES ($1, $2, $3, 0, 'admin', 'active', $4)
+         ON CONFLICT (tenant_id, lower(name)) DO NOTHING RETURNING id`, [c.claims.tenant_id, t.name, t.description, c.claims.card_id]);
+      const have = made.rows[0] ?? (await q.query("SELECT id FROM topics WHERE lower(name) = lower($1) AND status <> 'retired'", [t.name])).rows[0];
+      topics.push({ key: t.key, id: have?.id ?? null, created: made.rows.length > 0 });
+    }
+    return { topics };
+  }),
+  'topic.texts': (c) => asAiService(c.claims.tenant_id, async (q) => {
+    const { rows } = await q.query('SELECT id, name, description FROM topics WHERE id = ANY($1::uuid[])', [c.body.ids]);
+    return { topics: Object.fromEntries(rows.map((r) => [r.id, { name: r.name, description: r.description }])) };
+  }),
   'topic.suggest': () => ({ proposed: [] }),
   'expert_question.create': () => ({ id: id(), status: 'open', expires_at: now() }),
   'expert_question.list': () => ({ items: [], next_cursor: null }),
@@ -233,6 +289,9 @@ export class AiStub {
   }
 
   async stop(): Promise<void> {
+    const pool = aiPool;
+    aiPool = null;
+    await pool?.end();
     await new Promise<void>((resolve) => (this.#server ? this.#server.close(() => resolve()) : resolve()));
   }
 }
