@@ -15,7 +15,20 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.ai_gateway import AnswerOutput, Caller, DataBlock, Embedder, Gateway
-from app.capture import SEARCH_CACHE, Fields, SearchCache, answer_key, condition, load_approved, new_row_id, redact, retrieve, retrieve_in_memory
+from app.capture import (
+    SEARCH_CACHE,
+    Fields,
+    SearchCache,
+    answer_key,
+    condition,
+    item_title_columns,
+    load_approved,
+    new_row_id,
+    open_item_title,
+    redact,
+    retrieve,
+    retrieve_in_memory,
+)
 from app.knowledge.conflicts import check as check_conflicts
 from app.platform import Database, ServiceContext, one, write_audit
 
@@ -113,8 +126,10 @@ def _titles(cur: Any, tenant_id: str, rows: list[dict[str, Any]], spec: Any) -> 
     item_titles: dict[str, str] = {}
     provenance: dict[str, list[dict[str, str]]] = {i: [] for i in item_ids}
     if item_ids:
-        cur.execute("SELECT id::text AS id, title FROM knowledge_items WHERE tenant_id = %s AND id = ANY(%s::uuid[])", (tenant_id, item_ids))
-        item_titles = {r["id"]: r["title"] for r in cur.fetchall()}
+        cur.execute(f"SELECT i.id::text AS id, {item_title_columns('i')} FROM knowledge_items i WHERE i.tenant_id = %s AND i.id = ANY(%s::uuid[])",
+                    (tenant_id, item_ids))
+        titles = Fields(cur, tenant_id, "knowledge_items")
+        item_titles = {r["id"]: open_item_title(titles, dict(r))["title"] for r in cur.fetchall()}
         # Sources behind an item are named only if THIS reader may read them (docs/phase2/03).
         where, params = condition(spec, "sources", tenant_id)
         cur.execute(

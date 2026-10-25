@@ -20,7 +20,7 @@ from typing import Any
 
 import psycopg
 
-from app.capture import VERSION_TEXT, Fields, version_text
+from app.capture import VERSION_TEXT, Fields, conflict_key, item_title_columns, open_item_title, version_text
 from app.knowledge.conflicts import check
 from app.platform import write_audit
 
@@ -90,13 +90,18 @@ def sync(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str) -> int:
         for c in report.conflicts:
             other_id = c.b.source if c.a.source == item_id else c.a.source
             first_with.setdefault(other_id, c)
+        quotes = Fields(cur, tenant_id, "knowledge_item_conflicts")    # the quoted words are stored sealed (D41 step 6)
         for other_id, first in first_with.items():
             mine, theirs = (first.a.raw, first.b.raw) if first.a.source == item_id else (first.b.raw, first.a.raw)
             low, high = sorted((item_id, other_id))
+            key = conflict_key(low, high)
+            low_value, low_sealed, key_id = quotes.seal(key, "item_value", (mine if low == item_id else theirs)[:200])
+            high_value, high_sealed, _ = quotes.seal(key, "other_value", (theirs if low == item_id else mine)[:200], key_id=key_id)
             cur.execute(
-                """INSERT INTO knowledge_item_conflicts (tenant_id, item_id, other_item_id, measure, item_value, other_value)
-                   VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING""",
-                (tenant_id, low, high, first.measure, (mine if low == item_id else theirs)[:200], (theirs if low == item_id else mine)[:200]))
+                """INSERT INTO knowledge_item_conflicts (tenant_id, item_id, other_item_id, measure, item_value, other_value,
+                                                         item_value_sealed, other_value_sealed, sealed_key)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING""",
+                (tenant_id, low, high, first.measure, low_value, high_value, low_sealed, high_sealed, key_id))
             found.append(other_id)
         if more_items or report.truncated:
             write_audit(cur, tenant_id=tenant_id, card_id=None, action="knowledge:conflict_check", reason_code="ITEM_CONFLICT_CHECK_PARTIAL",
@@ -118,25 +123,30 @@ def of_item(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str, title: str, 
     nothing about its content can be read from the answer. (That a conflict exists at all is shown on purpose: the
     reader must know not to rely on this item. See docs/phase4/01 for what that still gives away.)"""
     cur.execute(
-        f"""SELECT c.measure, c.detected_at,
-                   CASE WHEN c.item_id = %s THEN c.item_value ELSE c.other_value END AS this_value,
-                   CASE WHEN c.item_id = %s THEN c.other_value ELSE c.item_value END AS other_value,
-                   i.id::text AS other_item_id, i.title AS other_title
+        f"""SELECT c.measure, c.detected_at, c.item_id::text AS low_id, c.other_item_id::text AS high_id, c.item_value, c.other_value,
+                   c.item_value_sealed, c.other_value_sealed, c.sealed_key, i.id::text AS other_item_id, {item_title_columns("i")}
               FROM knowledge_item_conflicts c
               LEFT JOIN knowledge_items i ON i.tenant_id = c.tenant_id AND i.id = CASE WHEN c.item_id = %s THEN c.other_item_id ELSE c.item_id END
                    AND i.status <> 'withdrawn' AND {where}
              WHERE c.tenant_id = %s AND (c.item_id = %s OR c.other_item_id = %s)
              ORDER BY c.detected_at, c.item_id, c.other_item_id""",
-        [item_id, item_id, item_id, *params, tenant_id, item_id, item_id])
+        [item_id, *params, tenant_id, item_id, item_id])
     out: list[dict[str, Any]] = []
     hidden = False
+    quotes = Fields(cur, tenant_id, "knowledge_item_conflicts")     # sealed words opened for this reader only (D41 step 6)
+    titles = Fields(cur, tenant_id, "knowledge_items")
     for r in cur.fetchall():
-        if r["other_item_id"] is None:
+        if r["other_item_id"] is None:     # the reader may not read the other item: nothing about it is opened
             hidden = True
             continue
+        key = conflict_key(r["low_id"], r["high_id"])
+        low = quotes.open(key, "item_value", r["item_value"], r["item_value_sealed"], r["sealed_key"])
+        high = quotes.open(key, "other_value", r["other_value"], r["other_value_sealed"], r["sealed_key"])
+        this_value, other_value = (low, high) if r["low_id"] == item_id else (high, low)
+        other_title = open_item_title(titles, dict(r), "other_item_id")["title"]
         out.append({"restricted": False, "measure": r["measure"],
-                    "this": {"kind": "item", "id": item_id, "title": title, "value": r["this_value"]},
-                    "other": {"kind": "item", "id": r["other_item_id"], "title": r["other_title"], "value": r["other_value"]},
+                    "this": {"kind": "item", "id": item_id, "title": title, "value": this_value},
+                    "other": {"kind": "item", "id": r["other_item_id"], "title": other_title, "value": other_value},
                     "detected_at": r["detected_at"].isoformat()})
     if hidden:
         out.append(dict(RESTRICTED))

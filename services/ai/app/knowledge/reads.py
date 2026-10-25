@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.capture import VERSION_TEXT, Fields, condition, expert_question_key, topic_condition, version_text
+from app.capture import VERSION_TEXT, Fields, condition, expert_question_key, item_title_columns, open_item_title, topic_condition, version_text
 from app.knowledge import item_conflicts
 from app.knowledge.items import ItemRefused, item_topics
 from app.platform import Database, ServiceContext, one, write_audit
@@ -47,13 +47,15 @@ def list_items(db: Database, ctx: ServiceContext, *, status: str | None, owner_m
     limit = max(1, min(limit, PAGE))
     with db.tenant_tx(ctx.tenant_id) as cur:
         cur.execute(
-            f"""SELECT i.id::text AS id, i.title, i.status, i.origin, i.ai_extracted, i.department_id::text AS department_id, i.sensitivity,
+            f"""SELECT i.id::text AS id, {item_title_columns("i")}, i.status, i.origin, i.ai_extracted, i.department_id::text AS department_id,
+                       i.sensitivity,
                        i.owner_person_id::text AS owner_person_id, i.usage_count, i.verified_at, i.stale_after, i.updated_at
                   FROM knowledge_items i
                  WHERE i.tenant_id = %s AND i.status <> 'withdrawn' AND {where}{extra}
                  ORDER BY i.id LIMIT %s""",
             [ctx.tenant_id, *params, *extra_params, limit + 1])
-        rows = [_iso(dict(r), "verified_at", "stale_after", "updated_at") for r in cur.fetchall()]
+        titles = Fields(cur, ctx.tenant_id, "knowledge_items")        # titles sealed from step 6 on (D41), opened for this reader
+        rows = [_iso(open_item_title(titles, dict(r)), "verified_at", "stale_after", "updated_at") for r in cur.fetchall()]
     more = len(rows) > limit
     rows = rows[:limit]
     return {"items": rows, "next_cursor": rows[-1]["id"] if more and rows else None}
@@ -63,7 +65,8 @@ def get_item(db: Database, ctx: ServiceContext, item_id: str) -> dict[str, Any]:
     where, params = condition(ctx.filter, "knowledge_items", ctx.tenant_id)
     with db.tenant_tx(ctx.tenant_id) as cur:
         cur.execute(
-            f"""SELECT i.id::text AS id, i.title, i.status, i.origin, i.ai_extracted, i.department_id::text AS department_id, i.sensitivity,
+            f"""SELECT i.id::text AS id, {item_title_columns("i")}, i.status, i.origin, i.ai_extracted, i.department_id::text AS department_id,
+                       i.sensitivity,
                        i.owner_person_id::text AS owner_person_id, i.usage_count, i.verified_at, i.stale_after, i.self_verified,
                        i.current_version_id::text AS current_version_id, i.updated_at
                   FROM knowledge_items i WHERE i.tenant_id = %s AND i.id = %s AND i.status <> 'withdrawn' AND {where}""",
@@ -71,7 +74,7 @@ def get_item(db: Database, ctx: ServiceContext, item_id: str) -> dict[str, Any]:
         item = cur.fetchone()
         if item is None:
             raise ItemRefused("not_found", 404)
-        item = _iso(dict(item), "verified_at", "stale_after", "updated_at")
+        item = _iso(open_item_title(Fields(cur, ctx.tenant_id, "knowledge_items"), dict(item)), "verified_at", "stale_after", "updated_at")
         cur.execute(f"""SELECT v.id::text AS id, v.version_no, v.change_kind, v.author_person_id::text AS author_person_id, v.erased_at,
                                 v.created_at, {VERSION_TEXT}
                            FROM knowledge_versions v WHERE v.tenant_id = %s AND v.item_id = %s ORDER BY v.version_no""", (ctx.tenant_id, item_id))

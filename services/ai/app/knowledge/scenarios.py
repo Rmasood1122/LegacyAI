@@ -20,7 +20,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from app.ai_gateway import Caller, DataBlock, Gateway, QuizGenerateOutput
-from app.capture import VERSION_TEXT, Fields, condition, redact, version_text
+from app.capture import VERSION_TEXT, Fields, condition, item_title_json, open_item_title, redact, version_text
 from app.knowledge.items import ItemRefused, review_settings
 from app.knowledge.readiness import (
     LOW_GRADING_CONFIDENCE,
@@ -44,6 +44,7 @@ RELEASED_ITEM = "i.status IN ('verified', 'corrected') AND i.sensitivity = 0"
 # that may quote it are still there (a legal hold, or the erasure step has not run). The database computes it from the
 # links (scenario_is_hidden), so a scenario whose first item was erased is hidden again when a second one is withdrawn.
 NOT_HIDDEN = "NOT scenario_is_hidden(sc.tenant_id, sc.id)"
+ITEM_TITLE = item_title_json("i")      # a linked item's title, sealed from D41 step 6 on; opened with open_item_title()
 # The only state in which a run shows results. Anything else - expired, waiting for a person, in progress, or a state
 # this code does not know - shows the learner's own words and the status, nothing more.
 GRADED = "graded"
@@ -291,14 +292,16 @@ def review_steps(cur: psycopg.Cursor[Any], tenant_id: str, scenario_id: str, rea
     """The steps as a REVIEWER sees them: with expected points and linked items. Never used for a learner.
     An item the reader may not read is named by id and status only, without its title."""
     allowed = set(readable_items)
+    titles = Fields(cur, tenant_id, "knowledge_items")      # item titles are sealed from step 6 on (D41): opened only where allowed
     cur.execute(
-        """SELECT st.position, st.prompt, st.rubric, st.erased_at IS NOT NULL AS erased,
-                  COALESCE((SELECT jsonb_agg(jsonb_build_object('id', i.id::text, 'title', i.title, 'status', i.status) ORDER BY i.id)
+        f"""SELECT st.position, st.prompt, st.rubric, st.erased_at IS NOT NULL AS erased,
+                  COALESCE((SELECT jsonb_agg(jsonb_build_object('id', i.id::text, {ITEM_TITLE}, 'status', i.status) ORDER BY i.id)
                               FROM scenario_step_items si JOIN knowledge_items i ON i.tenant_id = si.tenant_id AND i.id = si.item_id
                              WHERE si.tenant_id = st.tenant_id AND si.step_id = st.id), '[]'::jsonb) AS items
              FROM scenario_steps st WHERE st.tenant_id = %s AND st.scenario_id = %s ORDER BY st.position""", (tenant_id, scenario_id))
     return [{"position": r["position"], "prompt": r["prompt"], "erased": r["erased"], "rubric": list(r["rubric"] or []),
-             "items": [i if i["id"] in allowed else {"id": i["id"], "title": None, "status": i["status"]} for i in (r["items"] or [])]}
+             "items": [open_item_title(titles, dict(i)) if i["id"] in allowed else {"id": i["id"], "title": None, "status": i["status"]}
+                       for i in (r["items"] or [])]}
             for r in cur.fetchall()]
 
 
@@ -580,14 +583,15 @@ def get_attempt(db: Database, ctx: ServiceContext, attempt_id: str) -> dict[str,
         a = _iso(dict(row), "started_at", "expires_at", "submitted_at", "graded_at")
         show = bool(settings_full(cur, ctx.tenant_id).get("quiz_show_answers_after_grading", False))
         cur.execute(
-            """SELECT an.id::text AS answer_id, an.position, st.prompt, st.rubric, an.answer_text, an.final_score, an.decided_by,
+            f"""SELECT an.id::text AS answer_id, an.position, st.prompt, st.rubric, an.answer_text, an.final_score, an.decided_by,
                       an.ai_rubric_result, an.ai_confidence, an.text_removed_at,
-                      COALESCE((SELECT jsonb_agg(jsonb_build_object('id', i.id::text, 'title', i.title) ORDER BY i.id)
+                      COALESCE((SELECT jsonb_agg(jsonb_build_object('id', i.id::text, {ITEM_TITLE}) ORDER BY i.id)
                                   FROM scenario_step_items si JOIN knowledge_items i ON i.tenant_id = si.tenant_id AND i.id = si.item_id
                                  WHERE si.tenant_id = an.tenant_id AND si.step_id = an.step_id AND i.status <> 'withdrawn'), '[]'::jsonb) AS items
                  FROM scenario_answers an JOIN scenario_steps st ON st.tenant_id = an.tenant_id AND st.id = an.step_id
                 WHERE an.tenant_id = %s AND an.attempt_id = %s ORDER BY an.position""", (ctx.tenant_id, attempt_id))
-        rows = [dict(r) for r in cur.fetchall()]
+        titles = Fields(cur, ctx.tenant_id, "knowledge_items")
+        rows = [{**dict(r), "items": [open_item_title(titles, dict(i)) for i in (r["items"] or [])]} for r in cur.fetchall()]
     is_learner = ctx.person_id is not None and a["learner_person_id"] == ctx.person_id
     a["scores_released"], a["points_released"] = released(a["status"], is_learner=is_learner, show_points=show)
     a["steps"] = visible_steps(a["status"], is_learner=is_learner, show_points=show, rows=rows, readable_items=ctx.approved)

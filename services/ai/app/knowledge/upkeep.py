@@ -15,7 +15,7 @@ from collections.abc import Callable
 from typing import Any
 
 from app.capture import seal_chunks, seal_turns, still_readable
-from app.knowledge import item_conflicts, items, quality, scenario_erasure, scenarios, sealed_questions
+from app.knowledge import item_conflicts, items, quality, scenario_erasure, scenarios, sealed_questions, sealed_titles
 from app.platform import Database, KeyUnavailable, housekeeping
 
 SEAL_BATCH = 200
@@ -39,13 +39,15 @@ def run(db: Database, tenant_id: str) -> dict[str, int]:
 def seal_existing(db: Database, tenant_id: str, *, batch: int = SEAL_BATCH, seconds: float = SEAL_SECONDS,
                   clock: Callable[[], float] = time.monotonic) -> dict[str, int]:
     """Seals readable chunks, knowledge versions and interview turns (D41 step 5), and questions asked, questions to
-    experts and readers' comments (step 6 part 1), of ONE company. When the company's key cannot be used (switched off,
+    experts and readers' comments (step 6 part 1), item titles and the words stored conflicts quote (step 6 part 2), of
+    ONE company. When the company's key cannot be used (switched off,
     permission taken back), nothing is sealed and `seal_key_unavailable` is 1; the rows stay as they are until the key
     is back. Without content keys (development) nothing is sealed."""
     steps: dict[str, Callable[[Any, str, int], int]] = {
         "chunks": seal_chunks, "versions": items.seal_existing_versions, "turns": seal_turns,
         "questions": sealed_questions.seal_answer_logs, "expert_questions": sealed_questions.seal_expert_questions,
         "feedback": sealed_questions.seal_feedback,
+        "titles": sealed_titles.seal_item_titles, "conflicts": sealed_titles.seal_conflicts,
     }
     sealed = dict.fromkeys(steps, 0)
     unavailable = 0
@@ -64,5 +66,6 @@ def seal_existing(db: Database, tenant_id: str, *, batch: int = SEAL_BATCH, seco
         left = still_readable(cur, tenant_id)
         left["versions"] = items.versions_still_readable(cur, tenant_id)
         left.update(sealed_questions.still_readable(cur, tenant_id))
+        left.update(sealed_titles.still_readable(cur, tenant_id))
     return {**{f"sealed_{k}": v for k, v in sealed.items()}, **{f"readable_{k}": v for k, v in left.items()},
             "seal_key_unavailable": unavailable}

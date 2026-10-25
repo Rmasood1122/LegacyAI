@@ -18,7 +18,7 @@ import re
 from collections.abc import Callable
 from typing import Any, TypedDict
 
-from app.capture import condition, topic_condition
+from app.capture import Fields, condition, item_title_columns, open_item_title, topic_condition
 from app.knowledge.reads import CITED_PASSAGE_AND_DOCUMENT, CITES_ITEM_VERSION, readable_document
 from app.platform import Database, ServiceContext, write_audit
 
@@ -90,6 +90,7 @@ class _Reader:
     def __init__(self, cur: Any, ctx: ServiceContext) -> None:
         self.cur = cur
         self.tenant = ctx.tenant_id
+        self.titles = Fields(cur, ctx.tenant_id, "knowledge_items")     # item titles are sealed from step 6 on (D41)
         item, self.item_params = condition(ctx.filter, "knowledge_items", ctx.tenant_id)
         # THE definition of an item the caller may see in the map: readable, and not withdrawn. Every item query uses it.
         self.visible_item = f"({item} AND i.status <> 'withdrawn')"
@@ -101,16 +102,23 @@ class _Reader:
     def capped(self, sql: str, params: tuple[Any, ...], limit: int) -> tuple[list[dict[str, Any]], bool]:
         """At most `limit` rows, and whether there were more."""
         self.cur.execute(sql + " LIMIT %s", (*params, limit + 1))
-        rows = [dict(r) for r in self.cur.fetchall()]
+        rows = [self._opened(dict(r)) for r in self.cur.fetchall()]
         return rows[:limit], len(rows) > limit
+
+    def _opened(self, row: dict[str, Any]) -> dict[str, Any]:
+        """An item row's sealed title opened for this caller (rows of other kinds are left as they are)."""
+        return open_item_title(self.titles, row) if "title_key" in row else row
 
     def one(self, sql: str, params: tuple[Any, ...]) -> dict[str, Any] | None:
         self.cur.execute(sql, params)
         row = self.cur.fetchone()
-        return dict(row) if row is not None else None
+        return self._opened(dict(row)) if row is not None else None
 
     def group(self, name: str, edge_kind: str, sql: str, params: tuple[Any, ...], make: Callable[[dict[str, Any]], Neighbour]) -> Group:
         rows, more = self.capped(sql, params, NEIGHBOURS)
+        if rows and "status" in rows[0]:
+            # items: the database cannot sort sealed titles, so it picks them in id order and they are sorted by title here
+            rows.sort(key=lambda r: (r["title"], r["id"]))
         return {"group": name, "edge_kind": edge_kind, "truncated": more, "nodes": [make(r) for r in rows]}
 
 
@@ -119,7 +127,8 @@ def _item_neighbour(r: dict[str, Any]) -> Neighbour:
 
 
 def _around_item(q: _Reader, node_id: str) -> tuple[Node, list[Group]] | None:
-    me = q.one(f"SELECT i.id::text AS id, i.title, i.status FROM knowledge_items i WHERE {q.visible_item} AND i.id = %s", (*q.item_params, node_id))
+    me = q.one(f"SELECT i.id::text AS id, {item_title_columns('i')}, i.status FROM knowledge_items i WHERE {q.visible_item} AND i.id = %s",
+               (*q.item_params, node_id))
     if me is None:
         return None
     t = q.tenant
@@ -136,9 +145,9 @@ def _around_item(q: _Reader, node_id: str) -> tuple[Node, list[Group]] | None:
                      WHERE i.tenant_id = %s AND i.id = %s AND {q.readable_document} ORDER BY s.title, id""",
                 (t, node_id, *q.source_params), lambda r: {"node": node("source", r["id"], r["title"]), "origin": None}),
         q.group("conflicting_items", "item_conflict",
-                f"""SELECT i.id::text AS id, i.title, i.status FROM knowledge_item_conflicts k
+                f"""SELECT i.id::text AS id, {item_title_columns("i")}, i.status FROM knowledge_item_conflicts k
                       JOIN knowledge_items i ON i.tenant_id = k.tenant_id AND i.id = CASE WHEN k.item_id = %s THEN k.other_item_id ELSE k.item_id END
-                     WHERE k.tenant_id = %s AND (k.item_id = %s OR k.other_item_id = %s) AND {q.visible_item} ORDER BY i.title, i.id""",
+                     WHERE k.tenant_id = %s AND (k.item_id = %s OR k.other_item_id = %s) AND {q.visible_item} ORDER BY i.id""",
                 (node_id, t, node_id, node_id, *q.item_params), _item_neighbour),
     ]
 
@@ -150,9 +159,9 @@ def _around_topic(q: _Reader, node_id: str) -> tuple[Node, list[Group]] | None:
     t = q.tenant
     return node("topic", me["id"], me["name"]), [
         q.group("items", "item_topic",
-                f"""SELECT i.id::text AS id, i.title, i.status, kt.link_source FROM knowledge_item_topics kt
+                f"""SELECT i.id::text AS id, {item_title_columns("i")}, i.status, kt.link_source FROM knowledge_item_topics kt
                       JOIN knowledge_items i ON i.tenant_id = kt.tenant_id AND i.id = kt.item_id
-                     WHERE kt.tenant_id = %s AND kt.topic_id = %s AND {q.visible_item} ORDER BY i.title, i.id""",
+                     WHERE kt.tenant_id = %s AND kt.topic_id = %s AND {q.visible_item} ORDER BY i.id""",
                 (t, node_id, *q.item_params), lambda r: {"node": node("item", r["id"], r["title"], r["status"]), "origin": r["link_source"]}),
         q.group("job_roles", "job_role_topic",
                 "SELECT m.job_role FROM role_topic_maps m WHERE m.tenant_id = %s AND m.topic_id = %s ORDER BY m.job_role",
@@ -167,11 +176,11 @@ def _around_source(q: _Reader, node_id: str) -> tuple[Node, list[Group]] | None:
         return None
     return node("source", me["id"], me["title"]), [
         q.group("items", "item_source",
-                f"""SELECT DISTINCT i.id::text AS id, i.title, i.status FROM sources s
+                f"""SELECT DISTINCT i.id::text AS id, {item_title_columns("i")}, i.status FROM sources s
                       JOIN chunks c ON c.tenant_id = s.tenant_id AND c.source_id = s.id
                       JOIN citations ci ON ci.tenant_id = c.tenant_id AND ci.chunk_id = c.id AND {CITES_ITEM_VERSION}
                       JOIN knowledge_items i ON i.tenant_id = ci.tenant_id AND i.current_version_id = ci.subject_id
-                     WHERE s.tenant_id = %s AND s.id = %s AND {q.readable_document} AND {q.visible_item} ORDER BY i.title, id""",
+                     WHERE s.tenant_id = %s AND s.id = %s AND {q.readable_document} AND {q.visible_item} ORDER BY id""",
                 (q.tenant, node_id, *q.source_params, *q.item_params), _item_neighbour),
     ]
 
@@ -226,7 +235,7 @@ def export(db: Database, ctx: ServiceContext) -> dict[str, Any]:
             truncated = truncated or more
             return rows
 
-        items = take(f"SELECT i.id::text AS id, i.title, i.status FROM knowledge_items i WHERE {q.visible_item} ORDER BY i.id",
+        items = take(f"SELECT i.id::text AS id, {item_title_columns('i')}, i.status FROM knowledge_items i WHERE {q.visible_item} ORDER BY i.id",
                      tuple(q.item_params), EXPORT_NODES)
         topics = take(f"SELECT tp.id::text AS id, tp.name FROM topics tp WHERE {q.readable_topic} ORDER BY tp.id", tuple(q.topic_params), EXPORT_NODES)
         item_ids = [r["id"] for r in items]

@@ -13,6 +13,7 @@ through here, so the rules are in one place.
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Iterable, Sequence
 from typing import Any
 
@@ -172,6 +173,30 @@ def expert_question_key(question_id: str) -> str:
 
 def feedback_key(answer_id: str, card_id: str) -> str:
     return f"feedback:{answer_id}:{card_id}"
+
+
+# Step 6 (part 2): knowledge items' titles and the words a stored conflict quotes from two items.
+def item_title_columns(alias: str) -> str:
+    """The columns a reader selects from knowledge_items (alias `alias`) to open the title with open_item_title()."""
+    return f"{alias}.title, {alias}.title_sealed, {alias}.sealed_key AS title_key"
+
+
+def item_title_json(alias: str) -> str:
+    """The same columns inside jsonb_build_object (the sealed bytes as base64), for open_item_title()."""
+    return f"'title', {alias}.title, 'title_sealed', encode({alias}.title_sealed, 'base64'), 'title_key', {alias}.sealed_key"
+
+
+def open_item_title(fields: Fields, row: dict[str, Any], id_column: str = "id") -> dict[str, Any]:
+    """Replaces the title columns of `row` by the opened title ('' once erased). `fields` is for table knowledge_items."""
+    sealed = row.pop("title_sealed", None)
+    if isinstance(sealed, str):            # from jsonb: base64
+        sealed = base64.b64decode(sealed)
+    row["title"] = fields.open(f"item:{row[id_column]}", "title", row.get("title"), sealed, row.pop("title_key", None)) or ""
+    return row
+
+
+def conflict_key(item_id: str, other_item_id: str) -> str:
+    return f"conflict:{item_id}:{other_item_id}"
 
 
 def new_row_id(cur: psycopg.Cursor[Any]) -> str:

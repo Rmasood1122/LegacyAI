@@ -18,11 +18,24 @@ import psycopg
 from pgvector import HalfVector
 
 from app.ai_gateway import Caller, DataBlock, Embedder, Gateway, ItemExtractOutput
-from app.capture import Fields, Sealer, consent_family, redact, row_key, topic_condition, version_key
+from app.capture import (
+    Fields,
+    Sealer,
+    consent_family,
+    item_title_columns,
+    new_row_id,
+    open_item_title,
+    redact,
+    row_key,
+    topic_condition,
+    version_key,
+)
 from app.knowledge import item_conflicts, scenario_erasure
 from app.platform import Database, ServiceContext, one, write_audit
 
 BODY_MAX = 2000
+# An erased item keeps no title, in either form.
+_ERASE_TITLE = "UPDATE knowledge_items SET title = '', title_sealed = NULL, sealed_key = NULL WHERE tenant_id = %s AND id = %s"
 
 
 class ItemRefused(Exception):
@@ -43,7 +56,7 @@ review_settings = _settings      # the public name, for the other modules of thi
 
 def _item(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str, lock: bool = True) -> dict[str, Any]:
     cur.execute(
-        f"""SELECT i.id::text AS id, i.status, i.title, i.origin, i.department_id::text AS department_id, i.sensitivity,
+        f"""SELECT i.id::text AS id, i.status, {item_title_columns("i")}, i.origin, i.department_id::text AS department_id, i.sensitivity,
                    i.owner_person_id::text AS owner_person_id, i.current_version_id::text AS current_version_id,
                    v.body, v.body_sealed, v.sealed_key, v.change_kind, v.version_no, v.author_person_id::text AS author_person_id
               FROM knowledge_items i LEFT JOIN knowledge_versions v ON v.tenant_id = i.tenant_id AND v.id = i.current_version_id
@@ -51,7 +64,7 @@ def _item(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str, lock: bool = T
     row = cur.fetchone()
     if row is None:
         raise ItemRefused("not_found", 404)
-    item = dict(row)
+    item = open_item_title(Fields(cur, tenant_id, "knowledge_items"), dict(row))     # sealed from step 6 on (D41)
     sealed, key_id = item.pop("body_sealed"), item.pop("sealed_key")
     if item["version_no"] is not None:     # the text is sealed from step 4b on (D41): opened here, for this request only
         item["body"] = Fields(cur, tenant_id, "knowledge_versions").open(version_key(item_id, item["version_no"]), "body", item["body"],
@@ -106,12 +119,15 @@ def create_item(cur: psycopg.Cursor[Any], *, tenant_id: str, title: str, body: s
         cur.execute("SELECT COALESCE(max(sensitivity), 0) AS s FROM chunks WHERE tenant_id = %s AND id = ANY(%s::uuid[])",
                     (tenant_id, [p[0] for p in provenance]))
         sensitivity = max(sensitivity, int(one(cur)["s"]))
+    # the title is stored sealed with the company's content key (D41 step 6), bound to this item
+    item_id = new_row_id(cur)
+    readable, sealed, key_id = Fields(cur, tenant_id, "knowledge_items").seal(f"item:{item_id}", "title", (title or "Untitled")[:200])
     cur.execute(
-        """INSERT INTO knowledge_items (tenant_id, title, origin, ai_extracted, department_id, sensitivity, owner_person_id, consent_id,
-                                        created_by_card_id)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id::text AS id""",
-        (tenant_id, (title or "Untitled")[:200], origin, ai_extracted, department_id, sensitivity, owner_person_id, consent_id, created_by_card_id))
-    item_id = one(cur)["id"]
+        """INSERT INTO knowledge_items (id, tenant_id, title, title_sealed, sealed_key, origin, ai_extracted, department_id, sensitivity,
+                                        owner_person_id, consent_id, created_by_card_id)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+        (item_id, tenant_id, readable, sealed, key_id, origin, ai_extracted, department_id, sensitivity, owner_person_id, consent_id,
+         created_by_card_id))
     version_id = insert_version(cur, tenant_id=tenant_id, item_id=item_id, version_no=1, body=body, change_kind=change_kind,
                                 author_card_id=author_card_id, author_person_id=author_person_id, prompt_version=prompt_version)
     cur.execute("UPDATE knowledge_items SET current_version_id = %s WHERE tenant_id = %s AND id = %s", (version_id, tenant_id, item_id))
@@ -502,7 +518,7 @@ def erase_withdrawn_items(cur: psycopg.Cursor[Any], tenant_id: str, consent_id: 
         cur.execute("SELECT id FROM knowledge_versions WHERE tenant_id = %s AND item_id = %s AND erased_at IS NULL", (tenant_id, item_id))
         for v in cur.fetchall():
             cur.execute("SELECT erase_version(%s)", (v["id"],))
-        cur.execute("UPDATE knowledge_items SET title = '' WHERE tenant_id = %s AND id = %s", (tenant_id, item_id))
+        cur.execute(_ERASE_TITLE, (tenant_id, item_id))
     # The withdrawal itself is recorded by the database (migration 15), not through _move: the words a stored conflict
     # quotes from the erased text must go here, and the partner item loses its mark and its task.
     item_conflicts.clear_many(cur, tenant_id, erased)
@@ -530,7 +546,7 @@ def withdraw_items(cur: psycopg.Cursor[Any], tenant_id: str, only: list[str], mi
         cur.execute("SELECT id FROM knowledge_versions WHERE tenant_id = %s AND item_id = %s AND erased_at IS NULL", (tenant_id, item_id))
         for v in cur.fetchall():
             cur.execute("SELECT erase_version(%s)", (v["id"],))
-        cur.execute("UPDATE knowledge_items SET title = '' WHERE tenant_id = %s AND id = %s", (tenant_id, item_id))
+        cur.execute(_ERASE_TITLE, (tenant_id, item_id))
         item_conflicts.clear(cur, tenant_id, item_id)        # the stored conflict quotes words of the erased text
     scenario_erasure.erase_for_items(cur, tenant_id, only)   # and so does a scenario built on it
     sla = int(_settings(cur, tenant_id)["review_sla_days"])
