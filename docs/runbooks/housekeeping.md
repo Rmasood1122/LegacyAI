@@ -7,7 +7,7 @@ scheduled, run it once a day by hand, or accept what "What happens if it is not 
 
 ## What it does
 
-One command, five jobs, for every company:
+One command, six jobs, for every company:
 
 1. **Cards that have expired are written down as expired** (state, usage history, audit row) and renewal notices
    go out. Whether a card works never depends on this: the API treats a card as expired the moment its date passes.
@@ -30,6 +30,13 @@ One command, five jobs, for every company:
    `npm run outbound:deliver` (see `docs/runbooks/outbound-delivery.md`). It does nothing unless
    `WEBHOOK_DELIVERY=https` or an e-mail sender is configured. Old webhook events and deliveries and old queued
    e-mails (30 days) are removed with the other old rows in job 3.
+
+6. **The knowledge service's own housekeeping (added 2026-10-25):** for every customer company, the command asks the
+   AI service (`AI_SERVICE_URL`) to do its part: verified items past their date become stale, expired questions to
+   experts and test attempts are closed, answers older than the company's retention time are removed, and content
+   saved before 2026-10-25 is locked with the company's key (see "Locking older content" below). Until this date
+   nothing called that part at all. Each company runs by itself; a failure is printed with the company's id and the
+   reason (`knowledge.failures`), and the command ends with a failure code.
 
 A job that fails is reported in the output and does not stop the others; the command then ends with a failure
 code.
@@ -67,6 +74,29 @@ second time.
 - The tables named in job 3 keep growing.
 - **No renewal reminder is created and automatic renewal is never tried.** A company's term still ends on its
   date, and the Owner can still renew by hand on the billing screen.
+- **Knowledge housekeeping does not happen:** items past their date are not marked stale (answers already treat an
+  overdue item as stale), old answers are kept past the company's retention time, and content saved before
+  2026-10-25 stays readable in the database.
+
+## Locking older content (decision D41, step 5)
+
+Since 2026-10-25, documents, item texts and interview questions and answers are stored locked with the company's
+key. What was saved before is still stored readable. Job 6 locks it, a little at a time: per company and run at most
+200 document pieces, 200 item versions and 200 interview turns per round, rounds for at most 8 seconds.
+
+1. Run the command as usual. In the output, under `knowledge`:
+   - `sealed_chunks`, `sealed_versions`, `sealed_turns`: how many were locked in this run (all companies together);
+   - `readable_chunks`, `readable_versions`, `readable_turns`: how many are still readable after this run;
+   - `seal_key_unavailable`: how many companies were skipped because their key cannot be used right now (switched
+     off, permission taken back, or the key service did not answer). Their content stays as it is; nothing is half
+     done. It is tried again on the next run.
+2. Run it again until the three `readable_` numbers are 0. Running it more often is harmless: a locked row is never
+   locked twice, and each run only does a bounded amount of work.
+3. A company with its own key that is switched off is never locked with another key: its readable rows stay
+   readable until the key works again. Tell the company if `seal_key_unavailable` stays above 0.
+
+Nothing here needs a person to look at content, and the command never prints any of it. Once every company shows 0,
+the readable columns can be removed by a later change (step 5 part 2, not built).
 
 ## What it does not do
 

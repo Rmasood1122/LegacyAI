@@ -5,6 +5,7 @@ from app.capture.filters import company_wide, condition, grants_something, named
 from app.capture.memory_search import CompanyIndex
 from app.capture.redaction import Finding, Redacted, redact
 from app.capture.retrieval import Candidate, load_approved, load_index, retrieve, retrieve_in_memory
+from app.capture.seal_existing import seal_chunks, seal_turns, still_readable
 from app.capture.sealed_chunks import SEALED_COLUMNS, VERSION_TEXT, Fields, Opener, Sealer, row_key, turn_key, version_key, version_text
 from app.capture.search_cache import SEARCH_CACHE, SearchCache
 from app.capture.withdrawal import consent_family
@@ -32,6 +33,9 @@ __all__ = [
            "retrieve",
            "retrieve_in_memory",
            "row_key",
+           "seal_chunks",
+           "seal_turns",
+           "still_readable",
            "topic_condition",
            "turn_key",
            "version_key",

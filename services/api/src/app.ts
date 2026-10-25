@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createBilling, type BillingModule, type BillingPort, type PaymentProvider } from './modules/billing/index.ts';
 import { createIdentityAccess, type AnomalySettings, type AuthLimits, type IdentityAccess, type OidcHttp } from './modules/identity-access/index.ts';
-import { createKnowledgeGateway } from './modules/knowledge-gateway/index.ts';
+import { createKnowledgeGateway, type KnowledgeGateway } from './modules/knowledge-gateway/index.ts';
 import { createMail, type MailModule, type MailSender } from './modules/mail/index.ts';
 import { createWebhooks, type WebhookTransport, type WebhooksModule } from './modules/webhooks/index.ts';
 import {
@@ -44,6 +44,8 @@ export interface App {
   log: Logger;
   identity: IdentityAccess;
   billing: BillingModule;
+  /** The knowledge module's jobs (its routes are already on `http`). */
+  knowledge: Pick<KnowledgeGateway, 'upkeep'>;
   webhooks: WebhooksModule;
   mail: MailModule;
   exports: ExportRegistry;
@@ -118,7 +120,7 @@ export async function createApp(config: Config, overrides: AppOverrides = {}): P
 
   await http.app.ready();
   return {
-    http, db, log, identity, billing, webhooks, mail, exports,
+    http, db, log, identity, billing, knowledge, webhooks, mail, exports,
     close: async () => {
       await http.app.close();
       await mail.flush();

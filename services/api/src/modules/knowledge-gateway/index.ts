@@ -34,7 +34,17 @@ export interface KnowledgeGateway {
   routes: RouteDef[];
   /** For the identity module's retirement radar (plugged in by app.ts): what is held from a person, narrowed by the asking card's rights. */
   personHoldings: PersonHoldingsLoader;
+  /**
+   * The AI service's own housekeeping for ONE company (docs/phase2/01): items past their date become stale, expired
+   * questions and attempts are closed, answers older than the company's retention time are removed, and content
+   * written readable before decision D41 step 4b is sealed, a bounded amount per call. Returns the service's counts.
+   * Run by the housekeeping command.
+   */
+  upkeep(tenantId: string, requestId: string): Promise<Record<string, number>>;
 }
+
+/** The card id a job sends when it acts for nobody: the AI service needs one, and no real card has it. */
+const NO_CARD = '00000000-0000-0000-0000-000000000000';
 
 export function createKnowledgeGateway(deps: KnowledgeGatewayDeps): KnowledgeGateway {
   const ai = new AiServiceClient(deps.config.aiServiceUrl, deps.config.aiServiceTimeoutMs, deps.config.serviceTokenKey,
@@ -45,5 +55,12 @@ export function createKnowledgeGateway(deps: KnowledgeGatewayDeps): KnowledgeGat
   return {
     routes: [...knowledgeRoutes(g), ...workflowRoutes(g), ...adminRoutes(g), ...qualityRoutes(g), ...insightRoutes(g), ...scenarioRoutes(g)],
     personHoldings: personHoldingsLoader(deps.authorizer),
+    upkeep: async (tenantId, requestId) => {
+      const res = await ai.call<{ done?: Record<string, number> }>({
+        path: '/internal/housekeeping', action: 'housekeeping.run',
+        claims: { tenant_id: tenantId, card_id: NO_CARD, person_id: null, roles: [], card_phase: 'normal', request_id: requestId },
+      });
+      return res.done ?? {};
+    },
   };
 }

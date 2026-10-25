@@ -1,9 +1,10 @@
 # Documents and knowledge under the company's key — design (decision D41, 2026-10-24)
 
-> **Status: steps 2, 3 and 4a of 7 built (2026-10-25).** The AI service can lock and unlock content with the company's
-> key (`services/ai/app/platform/sealing.py`) and answers questions with the in-memory search
-> (`services/ai/app/capture/memory_search.py`, `search_cache.py`). Content is still stored readable: locking it when it
-> is saved is step 4b. This design answers the gap named in
+> **Status: steps 2 to 4b and the first part of step 5 built (2026-10-25).** The AI service locks documents, items'
+> texts and interview turns with the company's key when they are saved (`services/ai/app/platform/sealing.py`,
+> `services/ai/app/capture/sealed_chunks.py`), answers questions with the in-memory search
+> (`services/ai/app/capture/memory_search.py`, `search_cache.py`), and the housekeeping command locks what was saved
+> before (`services/ai/app/capture/seal_existing.py`). This design answers the gap named in
 > `08-bring-your-own-key.md` ("documents and knowledge are not covered") and splits the work into steps that can each
 > be built, tested and merged on their own. The founder confirmed the three choices at the end on 2026-10-24.
 
@@ -148,7 +149,20 @@ which unlocks a company's content into memory for a few minutes while it is bein
      withdrawal) empties both forms. The item screens, version history, conflict check, test questions, scenarios
      and the interview screens open them for the request only. Older rows stay readable until step 5.
 5. **The background job** that seals existing rows. Then empty the readable columns. A migration refuses to drop
-   them early.
+   them early. Done in two parts:
+   - **5 part 1, built 2026-10-25: the job.** Part of the housekeeping command (`npm run housekeeping`, job 6), which
+     now also runs the AI service's own housekeeping for every company (until then nothing called it; see the
+     report, step 21). Per company and run: batches of 200 chunks, 200 versions and 200 turns, each batch in its own
+     transaction, for at most 8 seconds; the rest is done by the next run. Each row is sealed exactly as a new one
+     would be (same key choice, same binding) and its readable columns are emptied in the same change. The database
+     allows this one change and nothing else: a source chunk only while the job's flag `app.reseal` is on; a version
+     only through `seal_version()` (the AI service still cannot change a version itself); never sealed -> readable.
+     A company whose key cannot be used is skipped and reported (`seal_key_unavailable`); nothing is half-done. The
+     command prints what is left (`knowledge.readable_chunks`, `readable_versions`, `readable_turns`).
+     Runbook: `docs/runbooks/housekeeping.md`, "Locking older content".
+   - **5 part 2, not built:** once production shows 0 left for every company, a migration drops the readable
+     columns (refused while any row is still readable) and `SEARCH_ENGINE=sql` is removed. Not built either: when a
+     company clears its own key, re-sealing its content with the platform's key (section 4 above).
 6. **The rest of the content columns:**
    - titles, topic names (uniqueness then by keyed hash), quiz, scenarios, feedback, conflict excerpts, questions;
    - exports unseal what they export.
