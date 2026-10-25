@@ -73,7 +73,7 @@ describe('every tenant table has forced row-level security', () => {
     const scoped = rows.filter((r) => !exempt.has(r.table));
     // 24 from Phase 1 + 25 from Phase 2 (docs/phase2/02) + 6 from Phase 4 (answer_feedback, knowledge_item_conflicts,
     // anomaly_settings, card_anomaly_counters, person_leaving, retirement_nudges)
-    expect(scoped.length).toBe(69);   // + 1 for bring-your-own-key (company_data_keys)   // + 3 for webhooks and e-mail (5 new tables; the 2 design-only ones they replace were already counted)   // + 1 for API keys (api_keys);   // + 4 for billing (subscriptions, invoices, payment_events, billing_notices);   // + 5 for scenario replay (scenarios, steps, step items, attempts, answers)
+    expect(scoped.length).toBe(70);   // + 1 for content keys (content_data_keys, decision D41 step 4b)   // + 1 for bring-your-own-key (company_data_keys)   // + 3 for webhooks and e-mail (5 new tables; the 2 design-only ones they replace were already counted)   // + 1 for API keys (api_keys);   // + 4 for billing (subscriptions, invoices, payment_events, billing_notices);   // + 5 for scenario replay (scenarios, steps, step items, attempts, answers)
     for (const r of scoped) {
       expect(r, `table ${r.table}`).toMatchObject({ enabled: true, forced: true });
       expect(r.policies, `table ${r.table} has no policy`).toBeGreaterThanOrEqual(1);
@@ -235,7 +235,7 @@ describe('cross-tenant access attempts (as the app role, in SQL)', () => {
 const OUR_FUNCTIONS = [
   'ai_usage_ledger_guard', 'api_keys_guard', 'app_current_tenant', 'audit_field', 'audit_log_chain', 'audit_log_reject_change',
   'audit_write', 'cards_enforce_lifecycle', 'cards_register_directory', 'chunks_count', 'chunks_guard', 'chunks_search_version',
-  'citations_guard', 'company_data_keys_guard', 'consent_is_valid', 'consents_guard', 'consents_hide_on_withdrawal', 'erase_version', 'expert_questions_guard',
+  'citations_guard', 'company_data_keys_guard', 'consent_is_valid', 'consents_guard', 'consents_hide_on_withdrawal', 'content_data_keys_guard', 'erase_version', 'expert_questions_guard',
   'interviews_guard', 'invoices_guard', 'knowledge_items_end_conflicts', 'knowledge_items_guard', 'knowledge_items_outbox', 'knowledge_items_touch_scenarios', 'knowledge_versions_immutable',
   'purge_login_attempts', 'quiz_attempts_guard', 'quiz_items_guard', 'relabel', 'resolve_card', 'resolve_sso_company', 'review_tasks_guard',
   'scenario_attempts_guard', 'scenario_is_hidden', 'scenario_parts_guard', 'scenarios_guard', 'sources_guard',

@@ -6,8 +6,11 @@ production default. A real AI provider can never be selected while ENVIRONMENT=t
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -50,6 +53,13 @@ class Settings:
     db_pool_max: int
     search_engine: Literal["memory", "sql"] = "memory"
     search_memory_bytes: int = 1024 * 1024 * 1024
+    # Content keys (decision D41, step 4b). The same names as the API's settings.
+    key_service: Literal["none", "local", "google-kms"] = "none"
+    local_keys: tuple[tuple[str, Secret], ...] = ()      # name -> base64 key; KEY_SERVICE=local only, never in production
+    platform_content_key: str | None = None              # the platform's content key: a Cloud KMS key name, or local:<name>
+
+    def local_key_bytes(self) -> dict[str, bytes]:
+        return {name: base64.b64decode(secret.reveal()) for name, secret in self.local_keys}
 
 
 def _bundle(env: dict[str, str]) -> dict[str, str]:
@@ -121,6 +131,33 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     if not 64 <= search_mb <= 16384:
         raise ConfigError("SEARCH_MEMORY_MB must be between 64 and 16384")
 
+    key_service = merged.get("KEY_SERVICE", "none")
+    if key_service not in ("none", "local", "google-kms"):
+        raise ConfigError("KEY_SERVICE must be none, local or google-kms")
+    local_keys: list[tuple[str, Secret]] = []
+    if key_service == "local":
+        if environment == "production":
+            raise ConfigError("KEY_SERVICE=local keeps keys in the configuration and is not allowed in production")
+        try:
+            parsed = json.loads(merged.get("LOCAL_KEY_SERVICE_KEYS", ""))
+        except json.JSONDecodeError:
+            parsed = None
+        if not isinstance(parsed, dict) or not parsed:
+            raise ConfigError("LOCAL_KEY_SERVICE_KEYS must be a JSON object of key name -> base64 32-byte key (KEY_SERVICE=local)")
+        for name, b64 in parsed.items():
+            if not re.fullmatch(r"[a-z0-9-]{1,40}", name) or not isinstance(b64, str):
+                raise ConfigError("LOCAL_KEY_SERVICE_KEYS: key names are 1-40 of a-z, 0-9 and -; keys are base64 strings")
+            try:
+                raw = base64.b64decode(b64, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise ConfigError(f"LOCAL_KEY_SERVICE_KEYS.{name} is not base64") from exc
+            if len(raw) != 32:
+                raise ConfigError(f"LOCAL_KEY_SERVICE_KEYS.{name} must be 32 bytes")
+            local_keys.append((name, Secret(b64)))
+    platform_content_key = merged.get("PLATFORM_CONTENT_KEY", "").strip() or None
+    if platform_content_key is not None and key_service == "none":
+        raise ConfigError("PLATFORM_CONTENT_KEY needs a key service (KEY_SERVICE)")
+
     return Settings(
         environment=environment,  # type: ignore[arg-type]
         database_url=Secret(need("DATABASE_URL")),
@@ -135,4 +172,7 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         db_pool_max=pool_max,
         search_engine=search_engine,  # type: ignore[arg-type]
         search_memory_bytes=search_mb * 1024 * 1024,
+        key_service=key_service,  # type: ignore[arg-type]
+        local_keys=tuple(local_keys),
+        platform_content_key=platform_content_key,
     )

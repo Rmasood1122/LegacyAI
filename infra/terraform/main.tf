@@ -22,6 +22,7 @@ locals {
     "monitoring.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "sts.googleapis.com",
+    "cloudkms.googleapis.com",
   ]
 
   # Names only. Terraform never sees a secret VALUE: you add values by hand.
@@ -126,6 +127,46 @@ resource "google_service_account" "scheduler" {
   display_name = "LegacyAI scheduler (starts the two jobs)"
 
   depends_on = [google_project_service.enabled]
+}
+
+# ------------------------------------------------------------------ the platform's content key (decision D41, step 4b)
+# Companies without a key of their own have their documents and knowledge sealed with a data key wrapped by THIS key
+# (the founder's choice of 2026-10-25). One software key, used only through Cloud KMS: it never leaves Google. About
+# $0.06 a month for its one key version, plus $0.03 per 10,000 uses after 10,000 free a month
+# (https://cloud.google.com/kms/pricing, read 2026-10-25). No automatic rotation: every new version costs the same
+# again. Made only together with the services. A key ring can never be deleted (Google's rule); the key version can be.
+resource "google_kms_key_ring" "content" {
+  count    = var.deploy_services ? 1 : 0
+  project  = var.project_id
+  name     = "legacyai-content"
+  location = var.primary_region
+
+  depends_on = [google_project_service.enabled]
+}
+
+resource "google_kms_crypto_key" "content_platform" {
+  count    = var.deploy_services ? 1 : 0
+  name     = "content-platform"
+  key_ring = google_kms_key_ring.content[0].id
+  purpose  = "ENCRYPT_DECRYPT"
+
+  version_template {
+    algorithm        = "GOOGLE_SYMMETRIC_ENCRYPTION"
+    protection_level = "SOFTWARE"
+  }
+
+  # destroying it would make every company's content without a key of its own unreadable
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Only the AI service's account may use it (wrap and unwrap); nobody else, not even the API.
+resource "google_kms_crypto_key_iam_member" "content_platform_ai" {
+  count         = var.deploy_services ? 1 : 0
+  crypto_key_id = google_kms_crypto_key.content_platform[0].id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  member        = "serviceAccount:${google_service_account.ai.email}"
 }
 
 # ------------------------------------------------------------------ secrets (names only)
@@ -432,6 +473,15 @@ resource "google_cloud_run_v2_service" "ai" {
         # all companies' in-memory search indexes together (decision D41, step 4a); must stay well below the machine's memory
         name  = "SEARCH_MEMORY_MB"
         value = "1024"
+      }
+      env {
+        # content keys (decision D41, step 4b): Cloud KMS, with this service's own account
+        name  = "KEY_SERVICE"
+        value = "google-kms"
+      }
+      env {
+        name  = "PLATFORM_CONTENT_KEY"
+        value = google_kms_crypto_key.content_platform[0].id
       }
       env {
         name = "SERVICE_TOKEN_KEY"

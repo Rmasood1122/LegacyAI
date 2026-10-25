@@ -62,7 +62,18 @@ if printf '%s\n%s\n' "$code" "$vars" | grep -Ei '(password|pepper|token|keyring|
    | grep -Evq '= *"(database-url|database-url-admin|api-keyrings|service-token-key|ai-service-config)"'; then
   fail "something that looks like a secret value is written in the Terraform code"
 fi
-paid='google_sql_|google_redis_|google_compute_(instance|address|global_address|router|forwarding_rule|backend_service)|google_container_cluster|google_vpc_access_connector|google_logging_project_sink|google_alloydb_|google_memcache_|google_kms_'
+paid='google_sql_|google_redis_|google_compute_(instance|address|global_address|router|forwarding_rule|backend_service)|google_container_cluster|google_vpc_access_connector|google_logging_project_sink|google_alloydb_|google_memcache_'
 if grep -Eq "resource \"($paid)" ./*.tf; then fail "a resource that costs money while idle was added"; fi
+# Cloud KMS: exactly ONE software key, the platform's content key (decision D41 step 4b; the founder's choice of
+# 2026-10-25, about $0.06 a month). Never a hardware (HSM) or external key, never automatic rotation (every new version
+# costs the same again), and only the AI service's account may use it.
+[ "$(count '^resource "google_kms_crypto_key" ')" -eq 1 ] || fail "exactly one Cloud KMS key is allowed (the platform's content key)"
+[ "$(count '^resource "google_kms_key_ring" ')" -eq 1 ] || fail "exactly one Cloud KMS key ring is allowed"
+kms_key="$(block "$code" '^resource "google_kms_crypto_key" "content_platform"')"
+printf '%s\n' "$kms_key" | grep -Eq 'protection_level *= *"SOFTWARE"' || fail "the content key must be a SOFTWARE key (HSM costs about 17 times more)"
+if printf '%s\n' "$kms_key" | grep -Eq 'rotation_period'; then fail "the content key must not rotate automatically (each version is paid)"; fi
+[ "$(count '^resource "google_kms_crypto_key_iam_member" ')" -eq 1 ] || fail "exactly one account may use the content key"
+printf '%s\n' "$(block "$code" '^resource "google_kms_crypto_key_iam_member" "content_platform_ai"')" \
+  | grep -q 'member *= *"serviceAccount:${google_service_account.ai.email}"' || fail "only the AI service may use the content key"
 
-echo "terraform-guardrails: PASS (min 0 x2, max api=$api_max ai=1, request-based billing x2, AI service invokable only by the API, AI memory <= 2Gi, fake AI provider by default, budget alert, $secrets empty secrets, $buckets private buckets with retention, risky flags default to false)"
+echo "terraform-guardrails: PASS (min 0 x2, max api=$api_max ai=1, request-based billing x2, AI service invokable only by the API, AI memory <= 2Gi, one software KMS key for the AI service only, fake AI provider by default, budget alert, $secrets empty secrets, $buckets private buckets with retention, risky flags default to false)"

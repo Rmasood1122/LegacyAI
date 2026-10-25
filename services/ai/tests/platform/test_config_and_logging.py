@@ -55,3 +55,32 @@ def test_logs_refuse_content_fields() -> None:
     for key in ("text", "question", "answer", "prompt", "body", "title", "token", "password"):
         with pytest.raises(ValueError):
             log.info("x", **{key: "synthetic content"})
+
+
+def test_content_key_settings_fail_closed() -> None:
+    """KEY_SERVICE, LOCAL_KEY_SERVICE_KEYS and PLATFORM_CONTENT_KEY (decision D41, step 4b): the API's names and rules."""
+    import base64
+
+    key = base64.b64encode(bytes(32)).decode()
+    s = load_settings(BASE)
+    assert (s.key_service, s.local_keys, s.platform_content_key) == ("none", (), None)
+    s = load_settings({**BASE, "KEY_SERVICE": "local", "LOCAL_KEY_SERVICE_KEYS": json.dumps({"platform": key}),
+                       "PLATFORM_CONTENT_KEY": "local:platform"})
+    assert s.local_key_bytes() == {"platform": bytes(32)} and s.platform_content_key == "local:platform"
+    assert key not in repr(s)                                                      # never printed
+    prod = {"ENVIRONMENT": "production", "DATABASE_URL": "postgres://u@h/db", "SERVICE_TOKEN_KEY": TEST_KEY, "EMBEDDER": "fake"}
+    assert load_settings({**prod, "KEY_SERVICE": "google-kms",
+                          "PLATFORM_CONTENT_KEY": "projects/acme-prod-1234/locations/us/keyRings/r/cryptoKeys/k"}).key_service == "google-kms"
+    for bad in (
+        {"KEY_SERVICE": "vault"},
+        {"KEY_SERVICE": "local"},                                                  # no keys
+        {"KEY_SERVICE": "local", "LOCAL_KEY_SERVICE_KEYS": "{}"},
+        {"KEY_SERVICE": "local", "LOCAL_KEY_SERVICE_KEYS": json.dumps({"Bad Name": key})},
+        {"KEY_SERVICE": "local", "LOCAL_KEY_SERVICE_KEYS": json.dumps({"short": base64.b64encode(bytes(16)).decode()})},
+        {"KEY_SERVICE": "local", "LOCAL_KEY_SERVICE_KEYS": json.dumps({"k": "not base64!"})},
+        {"PLATFORM_CONTENT_KEY": "local:platform"},                                # a platform key without a key service
+    ):
+        with pytest.raises(ConfigError):
+            load_settings({**BASE, **bad})
+    with pytest.raises(ConfigError):                                               # the stand-in is never allowed in production
+        load_settings({**prod, "KEY_SERVICE": "local", "LOCAL_KEY_SERVICE_KEYS": json.dumps({"platform": key})})
