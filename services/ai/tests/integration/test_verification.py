@@ -12,7 +12,7 @@ from app.ai_gateway import FakeEmbedder
 from app.knowledge import items
 from app.platform import Database
 from tests.conftest import World, give_consent, needs_db
-from tests.integration.helpers import verified_item
+from tests.integration.helpers import chunk_texts, verified_item
 
 pytestmark = [pytest.mark.db, needs_db]
 
@@ -64,7 +64,7 @@ def test_a_corrector_cannot_confirm_their_own_correction(db: Database, world: Wo
     with pytest.raises(items.ItemRefused):
         items.verify(db, world.ctx("reviewer", "item.verify"), item, embedder)
     assert items.verify(db, world.ctx("owner", "item.verify"), item, embedder) == "corrected"
-    copy = admin.execute("SELECT text, verification_status FROM chunks WHERE knowledge_item_id = %s", (item,)).fetchone()
+    copy = chunk_texts(admin, "c.knowledge_item_id = %s", (item,))[0]
     assert copy["verification_status"] == "corrected" and copy["text"].endswith("Wear gloves.")
 
 

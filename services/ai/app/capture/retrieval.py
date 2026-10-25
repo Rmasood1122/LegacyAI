@@ -8,12 +8,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
 import psycopg
 from pgvector import HalfVector
 
 from app.ai_gateway import Embedder
 from app.capture.filters import condition
 from app.capture.memory_search import CompanyIndex, Entry
+from app.capture.sealed_chunks import SEALED_COLUMNS, Opener
 
 CANDIDATES = 12
 
@@ -51,7 +53,7 @@ def retrieve(cur: psycopg.Cursor[Any], *, tenant_id: str, spec: Any, question: s
         WITH visible AS MATERIALIZED (
             SELECT c.id, c.kind, c.text, c.embedding, c.source_id, c.knowledge_item_id, c.verification_status
               FROM chunks c
-             WHERE c.tenant_id = %s AND c.status = 'active' AND c.embedding_model = %s
+             WHERE c.tenant_id = %s AND c.status = 'active' AND c.embedding_model = %s AND c.embedding IS NOT NULL
                AND {where}{extra}
         ),
         semantic AS (
@@ -82,13 +84,14 @@ def load_index(cur: psycopg.Cursor[Any], *, tenant_id: str, model_id: str) -> Co
     """Every active chunk of one company, for the in-memory search (D41 step 3). No access filter here: the index is
     the company's, and each search is limited to what the filter lets that person see (retrieve_in_memory)."""
     cur.execute(
-        """SELECT c.id::text AS id, c.kind, c.text, c.embedding, c.source_id::text AS source_id,
-                  c.knowledge_item_id::text AS knowledge_item_id, c.verification_status
-             FROM chunks c
-            WHERE c.tenant_id = %s AND c.status = 'active' AND c.embedding_model = %s""",
+        f"""SELECT c.id::text AS id, {SEALED_COLUMNS}, c.embedding, c.embedding_sealed, c.verification_status
+              FROM chunks c
+             WHERE c.tenant_id = %s AND c.status = 'active' AND c.embedding_model = %s""",
         [tenant_id, model_id])
-    return CompanyIndex(Entry(id=r["id"], kind=r["kind"], text=r["text"], vector=r["embedding"].to_numpy(), source_id=r["source_id"],
-                              knowledge_item_id=r["knowledge_item_id"], verification_status=r["verification_status"])
+    opener = Opener(cur, tenant_id)        # sealed chunks are opened here, in memory only (D41)
+    return CompanyIndex(Entry(id=r["id"], kind=r["kind"], text=opener.text(r),
+                              vector=r["embedding"].to_numpy() if r["embedding"] is not None else opener.vector(r) or [],
+                              source_id=r["source_id"], knowledge_item_id=r["knowledge_item_id"], verification_status=r["verification_status"])
                         for r in cur.fetchall())
 
 
@@ -110,6 +113,13 @@ def retrieve_in_memory(cur: psycopg.Cursor[Any], index: CompanyIndex, *, tenant_
                       verification_status=h.verification_status, score=h.score, similarity=h.similarity) for h in hits]
 
 
+def _cosine(a: list[float], b: list[float]) -> float:
+    """The same number as pgvector's 1 - (a <=> b)."""
+    x, y = np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64)
+    norm = float(np.linalg.norm(x) * np.linalg.norm(y))
+    return float(x @ y / norm) if norm else 0.0
+
+
 def load_approved(cur: psycopg.Cursor[Any], *, tenant_id: str, spec: Any, approved_ids: list[str],
                   question_vector: list[float] | None = None) -> list[dict[str, Any]]:
     """Loads the text of chunks the API approved for this request - again under the filter.
@@ -119,15 +129,19 @@ def load_approved(cur: psycopg.Cursor[Any], *, tenant_id: str, spec: Any, approv
     where, params = condition(spec, "chunks", tenant_id)
     if where == "FALSE":
         return []
-    sim_sql = "1 - (c.embedding <=> %s)" if question_vector is not None else "NULL::float8"
-    sim_params: list[Any] = [HalfVector(question_vector)] if question_vector is not None else []
     cur.execute(
-        f"""SELECT c.id::text AS id, c.kind, c.text, c.source_id::text AS source_id, c.knowledge_item_id::text AS knowledge_item_id,
-                   c.verification_status, c.owner_person_id::text AS owner_person_id, c.page_from, c.page_to,
-                   {sim_sql} AS similarity
+        f"""SELECT c.id::text AS id, {SEALED_COLUMNS}, c.embedding, c.embedding_sealed, c.verification_status,
+                   c.owner_person_id::text AS owner_person_id, c.page_from, c.page_to
               FROM chunks c
              WHERE c.tenant_id = %s AND c.status = 'active' AND c.id = ANY(%s::uuid[]) AND {where}""",
-        [*sim_params, tenant_id, approved_ids, *params])
-    rows = cur.fetchall()
+        [tenant_id, approved_ids, *params])
+    opener = Opener(cur, tenant_id)        # sealed chunks are opened here (D41); the similarity is computed here too
+    rows = []
+    for r in cur.fetchall():
+        vector = opener.vector(r) if question_vector is not None else None
+        rows.append({"id": r["id"], "kind": r["kind"], "text": opener.text(r), "source_id": r["source_id"],
+                     "knowledge_item_id": r["knowledge_item_id"], "verification_status": r["verification_status"],
+                     "owner_person_id": r["owner_person_id"], "page_from": r["page_from"], "page_to": r["page_to"],
+                     "similarity": _cosine(question_vector, vector) if question_vector is not None and vector is not None else None})
     order = {cid: i for i, cid in enumerate(approved_ids)}
     return sorted(rows, key=lambda r: order.get(r["id"], 1_000_000))

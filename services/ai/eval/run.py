@@ -36,10 +36,11 @@ from app.ai_gateway import Caller, DataBlock, FakeEmbedder, FakeProvider, Gatewa
 from app.ai_gateway.outputs import EvalJudgeOutput
 from app.ai_gateway.remote import AnthropicProvider, OpenAIProvider
 from app.ai_gateway.types import ProviderResult
-from app.capture import ingest, interviews, topics
+from app.capture import SEALED_COLUMNS, Opener, ingest, interviews, topics
 from app.capture.gaps import gap_report
 from app.knowledge import answers, items, readiness
-from app.platform import Database, Logger, ServiceContext
+from app.platform import ContentKeys, Database, Logger, ServiceContext, use_content_keys
+from app.platform.sealing import LocalKeyService
 from eval.one_sided import answer_from_one_side
 from eval.pdfs import make_pdf
 
@@ -138,9 +139,12 @@ def load_docs(db: Database, admin: psycopg.Connection[dict[str, Any]], c: Compan
 
 
 def chunk_rows(admin: psycopg.Connection[dict[str, Any]], tenant: str) -> dict[str, dict[str, Any]]:
-    rows = admin.execute("""SELECT c.id::text AS id, c.text, c.sensitivity, c.source_id::text AS source_id, c.tenant_id::text AS tenant_id
-                             FROM chunks c WHERE c.tenant_id = %s""", (tenant,)).fetchall()
-    return {r["id"]: r for r in rows}
+    """Every chunk of the company with its text opened (chunks are stored sealed, decision D41)."""
+    rows = admin.execute(f"""SELECT c.id::text AS id, c.sensitivity, c.tenant_id::text AS tenant_id, {SEALED_COLUMNS}
+                              FROM chunks c WHERE c.tenant_id = %s""", (tenant,)).fetchall()
+    with admin.cursor() as cur:
+        opener = Opener(cur, tenant)
+        return {r["id"]: {**r, "text": opener.text(r)} for r in rows}
 
 
 def ask(db: Database, c: Company, gateway: Gateway, rec: RecordingProvider, embedder: Any, caller: Caller, question: str,
@@ -210,6 +214,8 @@ def main() -> None:
     rec = RecordingProvider(inner)
     cap = int(args.cap_usd * 1_000_000)
 
+    # content is sealed as in production (decision D41); the platform key is a fresh random key for this run only
+    use_content_keys(ContentKeys(LocalKeyService({"platform": os.urandom(32)}), "local:platform"))
     db = Database(os.environ["DATABASE_URL_AI"], pool_max=4)
     admin = psycopg.connect(os.environ["DATABASE_URL_SUPERUSER"], autocommit=True, row_factory=dict_row)
     embedder = make_embedder(args.embedder) if args.embedder == "local" else FakeEmbedder()

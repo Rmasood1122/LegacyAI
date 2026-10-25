@@ -19,13 +19,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
-from pgvector import HalfVector
 
 from app.ai_gateway import Embedder
 from app.capture.chunking import chunk_pages
 from app.capture.files import UploadRejected, extract, sniff
 from app.capture.filters import condition
 from app.capture.redaction import Finding, redact
+from app.capture.sealed_chunks import SEALED_COLUMNS, Opener, Sealer, row_key
 from app.platform import Database, ServiceContext, one, write_audit
 
 DEFAULT_CHUNK_QUOTA = 5000
@@ -198,14 +198,16 @@ def process_upload(db: Database, ctx: ServiceContext, embedder: Embedder, source
                 (mime, len(data), doc.page_count, len(doc.text), digest, ctx.tenant_id, source_id))
             labels = one(cur)
             low = sum(1 for f in findings if f.low_confidence)
+            sealer = Sealer(cur, ctx.tenant_id)      # sealed with the company's content key (D41)
             for c in chunks:
                 count = sum(1 for f in findings if f.placeholder and f.placeholder in c.text)
+                body = sealer.text_columns(row_key(kind="source", source_id=source_id, ordinal=c.ordinal, knowledge_item_id=None), c.text)
                 cur.execute(
-                    """INSERT INTO chunks (tenant_id, kind, source_id, ordinal, text, token_estimate, department_id, sensitivity,
-                                           owner_person_id, page_from, page_to, redaction_count, low_confidence_redactions, status)
-                       VALUES (%s, 'source', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')""",
-                    (ctx.tenant_id, source_id, c.ordinal, c.text, c.token_estimate, labels["department_id"], labels["sensitivity"],
-                     labels["owner_person_id"], c.page_from, c.page_to, count,
+                    """INSERT INTO chunks (tenant_id, kind, source_id, ordinal, text, text_sealed, sealed_key, token_estimate, department_id,
+                                           sensitivity, owner_person_id, page_from, page_to, redaction_count, low_confidence_redactions, status)
+                       VALUES (%s, 'source', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')""",
+                    (ctx.tenant_id, source_id, c.ordinal, body["text"], body["text_sealed"], body["sealed_key"], c.token_estimate,
+                     labels["department_id"], labels["sensitivity"], labels["owner_person_id"], c.page_from, c.page_to, count,
                      any(f.low_confidence and f.placeholder in c.text for f in findings)))
             for f in findings:
                 cur.execute(
@@ -235,17 +237,21 @@ def continue_embedding(db: Database, tenant_id: str, card_id: str | None, source
     while time.monotonic() < deadline:
         with db.tenant_tx(tenant_id) as cur:
             cur.execute(
-                """SELECT id::text AS id, text FROM chunks WHERE tenant_id = %s AND source_id = %s AND status = 'pending' AND embedding IS NULL
-                    ORDER BY ordinal LIMIT %s""", (tenant_id, source_id, EMBED_BATCH))
+                f"""SELECT c.id::text AS id, {SEALED_COLUMNS} FROM chunks c
+                     WHERE c.tenant_id = %s AND c.source_id = %s AND c.status = 'pending' AND c.embedding IS NULL AND c.embedding_sealed IS NULL
+                     ORDER BY c.ordinal LIMIT %s""", (tenant_id, source_id, EMBED_BATCH))
             batch = cur.fetchall()
             if not batch:
                 break
-            vectors = embedder.embed([r["text"] for r in batch], "document")
+            vectors = embedder.embed(Opener(cur, tenant_id).texts(batch), "document")
+            sealer = Sealer(cur, tenant_id)
             for r, v in zip(batch, vectors, strict=True):
-                cur.execute("UPDATE chunks SET embedding = %s, embedding_model = %s WHERE tenant_id = %s AND id = %s",
-                            (HalfVector(v), embedder.model_id, tenant_id, r["id"]))
+                vec = sealer.vector_columns(row_key(kind="source", source_id=source_id, ordinal=r["ordinal"], knowledge_item_id=None), v,
+                                            r["sealed_key"])
+                cur.execute("UPDATE chunks SET embedding = %s, embedding_sealed = %s, embedding_model = %s WHERE tenant_id = %s AND id = %s",
+                            (vec["embedding"], vec["embedding_sealed"], embedder.model_id, tenant_id, r["id"]))
     with db.tenant_tx(tenant_id) as cur:
-        cur.execute("SELECT count(*) FILTER (WHERE embedding IS NULL)::int AS missing, count(*)::int AS total FROM chunks "
+        cur.execute("SELECT count(*) FILTER (WHERE embedding IS NULL AND embedding_sealed IS NULL)::int AS missing, count(*)::int AS total FROM chunks "
                     "WHERE tenant_id = %s AND source_id = %s AND status = 'pending'", (tenant_id, source_id))
         counts = one(cur)
         if counts["missing"] > 0:

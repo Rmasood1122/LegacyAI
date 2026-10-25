@@ -80,3 +80,17 @@ class ContentKeys:
         cur.execute("INSERT INTO content_data_keys (tenant_id, version, key_ref, wrapped_key) VALUES (%s, %s, %s, %s)",
                     (tenant_id, version, ref, wrapped))
         return {"version": version, "key_ref": ref, "wrapped_key": wrapped}
+
+
+# The content keys the service seals with: set once at start-up (main.Services) and by the test set-up. None means
+# "do not seal" - allowed only outside production (load_settings refuses production without a platform content key).
+_ACTIVE: ContentKeys | None = None
+
+
+def use_content_keys(keys: ContentKeys | None) -> None:
+    global _ACTIVE
+    _ACTIVE = keys
+
+
+def active_content_keys() -> ContentKeys | None:
+    return _ACTIVE

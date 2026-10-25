@@ -13,6 +13,7 @@ from pgvector import HalfVector
 
 from app.ai_gateway import Caller, DataBlock, Embedder, Gateway, TopicExtractOutput
 from app.capture.redaction import redact
+from app.capture.sealed_chunks import SEALED_COLUMNS, Opener
 from app.platform import Database, ServiceContext, one, write_audit
 
 SUGGEST_FROM_CHUNKS = 6
@@ -50,10 +51,10 @@ def suggest(db: Database, ctx: ServiceContext, gateway: Gateway, caller: Caller,
     if source_id not in ctx.approved:
         raise TopicRefused("not_found", 404)
     with db.tenant_tx(ctx.tenant_id) as cur:
-        cur.execute("""SELECT c.text FROM chunks c JOIN sources s ON s.tenant_id = c.tenant_id AND s.id = c.source_id
-                        WHERE c.tenant_id = %s AND c.source_id = %s AND c.status = 'active' AND s.status = 'ready'
-                        ORDER BY c.ordinal LIMIT %s""", (ctx.tenant_id, source_id, SUGGEST_FROM_CHUNKS))
-        texts = [r["text"] for r in cur.fetchall()]
+        cur.execute(f"""SELECT {SEALED_COLUMNS} FROM chunks c JOIN sources s ON s.tenant_id = c.tenant_id AND s.id = c.source_id
+                         WHERE c.tenant_id = %s AND c.source_id = %s AND c.status = 'active' AND s.status = 'ready'
+                         ORDER BY c.ordinal LIMIT %s""", (ctx.tenant_id, source_id, SUGGEST_FROM_CHUNKS))
+        texts = Opener(cur, ctx.tenant_id).texts(cur.fetchall())
         cur.execute("SELECT department_id::text AS d, sensitivity FROM sources WHERE tenant_id = %s AND id = %s", (ctx.tenant_id, source_id))
         labels = one(cur)
     if not texts:

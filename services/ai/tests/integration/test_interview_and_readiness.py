@@ -13,7 +13,7 @@ from app.capture.gaps import gap_report
 from app.knowledge import items, readiness
 from app.platform import Database
 from tests.conftest import World, give_consent, needs_db, tenant_filter
-from tests.integration.helpers import verified_item
+from tests.integration.helpers import chunk_texts, verified_item
 
 pytestmark = [pytest.mark.db, needs_db]
 
@@ -84,6 +84,10 @@ def test_an_interview_needs_consent_and_turns_answers_into_candidates(db: Databa
     assert (item["status"], item["origin"], item["ai_extracted"]) == ("in_review", "interview", True)
     stored = admin.execute("SELECT answer_text FROM interview_turns WHERE interview_id = %s AND ordinal = 1", (interview,)).fetchone()
     assert "Ruth Okafor" not in stored["answer_text"]             # redacted before it was stored
+    # the answer's search copy is stored sealed (decision D41) and opens to the redacted answer
+    copy = chunk_texts(admin, "c.interview_turn_id = (SELECT id FROM interview_turns WHERE interview_id = %s AND ordinal = 1)", (interview,))
+    assert len(copy) == 1 and copy[0]["sealed"] and copy[0]["has_vector"] and copy[0]["text"] == stored["answer_text"]
+    assert b"furnace" not in bytes(admin.execute("SELECT text_sealed FROM chunks WHERE id = %s", (copy[0]["id"],)).fetchone()["text_sealed"])
     assert "Ruth Okafor" not in provider.received_text()
     for req in provider.calls:                                    # question prompts hold only the topic and this expert's own words
         if req.feature == "interview_question":

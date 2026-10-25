@@ -24,7 +24,8 @@ import pytest
 from psycopg.rows import dict_row
 
 from app.ai_gateway import Caller, FakeEmbedder, FakeProvider, Gateway, load_prices, load_prompts
-from app.platform import Database, Logger, ServiceContext, Settings, load_settings
+from app.platform import ContentKeys, Database, Logger, ServiceContext, Settings, load_settings, use_content_keys
+from app.platform.sealing import LocalKeyService
 
 TEST_KEY = "test-only-service-token-key-0123456789abcdef"   # synthetic; matches nothing real
 AI_URL = os.environ.get("DATABASE_URL_AI")
@@ -58,6 +59,20 @@ def tenant_filter(tenant_id: str, max_sensitivity: int = 3, only_verified: bool 
 
 
 AI_LIMITS = {"max_input_tokens": 4000, "max_output_tokens": 600, "calls_per_hour": 300, "monthly_cap_micro_usd": 5_000_000}
+
+
+# ------------------------------------------------------------------------------------------ sealing (decision D41)
+# Every test writes content SEALED, as production does: the platform's content key is a made-up local key that exists
+# only here. A test that needs another key service or none sets its own and puts this one back.
+TEST_PLATFORM_KEY = bytes(range(100, 132))
+TEST_CONTENT_KEYS = ContentKeys(LocalKeyService({"platform": TEST_PLATFORM_KEY}), "local:platform")
+
+
+@pytest.fixture(autouse=True)
+def sealed_content() -> Iterator[None]:
+    use_content_keys(TEST_CONTENT_KEYS)
+    yield
+    use_content_keys(TEST_CONTENT_KEYS)
 
 
 # ------------------------------------------------------------------------------------------ database

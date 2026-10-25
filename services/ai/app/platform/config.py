@@ -157,6 +157,9 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     platform_content_key = merged.get("PLATFORM_CONTENT_KEY", "").strip() or None
     if platform_content_key is not None and key_service == "none":
         raise ConfigError("PLATFORM_CONTENT_KEY needs a key service (KEY_SERVICE)")
+    if environment == "production" and platform_content_key is None:
+        # every company's content is sealed (decision D41): without a platform content key nothing could be written
+        raise ConfigError("PLATFORM_CONTENT_KEY is required in production (with KEY_SERVICE=google-kms)")
 
     return Settings(
         environment=environment,  # type: ignore[arg-type]

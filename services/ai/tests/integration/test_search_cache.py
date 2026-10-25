@@ -12,8 +12,8 @@ import pytest
 from app.ai_gateway import FakeEmbedder
 from app.capture import SearchCache
 from app.knowledge import answers
-from app.platform import ConfigError, Database, load_settings
-from tests.conftest import World, make_world, needs_db
+from app.platform import ConfigError, Database, load_settings, use_content_keys
+from tests.conftest import TEST_CONTENT_KEYS, World, make_world, needs_db
 from tests.integration.helpers import company_document
 
 pytestmark = [pytest.mark.db, needs_db]
@@ -122,11 +122,20 @@ def test_a_company_bigger_than_the_limit_is_searched_but_not_kept_and_large_ones
     assert all(set(f) <= {"tenant_id", "chunks", "limit", "bytes"} for _, f in warnings.seen)   # counts only, never text
 
 
-def test_the_sql_fallback_finds_the_same(db: Database, world: World) -> None:
-    company_document(db, world, FakeEmbedder(), PUMP)
-    company_document(db, world, FakeEmbedder(), BOILER)
+def test_the_sql_fallback_finds_the_same_in_readable_chunks_and_nothing_sealed(db: Database, admin: psycopg.Connection[dict[str, Any]]) -> None:
+    readable, sealed = make_world(admin), make_world(admin)
+    use_content_keys(None)                              # written as before step 4b: readable
+    try:
+        company_document(db, readable, FakeEmbedder(), PUMP)
+        company_document(db, readable, FakeEmbedder(), BOILER)
+    finally:
+        use_content_keys(TEST_CONTENT_KEYS)
     for question in ("cooling pump restart", "boiler relief valve", "who tests the valve"):
-        assert ask(db, world, question, None) == ask(db, world, question, SearchCache())
+        assert ask(db, readable, question, None) == ask(db, readable, question, SearchCache()) != []
+    # the database cannot search sealed text (decision D41): the fallback finds nothing there, the in-memory search does
+    company_document(db, sealed, FakeEmbedder(), PUMP)
+    assert ask(db, sealed, "cooling pump restart", None) == []
+    assert ask(db, sealed, "cooling pump restart", SearchCache()) != []
 
 
 def test_the_search_settings() -> None:

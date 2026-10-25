@@ -18,7 +18,7 @@ import psycopg
 from pgvector import HalfVector
 
 from app.ai_gateway import Caller, DataBlock, Embedder, Gateway, ItemExtractOutput
-from app.capture import consent_family, redact, topic_condition
+from app.capture import Sealer, consent_family, redact, row_key, topic_condition
 from app.knowledge import item_conflicts, scenario_erasure
 from app.platform import Database, ServiceContext, one, write_audit
 
@@ -120,16 +120,22 @@ def _move(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str, status: str, v
 def _search_copy(cur: psycopg.Cursor[Any], tenant_id: str, item: dict[str, Any], status: str, embedder: Embedder) -> None:
     """Keep the item's chunk in step with its status: present while verified/corrected/stale, gone otherwise."""
     if status in ("verified", "corrected"):
-        vector = HalfVector(embedder.embed([item["body"]], "document")[0])
+        vector = embedder.embed([item["body"]], "document")[0]
+        sealer = Sealer(cur, tenant_id)          # the search copy is sealed with the company's content key (D41)
+        key = row_key(kind="item", source_id=None, ordinal=0, knowledge_item_id=item["id"])
+        body = sealer.text_columns(key, item["body"])
+        vec = sealer.vector_columns(key, vector, body["sealed_key"])
         cur.execute(
-            """INSERT INTO chunks (tenant_id, kind, knowledge_item_id, ordinal, text, token_estimate, embedding, embedding_model,
-                                   department_id, sensitivity, owner_person_id, verification_status, status)
-               VALUES (%s, 'item', %s, 0, %s, %s, %s, %s, %s, %s, %s, %s, 'active')
+            """INSERT INTO chunks (tenant_id, kind, knowledge_item_id, ordinal, text, text_sealed, sealed_key, token_estimate, embedding,
+                                   embedding_sealed, embedding_model, department_id, sensitivity, owner_person_id, verification_status, status)
+               VALUES (%s, 'item', %s, 0, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'active')
                ON CONFLICT (tenant_id, knowledge_item_id) WHERE knowledge_item_id IS NOT NULL
-               DO UPDATE SET text = EXCLUDED.text, token_estimate = EXCLUDED.token_estimate, embedding = EXCLUDED.embedding,
-                             embedding_model = EXCLUDED.embedding_model, verification_status = EXCLUDED.verification_status""",
-            (tenant_id, item["id"], item["body"], max(1, len(item["body"]) // 4), vector, embedder.model_id, item["department_id"],
-             item["sensitivity"], item["owner_person_id"], status))
+               DO UPDATE SET text = EXCLUDED.text, text_sealed = EXCLUDED.text_sealed, sealed_key = EXCLUDED.sealed_key,
+                             token_estimate = EXCLUDED.token_estimate, embedding = EXCLUDED.embedding,
+                             embedding_sealed = EXCLUDED.embedding_sealed, embedding_model = EXCLUDED.embedding_model,
+                             verification_status = EXCLUDED.verification_status""",
+            (tenant_id, item["id"], body["text"], body["text_sealed"], body["sealed_key"], max(1, len(item["body"]) // 4), vec["embedding"],
+             vec["embedding_sealed"], embedder.model_id, item["department_id"], item["sensitivity"], item["owner_person_id"], status))
     elif status == "stale":
         cur.execute("UPDATE chunks SET verification_status = 'stale' WHERE tenant_id = %s AND knowledge_item_id = %s", (tenant_id, item["id"]))
     else:

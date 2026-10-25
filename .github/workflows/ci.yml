@@ -162,6 +162,10 @@ jobs:
           EMBEDDER: fake
           DATABASE_URL: ${{ env.DATABASE_URL_AI }}
           SERVICE_TOKEN_KEY: test-service-token-key-0123456789abcdef
+          # content is stored sealed, as in production (decision D41); the stand-in key is "test-only-local-key-not-secret!!"
+          KEY_SERVICE: local
+          LOCAL_KEY_SERVICE_KEYS: '{"platform":"dGVzdC1vbmx5LWxvY2FsLWtleS1ub3Qtc2VjcmV0ISE="}'
+          PLATFORM_CONTENT_KEY: local:platform
         run: |
           nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8090 > ../../ai-service.log 2>&1 &
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8090/health && exit 0; sleep 1; done
@@ -249,6 +253,10 @@ jobs:
           EMBEDDER: fake
           DATABASE_URL: ${{ env.DATABASE_URL_AI }}
           SERVICE_TOKEN_KEY: test-service-token-key-0123456789abcdef
+          # content is stored sealed, as in production (decision D41); the stand-in key is "test-only-local-key-not-secret!!"
+          KEY_SERVICE: local
+          LOCAL_KEY_SERVICE_KEYS: '{"platform":"dGVzdC1vbmx5LWxvY2FsLWtleS1ub3Qtc2VjcmV0ISE="}'
+          PLATFORM_CONTENT_KEY: local:platform
         run: |
           nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8090 > ../../ai-service.log 2>&1 &
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8090/health && exit 0; sleep 1; done
