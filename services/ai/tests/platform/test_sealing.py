@@ -39,7 +39,7 @@ KMS_KEY = "projects/acme-prod-1234/locations/europe-west3/keyRings/legacyai/cryp
 
 
 def ref(row: str = "row-1", column: str = "text", tenant: str = TENANT, version: int = 1) -> FieldRef:
-    return FieldRef(tenant_id=tenant, table="chunks", column=column, row_id=row, key_version=version)
+    return FieldRef(tenant_id=tenant, table="chunks", column=column, row_id=row, key_id=f"company:{version}")
 
 
 # ------------------------------------------------------------------ the API and the AI service agree
@@ -73,17 +73,17 @@ def test_the_local_stand_in_refuses_what_a_real_service_would() -> None:
 # ------------------------------------------------------------------ the content key and one field
 
 def test_the_content_key_is_derived_per_company_and_version_never_the_data_key_itself() -> None:
-    k1 = content_key(FIXTURE_DATA_KEY, TENANT, 1)
+    k1 = content_key(FIXTURE_DATA_KEY, TENANT, "company:1")
     assert len(k1) == 32 and k1 != FIXTURE_DATA_KEY
-    assert k1 == content_key(FIXTURE_DATA_KEY, TENANT, 1)              # the same every time
-    assert k1 != content_key(FIXTURE_DATA_KEY, TENANT, 2)
-    assert k1 != content_key(FIXTURE_DATA_KEY, "00000000-0000-4000-8000-0000000000bb", 1)
+    assert k1 == content_key(FIXTURE_DATA_KEY, TENANT, "company:1")              # the same every time
+    assert k1 != content_key(FIXTURE_DATA_KEY, TENANT, "company:2")
+    assert k1 != content_key(FIXTURE_DATA_KEY, "00000000-0000-4000-8000-0000000000bb", "company:1")
     with pytest.raises(SealError):
-        content_key(b"short", TENANT, 1)
+        content_key(b"short", TENANT, "company:1")
 
 
 def test_a_sealed_field_opens_only_at_its_own_place() -> None:
-    key = content_key(FIXTURE_DATA_KEY, TENANT, 1)
+    key = content_key(FIXTURE_DATA_KEY, TENANT, "company:1")
     sealed = seal_text(key, "How the cooling pump is restarted after a power cut.", ref())
     assert b"cooling" not in sealed
     assert open_text(key, sealed, ref()) == "How the cooling pump is restarted after a power cut."
@@ -92,7 +92,7 @@ def test_a_sealed_field_opens_only_at_its_own_place() -> None:
         with pytest.raises(SealError):
             open_text(key, sealed, elsewhere)
     with pytest.raises(SealError):
-        open_text(content_key(FIXTURE_DATA_KEY, TENANT, 2), sealed, ref())
+        open_text(content_key(FIXTURE_DATA_KEY, TENANT, "company:2"), sealed, ref())
     # one changed byte, a cut-off value, or not a sealed value at all
     damaged = bytearray(sealed)
     damaged[-1] ^= 1
@@ -102,13 +102,13 @@ def test_a_sealed_field_opens_only_at_its_own_place() -> None:
 
 
 def test_every_sealing_uses_a_fresh_nonce() -> None:
-    key = content_key(FIXTURE_DATA_KEY, TENANT, 1)
+    key = content_key(FIXTURE_DATA_KEY, TENANT, "company:1")
     a, b = seal_bytes(key, b"same", ref()), seal_bytes(key, b"same", ref())
     assert a != b and a[1:13] != b[1:13]
 
 
 def test_a_vector_round_trips_as_float32() -> None:
-    key = content_key(FIXTURE_DATA_KEY, TENANT, 1)
+    key = content_key(FIXTURE_DATA_KEY, TENANT, "company:1")
     vector = [0.125, -0.5, 0.0, 1.0] + [0.01 * i for i in range(380)]
     sealed = seal_vector(key, vector, ref(column="embedding"))
     assert len(sealed) == 1 + 12 + 384 * 4 + 16
@@ -118,8 +118,9 @@ def test_a_vector_round_trips_as_float32() -> None:
 
 
 def test_a_field_reference_cannot_be_made_ambiguous() -> None:
-    key = content_key(FIXTURE_DATA_KEY, TENANT, 1)
-    for bad in (FieldRef(TENANT, "chunks", "te|xt", "row", 1), FieldRef(TENANT, "chunks", "text", "", 1)):
+    key = content_key(FIXTURE_DATA_KEY, TENANT, "company:1")
+    for bad in (FieldRef(TENANT, "chunks", "te|xt", "row", "company:1"), FieldRef(TENANT, "chunks", "text", "", "company:1"),
+                FieldRef(TENANT, "chunks", "text", "row", "company:0"), FieldRef(TENANT, "chunks", "text", "row", "mine:1")):
         with pytest.raises(SealError):
             seal_text(key, "x", bad)
 
@@ -130,20 +131,20 @@ def test_unwrapped_keys_are_kept_five_minutes_and_a_switched_off_key_stops_worki
     now = [1000.0]
     local = LocalKeyService({"fixture": FIXTURE_KEY})
     cache = KeyCache(local, clock=lambda: now[0])
-    first = cache.content_key(TENANT, 1, "local:fixture", FIXTURE_WRAPPED)
-    assert first == content_key(FIXTURE_DATA_KEY, TENANT, 1)
+    first = cache.content_key(TENANT, "company:1", "local:fixture", FIXTURE_WRAPPED)
+    assert first == content_key(FIXTURE_DATA_KEY, TENANT, "company:1")
     local.disable("fixture")
     now[0] += 299
-    assert cache.content_key(TENANT, 1, "local:fixture", FIXTURE_WRAPPED) == first   # still within 5 minutes
+    assert cache.content_key(TENANT, "company:1", "local:fixture", FIXTURE_WRAPPED) == first   # still within 5 minutes
     now[0] += 2
     with pytest.raises(KeyUnavailable):
-        cache.content_key(TENANT, 1, "local:fixture", FIXTURE_WRAPPED)
+        cache.content_key(TENANT, "company:1", "local:fixture", FIXTURE_WRAPPED)
     local.enable("fixture")
-    assert cache.content_key(TENANT, 1, "local:fixture", FIXTURE_WRAPPED) == first
+    assert cache.content_key(TENANT, "company:1", "local:fixture", FIXTURE_WRAPPED) == first
     cache.forget(TENANT)
     local.disable("fixture")
     with pytest.raises(KeyUnavailable):                                                # forgotten: asked again
-        cache.content_key(TENANT, 1, "local:fixture", FIXTURE_WRAPPED)
+        cache.content_key(TENANT, "company:1", "local:fixture", FIXTURE_WRAPPED)
 
 
 # ------------------------------------------------------------------ Cloud KMS (a stand-in transport)
@@ -234,3 +235,82 @@ def test_no_token_means_no_key() -> None:
     kms = GoogleKmsKeyService(tokens=broken, transport=FakeKms(), api="https://kms.test")
     with pytest.raises(KeyUnavailable):
         kms.unwrap(KMS_KEY, b"x" * 40, wrap_aad(TENANT, 1))
+
+
+# ------------------------------------------------------------------ wrapping (step 4b: the platform's content key)
+
+def test_the_local_stand_in_wraps_in_the_apis_format() -> None:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    local = LocalKeyService({"platform": FIXTURE_KEY})
+    data_key = os.urandom(32)
+    wrapped = local.wrap("local:platform", data_key, "content-data-key:t:1")
+    assert len(wrapped) == 12 + 16 + 32 and data_key not in wrapped
+    nonce, tag, body = wrapped[:12], wrapped[12:28], wrapped[28:]        # nonce | tag | ciphertext, as the API writes it
+    assert AESGCM(FIXTURE_KEY).decrypt(nonce, body + tag, b"content-data-key:t:1") == data_key
+    assert local.unwrap("local:platform", wrapped, "content-data-key:t:1") == data_key
+    with pytest.raises(KeyUnavailable):
+        local.unwrap("local:platform", wrapped, "content-data-key:t:2")
+    local.disable("platform")
+    with pytest.raises(KeyUnavailable):
+        local.wrap("local:platform", data_key, "content-data-key:t:1")
+    with pytest.raises(KeyUnavailable):
+        NoKeyService().wrap("local:platform", data_key, "x")
+
+
+def test_key_ids_name_one_data_key_and_platform_keys_are_bound_apart() -> None:
+    from app.platform.sealing import key_id_aad, parse_key_id
+
+    assert parse_key_id("company:3") == ("company", 3) and parse_key_id("platform:1") == ("platform", 1)
+    for bad in ("company:0", "platform:-1", "mine:1", "company:1:2", "company:", "", "platform:1234567"):
+        with pytest.raises(SealError):
+            parse_key_id(bad)
+    assert key_id_aad(TENANT, "company:1") == wrap_aad(TENANT, 1)
+    assert key_id_aad(TENANT, "platform:1") == f"content-data-key:{TENANT}:1"
+    # the same data key gives a different content key as a company key and as a platform key
+    assert content_key(FIXTURE_DATA_KEY, TENANT, "company:1") != content_key(FIXTURE_DATA_KEY, TENANT, "platform:1")
+
+
+class FakeKmsEncrypt(FakeKms):
+    """Adds cryptoKeys.encrypt as documented: the 'ciphertext' is the plaintext reversed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.unverified = False
+
+    def __call__(self, url: str, headers: dict[str, str], body: bytes, timeout: float) -> tuple[int, bytes]:
+        if not url.endswith(":encrypt"):
+            return super().__call__(url, headers, body, timeout)
+        sent = json.loads(body)
+        self.calls.append((url, headers, sent))
+        if self.status != 200:
+            return self.status, b'{"error":{"message":"projects/acme-prod-1234/... permission denied"}}'
+        plaintext = base64.b64decode(sent["plaintext"])
+        ok = sent["plaintextCrc32c"] == str(crc32c(plaintext)) and not self.unverified
+        ct = plaintext[::-1]
+        return 200, json.dumps({"name": f"{KMS_KEY}/cryptoKeyVersions/1", "ciphertext": base64.b64encode(ct).decode(),
+                                "ciphertextCrc32c": "1" if self.damage else str(crc32c(ct)),
+                                "verifiedPlaintextCrc32c": ok, "verifiedAdditionalAuthenticatedDataCrc32c": ok}).encode()
+
+
+def test_kms_encrypt_is_the_documented_request_and_refuses_what_does_not_add_up() -> None:
+    fake, tokens = FakeKmsEncrypt(), []
+    kms = GoogleKmsKeyService(tokens=lambda: (tokens.append(1) or "test-access-token", 9e18), transport=fake, api="https://kms.test")
+    data_key = os.urandom(32)
+    wrapped = kms.wrap(KMS_KEY, data_key, f"content-data-key:{TENANT}:1")
+    assert wrapped == data_key[::-1]
+    url, _, sent = fake.calls[-1]
+    aad = f"content-data-key:{TENANT}:1".encode()
+    assert url == f"https://kms.test/v1/{KMS_KEY}:encrypt"
+    assert sent == {"plaintext": base64.b64encode(data_key).decode(), "plaintextCrc32c": str(crc32c(data_key)),
+                    "additionalAuthenticatedData": base64.b64encode(aad).decode(), "additionalAuthenticatedDataCrc32c": str(crc32c(aad))}
+    assert kms.unwrap(KMS_KEY, wrapped, f"content-data-key:{TENANT}:1") == data_key
+    fake.unverified = True                                   # KMS did not confirm our checksums
+    with pytest.raises(KeyUnavailable):
+        kms.wrap(KMS_KEY, data_key, "x")
+    fake.unverified, fake.damage = False, True                # its answer was damaged on the way
+    with pytest.raises(KeyUnavailable):
+        kms.wrap(KMS_KEY, data_key, "x")
+    fake.damage, fake.status = False, 403                     # permission taken back
+    with pytest.raises(KeyUnavailable):
+        kms.wrap(KMS_KEY, data_key, "x")

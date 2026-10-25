@@ -32,5 +32,8 @@ try "audit bucket locked by default"             variables.tf '/^variable "lock_
 try "API cap default raised to 20"               variables.tf '/^variable "api_max_instances"/,/^}/s/default     = 2/default     = 20/'
 try "a secret value written into the code"       main.tf      's/^locals {/locals {\n  db_password = "hunter2-super-secret"/'
 try "an always-on database added"                main.tf      '$a resource "google_sql_database_instance" "db" {}'
+try "an HSM content key (17 times the price)"    main.tf      's/protection_level = "SOFTWARE"/protection_level = "HSM"/'
+try "a second Cloud KMS key"                     main.tf      '$a resource "google_kms_crypto_key" "extra" {}'
+try "automatic rotation of the content key"      main.tf      's/purpose  = "ENCRYPT_DECRYPT"/purpose  = "ENCRYPT_DECRYPT"\n  rotation_period = "7776000s"/'
 
 echo "guardrails-selftest: PASS ($fired deliberate breaks, all detected)"

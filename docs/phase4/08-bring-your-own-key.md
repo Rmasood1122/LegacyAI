@@ -100,13 +100,17 @@ platform's guarded HTTPS client.
   makes at most a few hundred decrypts a day.
 
 **What the founder does once (not done by me - it needs the Google Cloud account):**
-1. Set `KEY_SERVICE=google-kms` on the API service.
-2. Tell each company the service account's e-mail address (the Cloud Run service's identity).
+1. Set `KEY_SERVICE=google-kms` on the API service (the AI service gets it from Terraform, decision D41 step 4b).
+2. Tell each company the e-mail addresses of **both** service accounts: the API's and the AI service's
+   (`legacyai-ai@<project>.iam.gserviceaccount.com`). Since 2026-10-25 the AI service seals the company's documents
+   and knowledge with the company's data key and unwraps it itself (decision D41).
 
 **What a company does in its own Google Cloud project:**
 1. Enable the Cloud KMS API. Create a key ring and a **symmetric encrypt/decrypt** key (software protection is
    enough; HSM costs more).
-2. On that key, grant the LegacyAI service account the role **Cloud KMS CryptoKey Encrypter/Decrypter**.
+2. On that key, grant **both** LegacyAI service accounts (the API's and the AI service's) the role **Cloud KMS
+   CryptoKey Encrypter/Decrypter**. Without the AI service's grant, nothing new can be written to the company's
+   documents and knowledge (fail closed: it is never sealed with the platform's key instead).
 3. Send the platform operator the key's full name; the operator sets it for the company (the API checks that the key
    works before anything is sealed with it).
 

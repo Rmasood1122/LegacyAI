@@ -572,6 +572,22 @@ warning above 50,000 chunks and a 2 GB machine.
   counter switched off, 2 of them fail as they should.
 - **Not done or proven:** content is still stored readable (step 4b); the 2 GB machine is not applied; real companies.
 
+## Step 18 — A content key for every company (2026-10-25)
+
+Details: `10-content-under-company-key.md`, step 4b part 1; decision D41. The founder chose a Cloud KMS key for
+companies without a key of their own.
+
+- Each company now has a content key the AI service can use: the company's own key when it brought one, otherwise a
+  data key of its own, made on first use and locked by the platform's content key. Only the locked form is stored.
+- If a company's own key is switched off, nothing new can be written for it, and it is never locked with the
+  platform's key instead.
+- Terraform: one Cloud KMS software key, usable only by the AI service (about USD 0.06 a month). **The founder
+  applies it.** The cost guardrail allows exactly that one key and refuses a hardware key, a second key or automatic
+  rotation (its self-test: 18 deliberate breaks, all detected).
+- A company that brings its own key must now grant it to the AI service's account as well (`08-bring-your-own-key.md`).
+- Measured locally: 7 database tests, 4 new unit tests, settings tests; the whole AI suite passes (349).
+- **Not done or proven:** nothing is locked yet (parts 2 and 3); no Google Cloud account or real key was used.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

@@ -30,12 +30,14 @@ from app.capture.gaps import gap_report
 from app.knowledge import analytics, answers, expert, graph, items, quality, readiness, reads, scenarios, upkeep
 from app.platform import (
     ConfigError,
+    ContentKeys,
     Database,
     Logger,
     ReplayGuard,
     ServiceContext,
     Settings,
     TokenError,
+    key_service_from,
     load_settings,
     token_id,
     verify_service_token,
@@ -259,6 +261,8 @@ class Services:
         self.gateway = Gateway(db, provider, load_prompts(), load_prices(), logger, env_kill_switch=settings.ai_kill_switch)
         self.replay = ReplayGuard()
         self.search = SearchCache(max_bytes=settings.search_memory_bytes, log=logger) if settings.search_engine == "memory" else None
+        # content keys (D41 step 4b): the company's own key, or the platform's content key
+        self.content_keys = ContentKeys(key_service_from(settings.key_service, settings.local_key_bytes()), settings.platform_content_key)
 
 
 def build_provider(settings: Settings) -> ChatProvider:

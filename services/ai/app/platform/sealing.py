@@ -1,13 +1,15 @@
-"""Sealing a company's content with its own content key (decision D41, docs/phase4/10-content-under-company-key.md, step 2).
+"""Sealing a company's content with its own content key (decision D41, docs/phase4/10-content-under-company-key.md,
+steps 2 and 4b). The toolbox; content_keys.py decides which key a company's content uses.
 
-NOTHING USES THIS YET. It is the toolbox the next steps build on, tested on its own:
-
-* key services that UNWRAP a company's data key: the local stand-in (tests and development; the same format as the
+* key services that wrap and unwrap a data key: the local stand-in (tests and development; the same format as the
   API's LocalKeyService, so the AI service opens what the API wrapped) and Google Cloud KMS (the same two REST calls
-  as the API's gcp-kms.ts, with this service's own service account). The AI service never wraps: the API makes data
-  keys; nobody hands a key over in a request;
-* the content key: HKDF-SHA256 from the company's data key, bound to the company and the key version, for one purpose
-  ("content") - so it is never the same key that seals the API's secrets;
+  as the API's gcp-kms.ts, with this service's own service account). The AI service wraps only the data keys of
+  companies without a key of their own, with the platform's content key; a company's own data key is made by the
+  API. Nobody hands a key over in a request;
+* key ids say which data key: "company:<version>" (company_data_keys, wrapped by the company's key) or
+  "platform:<version>" (content_data_keys, wrapped by the platform's content key);
+* the content key: HKDF-SHA256 from the data key, bound to the company and the key id, for one purpose ("content") -
+  so it is never the same key that seals the API's secrets;
 * sealing one field: AES-256-GCM, a format byte, a fresh 12-byte nonce, and associated data that names the field's
   exact place (company, table, column, row, key version). A sealed value copied to another row, column, company or
   version does not open;
@@ -55,10 +57,12 @@ class KeyService(Protocol):
 
     def valid_ref(self, ref: str) -> bool: ...
 
+    def wrap(self, ref: str, data_key: bytes, aad: str) -> bytes: ...
+
     def unwrap(self, ref: str, wrapped: bytes, aad: str) -> bytes: ...
 
 
-# ------------------------------------------------------------------ key services (unwrap only)
+# ------------------------------------------------------------------ key services
 
 _LOCAL_REF = re.compile(r"^local:([a-z0-9-]{1,40})$")
 
@@ -82,7 +86,7 @@ class LocalKeyService:
     def enable(self, name: str) -> None:
         self._off.discard(name)
 
-    def unwrap(self, ref: str, wrapped: bytes, aad: str) -> bytes:
+    def _key(self, ref: str) -> bytes:
         m = _LOCAL_REF.match(ref)
         if m is None:
             raise KeyUnavailable("not a local key reference")
@@ -91,6 +95,16 @@ class LocalKeyService:
             raise KeyUnavailable("unknown key")
         if m.group(1) in self._off:
             raise KeyUnavailable("the key is switched off")
+        return key
+
+    def wrap(self, ref: str, data_key: bytes, aad: str) -> bytes:
+        key = self._key(ref)
+        nonce = _nonce()
+        sealed = AESGCM(key).encrypt(nonce, data_key, aad.encode("utf-8"))
+        return nonce + sealed[-TAG_BYTES:] + sealed[:-TAG_BYTES]
+
+    def unwrap(self, ref: str, wrapped: bytes, aad: str) -> bytes:
+        key = self._key(ref)
         if len(wrapped) < NONCE_BYTES + TAG_BYTES + 1:
             raise KeyUnavailable("not a wrapped key")
         nonce, tag, body = wrapped[:NONCE_BYTES], wrapped[NONCE_BYTES:NONCE_BYTES + TAG_BYTES], wrapped[NONCE_BYTES + TAG_BYTES:]
@@ -161,7 +175,8 @@ def _https_post(url: str, headers: dict[str, str], body: bytes, timeout: float) 
 
 
 class GoogleKmsKeyService:
-    """Cloud KMS `cryptoKeys.decrypt` (REST v1, read 2026-10-24), with CRC32C checks both ways, as in the API."""
+    """Cloud KMS `cryptoKeys.encrypt` and `decrypt` (REST v1, read 2026-10-24), with CRC32C checks both ways, as in
+    the API."""
 
     kind = "google-kms"
 
@@ -188,17 +203,12 @@ class GoogleKmsKeyService:
                 raise KeyUnavailable("no access token for the key service") from exc
             return self._cached[0]
 
-    def unwrap(self, ref: str, wrapped: bytes, aad: str) -> bytes:
+    def _call(self, ref: str, verb: str, fields: dict[str, str]) -> dict[str, object]:
         if not self.valid_ref(ref):
             raise KeyUnavailable("not a Cloud KMS key reference")
-        aad_bytes = aad.encode("utf-8")
-        body = json.dumps({
-            "ciphertext": base64.b64encode(wrapped).decode(), "ciphertextCrc32c": str(crc32c(wrapped)),
-            "additionalAuthenticatedData": base64.b64encode(aad_bytes).decode(), "additionalAuthenticatedDataCrc32c": str(crc32c(aad_bytes)),
-        }).encode()
-        status, raw = self._transport(f"{self._api}/v1/{ref}:decrypt", {
+        status, raw = self._transport(f"{self._api}/v1/{ref}:{verb}", {
             "authorization": f"Bearer {self._token()}", "content-type": "application/json", "accept": "application/json",
-        }, body, 5.0)
+        }, json.dumps(fields).encode(), 5.0)
         if status == 401:
             with self._lock:
                 self._cached = None
@@ -207,7 +217,36 @@ class GoogleKmsKeyService:
             raise KeyUnavailable(f"the key service refused (HTTP {status})")
         try:
             out = json.loads(raw)
-            plaintext = base64.b64decode(out["plaintext"], validate=True)
+        except Exception as exc:
+            raise KeyUnavailable("the key service gave an unreadable answer") from exc
+        if not isinstance(out, dict):
+            raise KeyUnavailable("the key service gave an unreadable answer")
+        return out
+
+    def wrap(self, ref: str, data_key: bytes, aad: str) -> bytes:
+        aad_bytes = aad.encode("utf-8")
+        out = self._call(ref, "encrypt", {
+            "plaintext": base64.b64encode(data_key).decode(), "plaintextCrc32c": str(crc32c(data_key)),
+            "additionalAuthenticatedData": base64.b64encode(aad_bytes).decode(), "additionalAuthenticatedDataCrc32c": str(crc32c(aad_bytes)),
+        })
+        if out.get("verifiedPlaintextCrc32c") is not True or out.get("verifiedAdditionalAuthenticatedDataCrc32c") is not True:
+            raise KeyUnavailable("the key service did not verify the request")
+        try:
+            ciphertext = base64.b64decode(str(out["ciphertext"]), validate=True)
+        except Exception as exc:
+            raise KeyUnavailable("the key service gave an unreadable answer") from exc
+        if out.get("ciphertextCrc32c") != str(crc32c(ciphertext)):
+            raise KeyUnavailable("the answer of the key service was damaged on the way")
+        return ciphertext
+
+    def unwrap(self, ref: str, wrapped: bytes, aad: str) -> bytes:
+        aad_bytes = aad.encode("utf-8")
+        out = self._call(ref, "decrypt", {
+            "ciphertext": base64.b64encode(wrapped).decode(), "ciphertextCrc32c": str(crc32c(wrapped)),
+            "additionalAuthenticatedData": base64.b64encode(aad_bytes).decode(), "additionalAuthenticatedDataCrc32c": str(crc32c(aad_bytes)),
+        })
+        try:
+            plaintext = base64.b64decode(str(out["plaintext"]), validate=True)
         except Exception as exc:
             raise KeyUnavailable("the key service gave an unreadable answer") from exc
         if out.get("plaintextCrc32c") != str(crc32c(plaintext)):
@@ -221,6 +260,9 @@ class NoKeyService:
     def valid_ref(self, ref: str) -> bool:
         return False
 
+    def wrap(self, ref: str, data_key: bytes, aad: str) -> bytes:
+        raise KeyUnavailable("no key service is configured (KEY_SERVICE=none)")
+
     def unwrap(self, ref: str, wrapped: bytes, aad: str) -> bytes:
         raise KeyUnavailable("no key service is configured (KEY_SERVICE=none)")
 
@@ -228,16 +270,39 @@ class NoKeyService:
 # ------------------------------------------------------------------ the content key and one sealed field
 
 def wrap_aad(tenant_id: str, version: int) -> str:
-    """What binds a wrapped data key to its company and version - the same text the API uses."""
+    """What binds a company's own wrapped data key to its company and version - the same text the API uses."""
     return f"company-data-key:{tenant_id}:{version}"
 
 
-def content_key(data_key: bytes, tenant_id: str, version: int) -> bytes:
+def platform_wrap_aad(tenant_id: str, version: int) -> str:
+    """What binds a data key wrapped by the platform's content key to its company and version."""
+    return f"content-data-key:{tenant_id}:{version}"
+
+
+_KEY_ID = re.compile(r"^(company|platform):([1-9][0-9]{0,5})$")
+
+
+def parse_key_id(key_id: str) -> tuple[str, int]:
+    """'company:3' -> ('company', 3). Anything else is refused."""
+    m = _KEY_ID.match(key_id)
+    if m is None:
+        raise SealError("not a key id")
+    return m.group(1), int(m.group(2))
+
+
+def key_id_aad(tenant_id: str, key_id: str) -> str:
+    """The text a key id's wrapped data key is bound to."""
+    kind, version = parse_key_id(key_id)
+    return wrap_aad(tenant_id, version) if kind == "company" else platform_wrap_aad(tenant_id, version)
+
+
+def content_key(data_key: bytes, tenant_id: str, key_id: str) -> bytes:
     """The key that seals a company's content: derived for this purpose only, never the data key itself."""
     if len(data_key) != 32:
         raise SealError("a data key is 32 bytes")
+    parse_key_id(key_id)
     return HKDF(algorithm=hashes.SHA256(), length=32, salt=None,
-                info=f"legacyai-content-v1|{tenant_id}|{version}".encode()).derive(data_key)
+                info=f"legacyai-content-v1|{tenant_id}|{key_id}".encode()).derive(data_key)
 
 
 @dataclass(frozen=True)
@@ -248,13 +313,14 @@ class FieldRef:
     table: str
     column: str
     row_id: str
-    key_version: int
+    key_id: str
 
     def aad(self) -> bytes:
         for part in (self.tenant_id, self.table, self.column, self.row_id):
             if not part or "|" in part:
                 raise SealError("a field reference part is empty or contains |")
-        return f"legacyai-field-v1|{self.tenant_id}|{self.table}|{self.column}|{self.row_id}|{self.key_version}".encode()
+        parse_key_id(self.key_id)
+        return f"legacyai-field-v1|{self.tenant_id}|{self.table}|{self.column}|{self.row_id}|{self.key_id}".encode()
 
 
 def seal_bytes(key: bytes, data: bytes, ref: FieldRef) -> bytes:
@@ -303,19 +369,19 @@ class KeyCache:
         self._keys = keys
         self._seconds = seconds
         self._clock = clock
-        self._entries: dict[tuple[str, int], tuple[bytes, float]] = {}
+        self._entries: dict[tuple[str, str], tuple[bytes, float]] = {}
         self._lock = threading.Lock()
 
-    def content_key(self, tenant_id: str, version: int, ref: str, wrapped: bytes) -> bytes:
+    def content_key(self, tenant_id: str, key_id: str, ref: str, wrapped: bytes) -> bytes:
         now = self._clock()
         with self._lock:
-            hit = self._entries.get((tenant_id, version))
+            hit = self._entries.get((tenant_id, key_id))
             if hit is not None and hit[1] > now:
                 return hit[0]
-        data_key = self._keys.unwrap(ref, wrapped, wrap_aad(tenant_id, version))
-        derived = content_key(data_key, tenant_id, version)
+        data_key = self._keys.unwrap(ref, wrapped, key_id_aad(tenant_id, key_id))
+        derived = content_key(data_key, tenant_id, key_id)
         with self._lock:
-            self._entries[(tenant_id, version)] = (derived, now + self._seconds)
+            self._entries[(tenant_id, key_id)] = (derived, now + self._seconds)
         return derived
 
     def forget(self, tenant_id: str) -> None:

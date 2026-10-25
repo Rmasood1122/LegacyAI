@@ -126,7 +126,13 @@ which unlocks a company's content into memory for a few minutes while it is bein
      `tenant_usage_counters.search_version`). All indexes together: at most 1 GB (`SEARCH_MEMORY_MB`), the company
      not asked for the longest dropped first. A warning is logged above 50,000 chunks in one company.
      `SEARCH_ENGINE=sql` switches back to the database search until step 5 removes it.
-   - 4b: seal on write, read both forms.
+   - **4b part 1, built 2026-10-25: a content key for every company.** A company with its own key uses its live data
+     key (unwrapped by the AI service's own account; the company grants the role to both services' accounts). Every
+     other company gets a data key of its own, made on first use and wrapped by the **platform's content key**: one
+     Cloud KMS software key in the platform's project, usable only by the AI service (the founder's choice of
+     2026-10-25; about USD 0.06 a month, read from https://cloud.google.com/kms/pricing that day). Keys are named
+     "company:<version>" or "platform:<version>"; each sealed value will store its key name. Nothing is sealed yet.
+   - 4b part 2: seal chunks on write, read both forms. Part 3: interview turns and knowledge versions.
 5. **The background job** that seals existing rows. Then empty the readable columns. A migration refuses to drop
    them early.
 6. **The rest of the content columns:**
