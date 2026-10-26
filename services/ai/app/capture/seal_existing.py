@@ -13,7 +13,7 @@ from typing import Any
 
 import psycopg
 
-from app.capture.sealed_chunks import Fields, Sealer, row_key, seal_source_title, turn_key
+from app.capture.sealed_chunks import Fields, Sealer, open_topic, row_key, seal_source_title, seal_topic, topic_text_columns, turn_key
 from app.platform import one
 
 
@@ -82,12 +82,32 @@ def seal_document_titles(cur: psycopg.Cursor[Any], tenant_id: str, limit: int) -
     return len(rows)
 
 
+def seal_topic_texts(cur: psycopg.Cursor[Any], tenant_id: str, limit: int) -> int:
+    """Seals up to `limit` readable topic names and descriptions (D41 step 6 part 4b), with the name's fingerprint.
+    Two readable names cannot clash (the database kept them unique in any case), and a sealed one cannot clash with
+    them either (every write checks both forms), so nothing here can refuse a row."""
+    fields = Fields(cur, tenant_id, "topics")
+    if fields.keys is None:
+        return 0
+    cur.execute(f"""SELECT tp.id::text AS id, {topic_text_columns("tp")} FROM topics tp WHERE tp.tenant_id = %s AND tp.name_sealed IS NULL
+                     ORDER BY tp.id LIMIT %s FOR UPDATE SKIP LOCKED""", (tenant_id, limit))
+    rows = cur.fetchall()
+    for r in rows:
+        t = open_topic(fields, dict(r))
+        stored = seal_topic(fields, t["id"], t["name"], t["description"])
+        cur.execute("""UPDATE topics SET name = NULL, name_sealed = %s, description = NULL, description_sealed = %s, sealed_key = %s, name_hash = %s
+                        WHERE tenant_id = %s AND id = %s AND name_sealed IS NULL""",
+                    (stored["name_sealed"], stored["description_sealed"], stored["sealed_key"], stored["name_hash"], tenant_id, t["id"]))
+    return len(rows)
+
+
 def still_readable(cur: psycopg.Cursor[Any], tenant_id: str) -> dict[str, int]:
-    """How many chunks, interview turns and document titles of the company are still readable (erased ones hold nothing)."""
+    """How many chunks, interview turns, document titles and topics of the company are still readable (erased ones hold nothing)."""
     cur.execute(
         """SELECT (SELECT count(*) FROM chunks WHERE tenant_id = %(t)s AND text_sealed IS NULL)::int AS chunks,
                   (SELECT count(*) FROM interview_turns WHERE tenant_id = %(t)s AND question_sealed IS NULL AND erased_at IS NULL)::int AS turns,
-                  (SELECT count(*) FROM sources WHERE tenant_id = %(t)s AND title_sealed IS NULL AND title <> '')::int AS document_titles""",
+                  (SELECT count(*) FROM sources WHERE tenant_id = %(t)s AND title_sealed IS NULL AND title <> '')::int AS document_titles,
+                  (SELECT count(*) FROM topics WHERE tenant_id = %(t)s AND name_sealed IS NULL)::int AS topics""",
         {"t": tenant_id})
     row = one(cur)
-    return {"chunks": int(row["chunks"]), "turns": int(row["turns"]), "document_titles": int(row["document_titles"])}
+    return {"chunks": int(row["chunks"]), "turns": int(row["turns"]), "document_titles": int(row["document_titles"]), "topics": int(row["topics"])}

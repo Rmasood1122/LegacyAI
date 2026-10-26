@@ -772,6 +772,32 @@ Details: `10-content-under-company-key.md`, step 6 part 4b (first half); decisio
 - **Not done or proven:** topic names are not locked yet (second half of part 4b); the AI service's own screens
   still read them as plain text; how much slower the topic list is with a real AI service was not measured.
 
+## Step 28 — Topic names and descriptions are stored locked (2026-10-25)
+
+Details: `10-content-under-company-key.md`, step 6 part 4b (second half); decision D41. With this, every part of
+step 6 is built.
+
+- A topic's name and description are now stored locked with the company's content key. Only the AI service can open
+  them (since step 27 the API asks it).
+- Two topics still cannot have the same name, in any case. For this the AI service keeps a keyed fingerprint of each
+  name (it reveals nothing without the key) and checks a new or changed name against it and against the names still
+  readable, one request at a time per company.
+- The gap report, the readiness report, the knowledge map, an item's topics and the interview's next question open the
+  names for the request only. Lists that were sorted by name are sorted after opening.
+- Older names are locked by housekeeping (job 6, new counters `sealed_topics` and `readable_topics`).
+- Measured locally: 4 new AI tests (stored locked, given back and renamed opened; a name used once in any case whether
+  the other is readable or locked, also for a rename and a template; the item's topics, gap report and knowledge map
+  show opened names, sorted; older names locked by housekeeping, still shown and still unique). Without the code
+  change 2 of the 4 fail (the stored-locked and the housekeeping one); the other 2 also hold on the old code, where
+  names were readable - they prove that uniqueness and the screens keep working once names are locked. Changed on purpose: the readiness test now creates its
+  topics through the AI service (as the product does since step 27), so the readiness report and the interview run with locked names; the topic tests read
+  the stored names by opening them; the housekeeping test expects the two new counters. Whole AI suite: 383 passed;
+  the 1 failure is the known one of this machine. API integration: 1335 passed; the 8 failures are the known card and
+  sign-in timing tests and the id stand-in of this machine. The evaluation gives the same numbers.
+- **Not done or proven:** the fingerprint uses Python's lower case and the old readable index PostgreSQL's - they
+  agree for ordinary letters but were not compared for every rare character; once every company's topics are
+  locked (housekeeping shows 0) the difference no longer matters. Speed with many topics was not measured.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

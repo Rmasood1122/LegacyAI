@@ -14,6 +14,9 @@ steps 2 and 4b). The toolbox; content_keys.py decides which key a company's cont
   exact place (company, table, column, row, key version). A sealed value copied to another row, column, company or
   version does not open;
 * vectors (embeddings) are sealed as their float32 bytes;
+* a keyed fingerprint of a value (HMAC-SHA256 with a key derived from the content key for that one column), for the
+  few values that must stay unique although they are sealed (a topic's name, step 6 part 4b). Equal values give equal
+  fingerprints under the same key version only; without the key nothing can be learned from it;
 * unwrapped data keys are kept for at most 5 minutes (as in the API, D35): switched off at the key service, a
   company's content stops opening within that time.
 """
@@ -21,6 +24,8 @@ steps 2 and 4b). The toolbox; content_keys.py decides which key a company's cont
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -335,6 +340,14 @@ def open_bytes(key: bytes, sealed: bytes, ref: FieldRef) -> bytes:
         return AESGCM(key).decrypt(sealed[1:1 + NONCE_BYTES], sealed[1 + NONCE_BYTES:], ref.aad())
     except Exception as exc:
         raise SealError("the sealed value does not open here") from exc
+
+
+def fingerprint(key: bytes, text: str, ref: FieldRef) -> bytes:
+    """A keyed fingerprint of `text` for the column `ref` names (its row is not part of it: equal values in different
+    rows of that column must give the same fingerprint). 32 bytes."""
+    info = FieldRef(ref.tenant_id, ref.table, ref.column, "fingerprint", ref.key_id).aad().replace(b"legacyai-field-v1", b"legacyai-fingerprint-v1")
+    index_key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=info).derive(key)
+    return hmac.new(index_key, text.encode("utf-8"), hashlib.sha256).digest()
 
 
 def seal_text(key: bytes, text: str, ref: FieldRef) -> bytes:

@@ -25,9 +25,11 @@ from app.capture import (
     item_title_columns,
     new_row_id,
     open_item_title,
+    open_topic,
     redact,
     row_key,
     topic_condition,
+    topic_text_columns,
     version_key,
 )
 from app.knowledge import item_conflicts, scenario_erasure
@@ -443,11 +445,14 @@ def item_topics(cur: psycopg.Cursor[Any], tenant_id: str, item_id: str, topic_wh
     """The topics an item is linked to. `topic_where` narrows them to what a reader may see (alias tp).
     A link to a RETIRED topic is left out: it is kept in the database but is neither shown nor changed by set_topics()."""
     cur.execute(
-        f"""SELECT kt.topic_id::text AS topic_id, tp.name, kt.link_source
+        f"""SELECT kt.topic_id::text AS topic_id, {topic_text_columns("tp")}, kt.link_source
               FROM knowledge_item_topics kt JOIN topics tp ON tp.tenant_id = kt.tenant_id AND tp.id = kt.topic_id
-             WHERE kt.tenant_id = %s AND kt.item_id = %s AND tp.status <> 'retired' AND {topic_where} ORDER BY tp.name, kt.topic_id""",
+             WHERE kt.tenant_id = %s AND kt.item_id = %s AND tp.status <> 'retired' AND {topic_where}""",
         [tenant_id, item_id, *(topic_params or [])])
-    return [dict(r) for r in cur.fetchall()]
+    names = Fields(cur, tenant_id, "topics")           # topic names are sealed (D41 step 6 part 4b): sorted once opened
+    opened = [open_topic(names, dict(r), "topic_id") for r in cur.fetchall()]
+    return sorted(({"topic_id": r["topic_id"], "name": r["name"], "link_source": r["link_source"]} for r in opened),
+                  key=lambda r: (r["name"], r["topic_id"]))
 
 
 def link_item_to_topics(cur: psycopg.Cursor[Any], *, tenant_id: str, item_id: str, item_vector: list[float], embedding_model: str,

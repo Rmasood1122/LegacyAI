@@ -7,7 +7,7 @@ from app.platform.config import ConfigError, Secret, Settings, load_settings
 from app.platform.content_keys import ContentKeys, active_content_keys, use_content_keys
 from app.platform.db import Database, MissingRow, UnsafeDatabaseRole, one
 from app.platform.logging import Logger
-from app.platform.sealing import FieldRef, KeyUnavailable, key_service_from, open_text, open_vector, seal_text, seal_vector
+from app.platform.sealing import FieldRef, KeyUnavailable, fingerprint, key_service_from, open_text, open_vector, seal_text, seal_vector
 
 __all__ = [
     "ConfigError",
@@ -24,6 +24,7 @@ __all__ = [
     "TokenError",
     "UnsafeDatabaseRole",
     "active_content_keys",
+    "fingerprint",
     "key_service_from",
     "load_settings",
     "one",

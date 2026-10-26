@@ -18,7 +18,7 @@ import psycopg
 from app.ai_gateway import Caller, DataBlock, Embedder, Gateway, InterviewQuestionOutput
 from app.capture.gaps import gap_report
 from app.capture.redaction import redact
-from app.capture.sealed_chunks import Fields, Sealer, new_row_id, row_key, seal_source_title, turn_key
+from app.capture.sealed_chunks import Fields, Sealer, new_row_id, open_topic, row_key, seal_source_title, topic_text_columns, turn_key
 from app.platform import Database, ServiceContext, one, write_audit
 
 FOLLOW_UPS_PER_TOPIC = 2
@@ -154,9 +154,11 @@ def _next_question(cur: psycopg.Cursor[Any], ctx: ServiceContext, iv: dict[str, 
         topic_id = ranked[0].topic_id if ranked else None
     topic_name, topic_desc = "your work", ""
     if topic_id is not None:
-        cur.execute("SELECT name, description FROM topics WHERE tenant_id = %s AND id = %s", (ctx.tenant_id, topic_id))
-        t = cur.fetchone()
-        if t:
+        cur.execute(f"SELECT tp.id::text AS id, {topic_text_columns('tp')} FROM topics tp WHERE tp.tenant_id = %s AND tp.id = %s",
+                    (ctx.tenant_id, topic_id))
+        found = cur.fetchone()
+        if found:
+            t = open_topic(Fields(cur, ctx.tenant_id, "topics"), dict(found))
             topic_name, topic_desc = t["name"], t["description"]
     cur.execute("SELECT count(*)::int AS n FROM interview_turns WHERE tenant_id = %s AND interview_id = %s AND topic_id IS NOT DISTINCT FROM %s",
                 (ctx.tenant_id, iv["id"], topic_id))
