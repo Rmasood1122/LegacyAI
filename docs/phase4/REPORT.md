@@ -798,6 +798,29 @@ step 6 is built.
   agree for ordinary letters but were not compared for every rare character; once every company's topics are
   locked (housekeeping shows 0) the difference no longer matters. Speed with many topics was not measured.
 
+## Step 29 — Locking again after a company clears its own key, part 1 (2026-10-26)
+
+Details: `10-content-under-company-key.md`, step 5 ("re-keying") and section 4; decision D41.
+
+- When a company clears its own key (or changes to another one), what was locked with the old key is now locked again
+  with the company's current key by the housekeeping command, a bounded amount per run. This part covers document
+  pieces with their search vectors, item texts (all versions) and interview questions and answers.
+- The database allows exactly this change and checks it: the old key must be a retired key of the company, the new
+  one must be the key the company locks with now, and nothing else may change. It cannot check the words inside.
+- If the old key no longer works, nothing is lost: those rows wait, and the command says so; readable rows are still
+  locked with the current key in the meantime.
+- Runbook: tell the company to keep the old key working until the command shows 0 left on it.
+- Measured locally: 3 new AI tests (after clearing the key everything is locked again, and with the old key switched
+  off everything still opens and is still found; with the old key already off nothing is lost, readable rows are
+  still locked, and the next run finishes once the key is back; the database refuses the change while the key is
+  live, without the job's flag, to a key that is not the current one, and for a version to the same key). Without the
+  change all 3 fail. Changed on purpose: the API's list of database functions gains the three new ones. Whole AI suite:
+  387 passed; the 1 failure is the known one of this machine. The function-list test was checked locally: its only
+  difference is the known id function stand-in of this machine.
+- **Not done or proven:** the other locked fields (questions asked, comments, titles, conflicts, readiness and
+  scenario texts, document titles, topic names) are not locked again yet - part 2. A company that destroys its old
+  key before the command reaches 0 loses what was still on it; this is told to the operator, not prevented.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

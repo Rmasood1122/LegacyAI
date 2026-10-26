@@ -27,6 +27,7 @@ from app.capture import (
     open_item_title,
     open_topic,
     redact,
+    retired_company_keys,
     row_key,
     topic_condition,
     topic_text_columns,
@@ -101,6 +102,31 @@ def seal_existing_versions(cur: psycopg.Cursor[Any], tenant_id: str, limit: int)
         cur.execute("SELECT seal_version(%s, %s, %s) AS done", (v["id"], body, key_id))
         sealed += 1 if one(cur)["done"] else 0
     return sealed
+
+
+def rekey_versions(cur: psycopg.Cursor[Any], tenant_id: str, limit: int) -> int:
+    """Re-keying (D41 section 4): seals up to `limit` versions again with the company's current key, where they are
+    still sealed with a retired own key, through reseal_version() (the database allows this key change and nothing
+    else). Erased versions hold nothing and are left alone."""
+    fields = Fields(cur, tenant_id, "knowledge_versions")
+    old = retired_company_keys(cur, tenant_id) if fields.keys is not None else []
+    if not old:
+        return 0
+    cur.execute("""SELECT id::text AS id, item_id::text AS item_id, version_no, body_sealed, sealed_key FROM knowledge_versions
+                    WHERE tenant_id = %s AND sealed_key = ANY(%s) AND erased_at IS NULL ORDER BY id LIMIT %s""", (tenant_id, old, limit))
+    done = 0
+    for v in cur.fetchall():
+        key = version_key(v["item_id"], int(v["version_no"]))
+        _, body, key_id = fields.seal(key, "body", fields.open(key, "body", None, v["body_sealed"], v["sealed_key"]) or "")
+        cur.execute("SELECT reseal_version(%s, %s, %s, %s) AS done", (v["id"], v["sealed_key"], body, key_id))
+        done += 1 if one(cur)["done"] else 0
+    return done
+
+
+def versions_on_old_key(cur: psycopg.Cursor[Any], tenant_id: str) -> int:
+    cur.execute("SELECT count(*)::int AS n FROM knowledge_versions WHERE tenant_id = %s AND sealed_key = ANY(%s) AND erased_at IS NULL",
+                (tenant_id, retired_company_keys(cur, tenant_id)))
+    return int(one(cur)["n"])
 
 
 def versions_still_readable(cur: psycopg.Cursor[Any], tenant_id: str) -> int:

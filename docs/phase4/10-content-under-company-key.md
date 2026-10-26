@@ -161,8 +161,17 @@ which unlocks a company's content into memory for a few minutes while it is bein
      command prints what is left (`knowledge.readable_chunks`, `readable_versions`, `readable_turns`).
      Runbook: `docs/runbooks/housekeeping.md`, "Locking older content".
    - **5 part 2, not built:** once production shows 0 left for every company, a migration drops the readable
-     columns (refused while any row is still readable) and `SEARCH_ENGINE=sql` is removed. Not built either: when a
-     company clears its own key, re-sealing its content with the platform's key (section 4 above).
+     columns (refused while any row is still readable) and `SEARCH_ENGINE=sql` is removed.
+   - **Re-keying, part 1, built 2026-10-26** (section 4 above): when a company clears its own key, or changes to
+     another one, housekeeping job 6 seals what is still sealed with the retired version again with the company's
+     current key (the platform's content key, or its new own key): chunks (text and vector), knowledge versions
+     (through `reseal_version()`) and interview turns. The database allows this one change: a sealed value replaced
+     by a sealed value when the old key is a RETIRED version of the company's own data key and the new one is the key
+     it seals with now (`content_rekey_allowed()`, `content_write_key()`), nothing else changing; it cannot check the
+     text inside. Separate rounds from the sealing of readable rows, so a company whose old key no longer works still
+     has those sealed (`old_key_unavailable`). Counters: `rekeyed_*`, `old_key_*`. Runbook: "Locking again after a
+     company clears or changes its own key". **Part 2, not built:** the step-6 columns (questions, comments, titles,
+     conflicts, readiness and scenario texts, document titles, topic names).
 6. **The rest of the content columns:**
    - titles, topic names (uniqueness then by keyed hash), quiz, scenarios, feedback, conflict excerpts, questions;
    - exports unseal what they export.
