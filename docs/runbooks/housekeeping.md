@@ -107,14 +107,15 @@ the readable columns can be removed by a later change (step 5 part 2, not built)
 
 When a company clears its own key (or changes to another one), new content is locked with its current key at once,
 but what was locked before is still locked with the OLD key - readable only while that key still works. Job 6 locks
-it again with the current key, in the same bounded way. So far this covers document pieces, item texts and interview
-turns (the other locked fields follow in a later change).
+it again with the current key, in the same bounded way: every kind of locked content (the same fifteen kinds as
+above).
 
 1. Tell the company: **keep the old key working until housekeeping shows 0 below**. Destroying it earlier makes what is
    still locked with it unreadable for good.
 2. Run the command. Under `knowledge`:
-   - `rekeyed_chunks`, `rekeyed_versions`, `rekeyed_turns`: how many were locked again in this run;
-   - `old_key_chunks`, `old_key_versions`, `old_key_turns`: how many are still locked with an old key;
+   - `rekeyed_` with the same fifteen names as above (`rekeyed_chunks`, `rekeyed_versions`, ... `rekeyed_topics`): how
+     many were locked again in this run;
+   - `old_key_` with the same fifteen names: how many are still locked with an old key;
    - `old_key_unavailable`: how many companies have content on an old key that cannot be used right now. Nothing
      is lost or half done; it is tried again on the next run once the key works. Their readable rows are still
      locked with the current key in the meantime.

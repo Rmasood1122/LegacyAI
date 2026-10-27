@@ -170,8 +170,13 @@ which unlocks a company's content into memory for a few minutes while it is bein
      it seals with now (`content_rekey_allowed()`, `content_write_key()`), nothing else changing; it cannot check the
      text inside. Separate rounds from the sealing of readable rows, so a company whose old key no longer works still
      has those sealed (`old_key_unavailable`). Counters: `rekeyed_*`, `old_key_*`. Runbook: "Locking again after a
-     company clears or changes its own key". **Part 2, not built:** the step-6 columns (questions, comments, titles,
-     conflicts, readiness and scenario texts, document titles, topic names).
+     company clears or changes its own key".
+   - **Re-keying, part 2, built 2026-10-27:** the step-6 columns too (questions asked, questions to experts,
+     comments, item titles, conflict quotes, readiness questions and answers, scenario texts and answers, document
+     titles, topic names and descriptions with their fingerprints), through one routine driven by a list of the
+     sealed columns and their bindings (`services/ai/app/knowledge/rekey.py`). The guards of expert questions,
+     readiness questions, scenarios and scenario steps allow the same one change; an answer log goes through
+     `reseal_answer_log()`, which checks the rule itself.
 6. **The rest of the content columns:**
    - titles, topic names (uniqueness then by keyed hash), quiz, scenarios, feedback, conflict excerpts, questions;
    - exports unseal what they export.
