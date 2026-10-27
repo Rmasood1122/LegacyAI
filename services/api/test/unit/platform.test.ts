@@ -135,6 +135,17 @@ describe('log redaction', () => {
     expect(scrubString('request 42 took 17 ms')).toBe('request 42 took 17 ms');
   });
 
+  it('keeps ids whose first 16 characters happen to be digits (regression: a random invoice id was masked as a card number)', () => {
+    for (const id of ['36933491-7157-4821-8a3e-0c5d2f1b9e47', '01937601-5277-7300-9000-000000000001', '12345678-1234-1234-1234-123456789012']) {
+      expect(scrubString(`invoice ${id} opened`)).toBe(`invoice ${id} opened`);
+      expect(scrubString(id.toUpperCase())).toBe(id.toUpperCase());
+    }
+    // a card number next to an id is still masked
+    expect(scrubString('invoice 36933491-7157-4821-8a3e-0c5d2f1b9e47 card 4821-9376-0152-7730'))
+      .toBe('invoice 36933491-7157-4821-8a3e-0c5d2f1b9e47 card [card-number]');
+    expect(scrubString('4821937601527730-')).toBe('[card-number]-');
+  });
+
   it('runs in linear time on hostile input (regression: an unbounded pattern once took 30 s on 70 KB)', () => {
     for (const hostile of ['y'.repeat(500_000), 'a:'.repeat(200_000), '1234 '.repeat(100_000), 'x://'.repeat(100_000), `${'a'.repeat(100_000)}://u:p@h`]) {
       const started = process.hrtime.bigint();

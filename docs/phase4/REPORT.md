@@ -920,6 +920,18 @@ Details: decision D42; `09-batch-c-prepared.md`, feature 9.
   the application does; a clock set back before the next opening (not behind the last one) gains that much time; a
   switched-off company key does not remove copies already on devices (a new copy is refused).
 
+## Step 34 — Ids are no longer masked as card numbers in the logs (2026-10-27)
+
+- The logs mask anything that looks like a card number (16 digits). The first 16 characters of a random id are all
+  digits about once in a thousand ids, and such an id was masked too. Found when a billing test that looks for an
+  invoice id in the log failed once in CI, by chance. Ids (UUIDs) are now recognised first, as a whole, and
+  kept; card numbers, also next to an id, are still masked.
+- Measured locally: a new unit test with the id from that failure and two more; it failed before the change
+  (`invoice [card-number]-8a3e-… opened`) and passes after. The test that the masking runs in linear time on hostile
+  input still passes. API unit tests and the billing tests: 798 passed.
+- Not covered: a card number deliberately written in the shape of an id (8-4-4-4-12 characters) is not masked. Card
+  numbers are written as LGY-XXXX-XXXX-XXXX-XXXX.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

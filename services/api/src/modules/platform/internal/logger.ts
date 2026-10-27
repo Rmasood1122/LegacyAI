@@ -14,8 +14,10 @@ const SENSITIVE_KEYS = new Set([
 ]);
 
 const REDACTED = '[redacted]';
-// 16 digits, optionally grouped with spaces or dashes and prefixed LGY-.
-const CARD_NUMBER_RE = /(?:LGY[- ]?)?\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b/gi;
+// 16 digits, optionally grouped with spaces or dashes and prefixed LGY-. An id (UUID) is matched first, as a whole,
+// and kept: the first 16 characters of a random id are all digits about once in a thousand ids, and such an id was
+// being masked as a card number (found by a test that looked for an invoice id in the log).
+const ID_OR_CARD_NUMBER_RE = /(\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b)|(?:LGY[- ]?)?\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b/gi;
 
 // A database URL carries a password. Error messages from drivers sometimes include one.
 // Every quantifier is bounded so the pattern runs in linear time: log content can be
@@ -25,7 +27,8 @@ const MAX_LOGGED_STRING = 8_000;
 
 export function scrubString(value: string): string {
   const bounded = value.length > MAX_LOGGED_STRING ? `${value.slice(0, MAX_LOGGED_STRING)}[truncated]` : value;
-  return bounded.replace(CONNECTION_STRING_RE, '[connection-string]').replace(CARD_NUMBER_RE, '[card-number]');
+  return bounded.replace(CONNECTION_STRING_RE, '[connection-string]')
+    .replace(ID_OR_CARD_NUMBER_RE, (match, id: string | undefined) => (id === undefined ? '[card-number]' : match));
 }
 
 /** Returns a deep copy with sensitive values removed. Never mutates its input. */
