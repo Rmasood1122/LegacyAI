@@ -335,3 +335,15 @@ CONSEQUENCES:
 - **Step 5 part 1 (2026-10-25):** existing rows are sealed by the housekeeping command (job 6), not by a new scheduled worker: it reuses the one command the operator already runs, and the AI service's per-company housekeeping, which until then nothing called. The database allows readable -> sealed only (a flag for source chunks, `seal_version()` for versions) so the job cannot be used to change content. A company whose own key is off is skipped, never sealed with another key.
 - **Step 6 part 4 (2026-10-25, the founder's choice):** document titles and topic names are sealed too, and the API shows them by asking the AI service (rather than giving the API its own way to open them, or leaving them readable). Accepted cost: those screens are a little slower and do not work while the AI service is down.
 
+
+**D42 — Offline mode (feature 9): an installable web app with 7-day packs of verified level-0/1 knowledge (2026-10-27).**
+- The founder's choices of 2026-10-27, each the recommended option: (1) the existing web app made installable and able
+  to read a downloaded pack without a connection - no app-store accounts, no separate phone builds; (2) a pack may be
+  opened offline for **7 days**; (3) a pack holds only **verified (or corrected), current knowledge at levels 0 and 1**
+  that the person may read, linked to the job role's active topics - confidential levels 2 and 3 never leave the server.
+- Accepted costs: a revoked card or a switched-off company key is not noticed on a device for up to 7 days (offline, the
+  device cannot ask); a phone's browser may clear the stored pack when space runs low, so it must be downloaded again;
+  offline is reading and searching only - no questions to the AI, no changes.
+- Built in two parts. Part 1 (2026-10-27): the server side - `GET /v1/offline-pack?job_role=` (a card only, never a
+  machine's key; every download in the audit log with the count). Part 2: the web app (stored sealed on the device,
+  "as of" on every page, refused after the expiry).

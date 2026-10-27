@@ -3416,6 +3416,54 @@ paths:
           $ref: "#/components/responses/TooManyRequests"
         "502":
           $ref: "#/components/responses/BadGateway"
+  /v1/offline-pack:
+    get:
+      operationId: "getOfflinePack"
+      summary: "The verified knowledge of one job role this card may read, as a pack to read without a connection (feature 9)."
+      description: >-
+        Only verified (or corrected) knowledge that is not past its review date, at sensitivity level 0 or 1 - never
+        higher, whatever the card may read (the founder's choice of 2026-10-27) - linked to the job role's active topics,
+        and only what this card may read. At most 500 items; `truncated` says when there were more. The pack says when it
+        was made (`as_of`) and until when it may be opened offline (`expires_at`, 7 days later): the device must refuse
+        it after that and must show "as of" on every page. Offline is reading and searching only; nothing in the pack
+        can be changed or sent back. Every download is written to the audit log (count only, no content). A card only:
+        a machine's key cannot take a pack.
+      tags:
+        - "knowledge"
+      x-permission: "knowledge:read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: "job_role"
+          in: "query"
+          required: true
+          schema:
+            $ref: "#/components/schemas/JobRoleName"
+      responses:
+        "200":
+          description: "Success"
+          content:
+            "application/json":
+              schema:
+                $ref: "#/components/schemas/KOfflinePack"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+        "503":
+          $ref: "#/components/responses/CompanyKeyUnavailable"
   /v1/topics:
     get:
       operationId: "listTopics"
@@ -9856,6 +9904,87 @@ components:
             - "string"
             - "null"
           format: "uuid"
+    KOfflinePack:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "job_role"
+        - "as_of"
+        - "expires_at"
+        - "max_sensitivity"
+        - "topics"
+        - "items"
+        - "truncated"
+      properties:
+        job_role:
+          type: "string"
+        as_of:
+          type: "string"
+          format: "date-time"
+        expires_at:
+          type: "string"
+          format: "date-time"
+        max_sensitivity:
+          type: "integer"
+          enum:
+            - 1
+        topics:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "topic_id"
+              - "name"
+            properties:
+              topic_id:
+                type: "string"
+                format: "uuid"
+              name:
+                type: "string"
+        items:
+          type: "array"
+          maxItems: 500
+          items:
+            type: "object"
+            additionalProperties: false
+            required:
+              - "id"
+              - "title"
+              - "body"
+              - "status"
+              - "sensitivity"
+              - "verified_at"
+              - "topic_ids"
+            properties:
+              id:
+                type: "string"
+                format: "uuid"
+              title:
+                type: "string"
+              body:
+                type: "string"
+              status:
+                type: "string"
+                enum:
+                  - "verified"
+                  - "corrected"
+              sensitivity:
+                type: "integer"
+                minimum: 0
+                maximum: 1
+              verified_at:
+                type:
+                  - "string"
+                  - "null"
+                format: "date-time"
+              topic_ids:
+                type: "array"
+                items:
+                  type: "string"
+                  format: "uuid"
+        truncated:
+          type: "boolean"
     KGapReport:
       type: "object"
       additionalProperties: false

@@ -11,7 +11,7 @@ import { addMember, createTenant, platformOperator, startApp, superuser, type Re
 
 const REAL = process.env.AI_SERVICE_URL_REAL;
 // Phase 2, plus Phase 4: five quality operations (features 22, 23), two for department templates (26), one for activity numbers (27), two for the graph (30)
-const PHASE2_OPERATIONS = 78 + 5 + 2 + 3 + 15;   // + fifteen for scenario replay (feature 8)
+const PHASE2_OPERATIONS = 78 + 5 + 2 + 3 + 15 + 1;   // + fifteen for scenario replay (feature 8), + the offline pack (feature 9)
 
 describe.skipIf(!REAL)('Phase 2 walk with the real AI service', () => {
   let t: TestApp;
@@ -123,6 +123,11 @@ describe.skipIf(!REAL)('Phase 2 walk with the real AI service', () => {
     expect((await o.get(`/v1/knowledge/items/${itemId}`)).body.topics).toEqual(linked.body.topics);
     const stored = await su.query('SELECT link_source FROM knowledge_item_topics WHERE item_id = $1 AND topic_id = $2', [itemId, topic.body.id]);
     expect(stored.rows).toEqual([{ link_source: 'reviewer' }]);
+    // the learner takes the role's offline pack (feature 9): the verified, now company-wide item is in it, opened
+    const pack = ok('getOfflinePack', await l.get(`/v1/offline-pack?job_role=${encodeURIComponent(role)}`), 200);
+    expect(pack.body.topics).toEqual([{ topic_id: topic.body.id, name: 'Relief valves' }]);
+    expect(pack.body.items.map((i: any) => [i.id, i.status, i.body])).toEqual([
+      [itemId, 'corrected', 'Lift each relief valve lever monthly until steam escapes, then release it slowly. Wear gloves.']]);
 
     // ---- asking
     const answer = ok('askKnowledge', await l.post('/v1/knowledge/ask', { question: 'How often do I test a relief valve lever?' }), 200);

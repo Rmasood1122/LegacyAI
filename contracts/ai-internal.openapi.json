@@ -485,6 +485,22 @@
         "title": "Labels",
         "type": "object"
       },
+      "OfflinePackQuery": {
+        "additionalProperties": false,
+        "properties": {
+          "job_role": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Job Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_role"
+        ],
+        "title": "OfflinePackQuery",
+        "type": "object"
+      },
       "Override": {
         "additionalProperties": false,
         "properties": {
@@ -3317,6 +3333,67 @@
         "summary": "Labels",
         "x-action": "label.change",
         "x-subject": "target_id"
+      }
+    },
+    "/internal/offline/pack": {
+      "post": {
+        "description": "Verified level-0/1 knowledge of a job role that the caller may read, opened for this request (offline.py).",
+        "operationId": "offline_pack_internal_offline_pack_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfflinePackQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Offline Pack Internal Offline Pack Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Offline Pack",
+        "x-action": "offline.pack",
+        "x-subject": null
       }
     },
     "/internal/quality/feedback/list": {
