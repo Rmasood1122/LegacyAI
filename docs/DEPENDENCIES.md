@@ -333,7 +333,7 @@ than the rule requires.
 | @testing-library/react | **16.3.2** (2026-01-19) | MEASURED: major 16 since 2024-06-03; MIT | Tests screens the way a person uses them (by label and role). |
 | @testing-library/dom | **10.4.1** (2025-07-27) | MEASURED: required peer of @testing-library/react (`^10.0.0`); MIT | |
 | @testing-library/user-event | **14.6.3** (2026-08-03) | MEASURED: major 14 since 2022-03-29; latest 14.6.7; MIT | Simulates typing and clicking. |
-| @playwright/test | **1.62.1** (2026-07-30) | MEASURED: latest 1.63.0 (2026-09-04); Apache-2.0 | Browser tests in CI (Chromium). |
+| @playwright/test | **1.62.1** (2026-07-30) | MEASURED: latest 1.63.0 (2026-09-04); Apache-2.0 | Browser tests in CI (Chromium; since 2026-10-27 also the Firefox and WebKit builds of the same release, for offline reading only). Not adopted: the fix for WebKit's offline mode with a service worker (Playwright issue 42775, fix 42894, read 2026-10-27) comes in a later release that is younger than 60 days. |
 | playwright-core | **1.62.1** | MEASURED: pinned explicitly so that @axe-core/playwright uses the same copy as @playwright/test (npm otherwise installs 1.63.0 beside it and the types clash) | |
 | @axe-core/playwright | **4.12.1** (2026-06-23) | MEASURED: major 4 since 2021-06-23; latest 4.13.0; MPL-2.0 (a test tool, not shipped) | Automated accessibility scan in the browser tests. |
 | `eslint` (web) | **10.11.0** | see section 2 | Lint, including the rules "only the API client talks to the network", "no browser storage" (one file excepted: the locked offline copy, D42), "no inline style or raw HTML". |
