@@ -1,7 +1,7 @@
 // Lint rules for the web application. Besides the TypeScript checks, these rules keep promises the
 // design makes (docs/phase3/00-proposal.md, docs/phase3/01-web-application.md):
 //   1. only src/api/client.ts may talk to the network (screens go through the client and the hooks);
-//   2. nothing is kept in browser storage;
+//   2. nothing is kept in browser storage - except the locked offline copy, in src/offline/storage.ts only (D42);
 //   3. no inline styles and no raw HTML injection (the content-security policy forbids the first,
 //      and the second is how cross-site scripting gets in);
 //   4. the layers point one way:  generated -> api -> session -> navigation -> features -> screens/App,
@@ -19,6 +19,10 @@ const everywhere = [
   { selector: "CallExpression[callee.name='eval']", message: 'No eval.' },
   // The layer rules read static imports; a dynamic import() would slip past them, and nothing here needs one.
   { selector: 'ImportExpression', message: 'No dynamic import(): the layer rules only see static imports.' },
+];
+const browserStorageExceptIndexedDb = [
+  { selector: "MemberExpression[object.name=/^(localStorage|sessionStorage)$/]", message: 'Nothing is kept in browser storage.' },
+  { selector: "Identifier[name=/^(localStorage|sessionStorage)$/]", message: 'Nothing is kept in browser storage.' },
 ];
 const noNetwork = [
   { selector: "CallExpression[callee.name='fetch']", message: 'Only src/api/client.ts talks to the network. Use the API client.' },
@@ -44,10 +48,14 @@ export default tseslint.config(
   },
   // The one place that may call fetch; the composition root hands it the browser's fetch.
   { files: ['src/api/client.ts', 'src/main.tsx'], rules: { 'no-restricted-syntax': ['error', ...everywhere] } },
+  // The one place that may keep something in the browser: the locked offline copy, in IndexedDB (decision D42).
+  { files: ['src/offline/storage.ts'], rules: { 'no-restricted-syntax': ['error', ...everywhere.filter((r) => !r.selector.includes('indexedDB')), ...noNetwork, ...browserStorageExceptIndexedDb] } },
 
   layer(['src/api/**/*.{ts,tsx}'], dirs('session', 'navigation', 'ui', 'features', 'styles'), FRAME),
   layer(['src/session/**/*.{ts,tsx}'], dirs('navigation', 'ui', 'features'), FRAME),
   layer(['src/navigation/**/*.{ts,tsx}'], dirs('ui', 'features'), FRAME),
+  // The offline copy (D42): its own small layer, below the features. It knows the API's types, nothing above them.
+  layer(['src/offline/**/*.{ts,tsx}'], dirs('session', 'navigation', 'ui', 'features'), FRAME),
   layer(['src/ui/**/*.{ts,tsx}'], { ...dirs('api', 'session', 'navigation', 'features'), message: 'ui/ is presentational: no data access.' }, FRAME),
   // Features share only api/, session/, navigation/ and ui/. A feature folder is one level deep, so
   // "../something" from inside it is always a sibling feature.

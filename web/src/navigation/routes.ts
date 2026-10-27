@@ -62,6 +62,11 @@ export const ROUTES = {
   },
   attempt: { path: '/readiness/attempts/:attemptId', requiredOperation: 'getReadinessAttempt' },
   report: { path: '/readiness/reports/:attemptId', requiredOperation: 'getReadinessReport' },
+  // Offline reading (feature 9, D42): a copy of a job role's verified knowledge kept on this device.
+  offline: {
+    path: '/offline', label: 'Offline', requiredOperation: 'getOfflinePack',
+    home: { title: 'Offline reading', text: 'Keep a copy of a job role’s verified knowledge on this device, to read without a connection.', linkText: 'Set up offline reading' },
+  },
   // Scenario replay: a learner sees what is offered to it and its runs; the people who write and approve scenarios
   // have their own list (the right to read the question bank, which learners do not hold).
   scenarios: {

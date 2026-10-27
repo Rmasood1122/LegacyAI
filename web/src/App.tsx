@@ -5,6 +5,8 @@ import { NavLink, Route, Routes } from 'react-router';
 import { EnrollScreen } from './features/auth/EnrollScreen.tsx';
 import { SignInScreen } from './features/auth/SignInScreen.tsx';
 import { SsoReturnScreen } from './features/auth/SsoReturnScreen.tsx';
+import { useOfflineGuard } from './features/offline/hooks.ts';
+import { OfflineFallback } from './features/offline/OfflineFallback.tsx';
 import { dropCardFragment } from './navigation/cardLink.ts';
 import { mayOpen } from './navigation/routes.ts';
 import { SCREENS } from './screens.tsx';
@@ -13,10 +15,10 @@ import { Banner, Button, Loading, Page } from './ui/index.tsx';
 
 export function App() {
   const { state } = useSession();
+  useOfflineGuard(state);
   if (state.status === 'loading') return <main><Loading what="LegacyAI" /></main>;
-  if (state.status === 'error') {
-    return <main><Banner tone="danger" title="LegacyAI could not be reached">{state.message} Reload the page to try again.</Banner></main>;
-  }
+  // Without the API, only the copy kept on this device for offline reading can be shown (feature 9).
+  if (state.status === 'error') return <OfflineFallback message={state.message} />;
   if (state.status === 'signed_out') {
     return (
       <main id="main">

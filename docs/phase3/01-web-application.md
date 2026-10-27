@@ -40,7 +40,7 @@ web/src/screens.tsx          routes.ts plus the component of each screen; the me
 ```
 
 Rules that lint enforces (and a self-test proves the rules fire): only `api/client.ts` may call the network; nothing
-is kept in browser storage; no inline style and no raw HTML; `ui/` may not reach for data; the layers point one way
+is kept in browser storage, except the locked offline copy, in `offline/storage.ts` only (decision D42); no inline style and no raw HTML; `ui/` may not reach for data; the layers point one way
 (`api` → `session` → `navigation` → `features` → `screens`/`App`); a feature may not import another feature (the rule
 does not depend on folder names, so it also covers features added later), nor the application frame, nor the cache
 library or the API client itself — features use only the helpers of `api/context.tsx`.

@@ -59,6 +59,9 @@ export const seedReadiness = () => control<{ job_role: string; item_id: string }
 /** The name of the topic the seed creates (topic names are not redacted). */
 export const SEED_TOPIC = 'Relief valves';
 
+/** The test server's clock (it runs ahead of real time: every sign-in moves it on by an authenticator-code step). */
+export const serverNow = async (): Promise<number> => Date.parse((await control<{ now: string }>('/now')).now);
+
 /** On a failure, keeps what the page showed as text: CI publishes it, so the cause can be read without the screenshot. */
 export async function keepPageTextOnFailure(page: Page, info: TestInfo): Promise<void> {
   if (info.status === info.expectedStatus) return;

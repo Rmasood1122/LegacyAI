@@ -55,6 +55,7 @@ the permission rules stay where they are — in the API. A screen can hide a but
 - **Types generated from `openapi.yaml`**, so a screen cannot call an operation or use a field that does not exist;
   CI fails if they drift.
 - **No secret in the browser.** The session stays in the existing protected cookie; nothing is kept in browser storage.
+  (Since decision D42, one exception: the locked offline copy a person may take of verified level-0/1 knowledge.)
 - **Accessibility from the start**: keyboard use, visible focus, labels, sufficient contrast — checked by an
   automated test on every screen and stated honestly as "automated checks only" (no test with real users of
   assistive technology).

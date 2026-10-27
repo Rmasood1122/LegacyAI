@@ -58,7 +58,8 @@ adds a detour:
 | `POST /v1/auth/sso/finish` | the web application hands code, state and the company id from the address on at once; only the browser that started can finish (a cookie set at start); the API redeems the code once at the provider, checks the ID token, ends the original step and opens a new one (5 minutes) that carries the identity the provider vouched for |
 | `POST /v1/auth/login/verify` with factor `sso` | as always: 3-digit code + strong factor. The factor holds only if the identity is linked to THIS card, through the company's current connection, and was vouched for in THIS step |
 
-The web application uses no browser storage (its lint rule forbids it). The one thing the browser keeps between start
+The web application keeps nothing for sign-in in browser storage (its lint rule forbids it; the one exception,
+since D42, is the locked offline copy of knowledge). The one thing the browser keeps between start
 and finish is an HttpOnly cookie the API sets and the page cannot read. Every failure is the same 401. Starting the
 detour keeps the original step alive for as long as the detour may take (10 minutes), because a provider sign-in with
 a second factor can take longer than the usual 5.

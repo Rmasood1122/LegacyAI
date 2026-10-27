@@ -345,5 +345,19 @@ CONSEQUENCES:
   device cannot ask); a phone's browser may clear the stored pack when space runs low, so it must be downloaded again;
   offline is reading and searching only - no questions to the AI, no changes.
 - Built in two parts. Part 1 (2026-10-27): the server side - `GET /v1/offline-pack?job_role=` (a card only, never a
-  machine's key; every download in the audit log with the count). Part 2: the web app (stored sealed on the device,
-  "as of" on every page, refused after the expiry).
+  machine's key; every download in the audit log with the count). Part 2 (2026-10-27): the web app - installable
+  (a manifest and a service worker that keeps only the application's own files, never anything under `/v1`); the copy
+  kept in IndexedDB, encrypted with a key made on the device that the browser will not give out; "as of" on every
+  offline view; refused and removed from its expiry on.
+- Rules added in part 2, not chosen by the founder separately (they follow from the choices above):
+  - a copy belongs to the card that took it: it is removed whenever the API answers that nobody, or another card, is
+    signed in (so also when a session simply ran out while connected), and on signing out. It opens only while the API
+    cannot be reached, or for the same card.
+  - a copy is refused (and kept) while the device's clock is behind its last opening or behind the moment it was made,
+    so setting the clock back cannot stop the 7 days. A clock set back before the next opening, but not behind the last
+    one, cannot be told from a correct clock: that much time can be gained.
+  - switching the company's key off does not remove copies already on devices: they stay readable until their 7 days
+    are over (the application asks the API who is signed in, not whether the company's key is on). Taking a new copy
+    is refused while the key is off. Stated in `docs/customers/your-own-key.md`.
+  - the rule "nothing is kept in browser storage" (Phase 3) now has one exception: this copy, in one file
+    (`web/src/offline/storage.ts`), which the lint rules enforce.

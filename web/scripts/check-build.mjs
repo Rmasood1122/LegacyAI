@@ -24,8 +24,15 @@ for (const f of files.filter((e) => e.name.endsWith('.js'))) {
   if (/\b(localStorage|sessionStorage)\b/.test(text)) problems.push(`${f.name} mentions browser storage`);
 }
 
+// The service worker (feature 9, D42) keeps only the application's own files, never anything under /v1.
+const sw = readFileSync(path.join(dist, 'sw.js'), 'utf8');
+const kept = JSON.parse(/const FILES = (\[[^\]]*\]);/.exec(sw)?.[1] ?? 'null');
+if (!Array.isArray(kept) || kept.length === 0) problems.push('sw.js has no list of files to keep');
+else for (const f of kept) if (typeof f !== 'string' || !f.startsWith('/') || f.startsWith('/v1')) problems.push(`sw.js would keep something that is not the application's own file: ${f}`);
+if (!sw.includes("url.pathname.startsWith('/v1/')")) problems.push('sw.js does not leave /v1 to the network');
+
 if (problems.length > 0) {
   console.error(`web-build: FAIL\n- ${problems.join('\n- ')}`);
   process.exit(1);
 }
-console.log(`web-build: PASS (${files.length} files; no inline script or style, nothing from another site, no browser storage in the scripts)`);
+console.log(`web-build: PASS (${files.length} files; no inline script or style, nothing from another site, no browser storage in the scripts; the service worker keeps ${kept.length} of the application's own files and nothing under /v1)`);
