@@ -81,7 +81,9 @@ function toProblem(status: number, code: string): ProblemError {
     case 413: return new ProblemError(413, 'payload-too-large', 'The file is too large');
     case 422: return problems.unprocessable(code.replace(/_/g, ' '));
     case 429: return problems.tooManyRequests(3600);
-    case 503: return new ProblemError(503, 'ai-unavailable', 'AI is not available right now');
+    // The company's own key is switched off, destroyed or unreachable (decision D41, step 7): said as such, so the owner
+    // knows to look at the key, not at the AI service.
+    case 503: return code === 'company_key_unavailable' ? problems.companyKeyUnavailable() : new ProblemError(503, 'ai-unavailable', 'AI is not available right now');
     case 507: return new ProblemError(507, 'storage-full', 'Storage for captured knowledge is full');
     default: return new ProblemError(502, 'ai-service-error', 'The knowledge service did not answer');
   }

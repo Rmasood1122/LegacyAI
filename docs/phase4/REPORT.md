@@ -840,6 +840,29 @@ Details: `10-content-under-company-key.md`, step 5 ("re-keying", part 2); decisi
 - **Not done or proven:** a company that destroys its old key before the command reaches 0 still loses what was on
   it (told to the operator, not prevented); the time a large company needs was not measured.
 
+## Step 31 — A company's key switched off or destroyed, end to end (2026-10-27)
+
+Details: `10-content-under-company-key.md`, step 7; decision D41.
+
+- When a company's key cannot be used, people now read "The company's own encryption key cannot be used right now"
+  on every screen that needs the company's content. Before, the same situation said "AI is not available right now",
+  which pointed the owner at the wrong thing.
+- New operator runbook `docs/runbooks/company-key.md`: what to do when a key is switched off, switched back on,
+  changed or cleared, or destroyed; what backups can and cannot bring back; why the platform's own key must never be
+  destroyed. It states Google's 30-day waiting period before a destroyed key version is gone (read from Google's
+  documentation on 2026-10-27).
+- New customer page `docs/customers/your-own-key.md`: what the key locks, what it does not, and what happens in each
+  case.
+- The feature-21 note no longer says documents and knowledge are not covered (that changed with D41); the API's
+  description of the key operation says the same.
+- Measured locally: 2 new API tests (the topic list and creating a topic answer 503 `company-key-unavailable` with
+  that sentence when the AI service says the company's key is unavailable, without passing on the AI service's own
+  wording; any other 503 of the AI service is still "AI is not available right now"). Without the change the first
+  fails; the second is a control and held before.
+- **Not done or proven:** a real Google Cloud KMS key was never used; opening restored sealed content from a real
+  backup is designed to work while the key works but is not tested end to end. With step 7, D41 is built except
+  step 5 part 2 (dropping the readable columns), which waits until production shows nothing readable is left.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

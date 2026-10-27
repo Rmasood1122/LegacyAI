@@ -13,16 +13,16 @@ the key on again later.
 
 ## What it covers today, and what it does not
 
-| Covered | Not covered (yet) |
+| Covered | Not covered |
 |---|---|
-| authenticator-app seeds (sign-in factor) | **documents and knowledge** (text, chunks, embeddings in the AI service's tables) |
-| webhook signing secrets | the audit log, people, cards (hashed or not secret) |
-| SSO client secrets | backups (they hold what the database holds: the sealed values, which stay sealed) |
+| authenticator-app seeds (sign-in factor) | the audit log, people, cards (hashed or not secret) |
+| webhook signing secrets | labels, dates, counts and sizes (needed to decide who may see what) |
+| SSO client secrets | |
+| **documents and knowledge** (since decision D41, 2026-10-25: text, search copies, vectors and every other written field; see `10-content-under-company-key.md`) | |
 
-Why not the documents and knowledge: search depends on the database reading the text (full-text search) and its
-vectors. Encrypting them with a key the database cannot use would switch search off. Covering them needs a different
-design, for example encrypted search, or decrypting into memory per company. That is a decision of its own, with real
-costs. It is the main remaining gap, and the founder must know it before anyone promises "your data under your key".
+Backups hold what the database holds: the sealed values, which stay sealed. **Updated 2026-10-27 (D41 step 7):** the
+earlier gap - documents and knowledge not covered - is closed; the operator's steps are in
+`docs/runbooks/company-key.md` and the customers' explanation in `docs/customers/your-own-key.md`.
 
 ## How it works
 
