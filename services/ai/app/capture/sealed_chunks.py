@@ -269,6 +269,13 @@ def conflict_key(item_id: str, other_item_id: str) -> str:
     return f"conflict:{item_id}:{other_item_id}"
 
 
+def retired_company_keys(cur: psycopg.Cursor[Any], tenant_id: str) -> list[str]:
+    """The key ids of the company's RETIRED own data keys (it cleared its key or changed to another one): what is still
+    sealed with them is sealed again with the current key by the housekeeping job (re-keying)."""
+    cur.execute("SELECT 'company:' || version AS key_id FROM company_data_keys WHERE tenant_id = %s AND retired_at IS NOT NULL", (tenant_id,))
+    return [str(r["key_id"]) for r in cur.fetchall()]
+
+
 def new_row_id(cur: psycopg.Cursor[Any]) -> str:
     """A row id taken before the insert, so a value can be sealed to its row (the same time-ordered ids the tables use)."""
     cur.execute("SELECT uuidv7()::text AS id")

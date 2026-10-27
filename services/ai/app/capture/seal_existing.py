@@ -1,4 +1,6 @@
-"""Sealing the rows written before decision D41 step 4b (step 5): document pieces and search copies (chunks) and
+"""Sealing the rows written before decision D41 step 4b (step 5), and sealing again what is still sealed with a
+company's retired own key (re-keying, section 4 of the plan; part 1: chunks and interview turns here, knowledge
+versions in the knowledge module): document pieces and search copies (chunks) and
 interview turns that are still readable are sealed with the company's content key, exactly as new rows are. Knowledge
 versions are sealed by the knowledge module (`app.knowledge.items.seal_existing_versions`) with the same helpers.
 
@@ -13,7 +15,18 @@ from typing import Any
 
 import psycopg
 
-from app.capture.sealed_chunks import Fields, Sealer, open_topic, row_key, seal_source_title, seal_topic, topic_text_columns, turn_key
+from app.capture.sealed_chunks import (
+    Fields,
+    Opener,
+    Sealer,
+    open_topic,
+    retired_company_keys,
+    row_key,
+    seal_source_title,
+    seal_topic,
+    topic_text_columns,
+    turn_key,
+)
 from app.platform import one
 
 
@@ -99,6 +112,70 @@ def seal_topic_texts(cur: psycopg.Cursor[Any], tenant_id: str, limit: int) -> in
                         WHERE tenant_id = %s AND id = %s AND name_sealed IS NULL""",
                     (stored["name_sealed"], stored["description_sealed"], stored["sealed_key"], stored["name_hash"], tenant_id, t["id"]))
     return len(rows)
+
+
+def rekey_chunks(cur: psycopg.Cursor[Any], tenant_id: str, limit: int) -> int:
+    """Seals up to `limit` chunks again (text and vector) with the company's current key, where they are still sealed
+    with a retired own key. Raises KeyUnavailable when the old key cannot be used any more."""
+    sealer = Sealer(cur, tenant_id)
+    old = retired_company_keys(cur, tenant_id) if sealer.sealing else []
+    if not old:
+        return 0
+    cur.execute(
+        """SELECT id, kind, source_id::text AS source_id, ordinal, knowledge_item_id::text AS knowledge_item_id, text, text_sealed, sealed_key,
+                  embedding, embedding_sealed
+             FROM chunks WHERE tenant_id = %s AND sealed_key = ANY(%s) ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED""", (tenant_id, old, limit))
+    rows = cur.fetchall()
+    if not rows:
+        return 0
+    opener = Opener(cur, tenant_id)
+    cur.execute("SELECT set_config('app.reseal', 'on', true)")      # chunks_guard allows this change only under the flag
+    for r in rows:
+        key = row_key(kind=r["kind"], source_id=r["source_id"], ordinal=r["ordinal"], knowledge_item_id=r["knowledge_item_id"])
+        body = sealer.text_columns(key, opener.text(r))
+        vector = opener.vector(r)
+        embedding = None if vector is None else sealer.vector_columns(key, vector, body["sealed_key"])["embedding_sealed"]
+        cur.execute("""UPDATE chunks SET text_sealed = %s, sealed_key = %s, embedding_sealed = %s
+                        WHERE tenant_id = %s AND id = %s AND sealed_key = %s""",
+                    (body["text_sealed"], body["sealed_key"], embedding, tenant_id, r["id"], r["sealed_key"]))
+    cur.execute("SELECT set_config('app.reseal', 'off', true)")
+    return len(rows)
+
+
+def rekey_turns(cur: psycopg.Cursor[Any], tenant_id: str, limit: int) -> int:
+    """Seals up to `limit` interview turns again (question and answer, one key) with the company's current key."""
+    fields = Fields(cur, tenant_id, "interview_turns")
+    old = retired_company_keys(cur, tenant_id) if fields.keys is not None else []
+    if not old:
+        return 0
+    cur.execute(
+        """SELECT id, interview_id::text AS interview_id, ordinal, question_sealed, answer_sealed, sealed_key
+             FROM interview_turns WHERE tenant_id = %s AND sealed_key = ANY(%s) AND erased_at IS NULL
+            ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED""", (tenant_id, old, limit))
+    rows = cur.fetchall()
+    for r in rows:
+        key = turn_key(r["interview_id"], int(r["ordinal"]))
+        question = fields.open(key, "question", None, r["question_sealed"], r["sealed_key"]) or ""
+        _, question_sealed, key_id = fields.seal(key, "question", question)
+        answer_sealed = None
+        if r["answer_sealed"] is not None:
+            _, answer_sealed, _ = fields.seal(key, "answer", fields.open(key, "answer", None, r["answer_sealed"], r["sealed_key"]) or "",
+                                              key_id=key_id)
+        cur.execute("""UPDATE interview_turns SET question_sealed = %s, answer_sealed = %s, sealed_key = %s
+                        WHERE tenant_id = %s AND id = %s AND sealed_key = %s""",
+                    (question_sealed, answer_sealed, key_id, tenant_id, r["id"], r["sealed_key"]))
+    return len(rows)
+
+
+def still_on_old_key(cur: psycopg.Cursor[Any], tenant_id: str) -> dict[str, int]:
+    """How many chunks and interview turns of the company are still sealed with a retired own key."""
+    old = retired_company_keys(cur, tenant_id)
+    cur.execute(
+        """SELECT (SELECT count(*) FROM chunks WHERE tenant_id = %(t)s AND sealed_key = ANY(%(old)s))::int AS chunks,
+                  (SELECT count(*) FROM interview_turns WHERE tenant_id = %(t)s AND sealed_key = ANY(%(old)s) AND erased_at IS NULL)::int AS turns""",
+        {"t": tenant_id, "old": old})
+    row = one(cur)
+    return {"chunks": int(row["chunks"]), "turns": int(row["turns"])}
 
 
 def still_readable(cur: psycopg.Cursor[Any], tenant_id: str) -> dict[str, int]:

@@ -5,7 +5,16 @@ from app.capture.filters import company_wide, condition, grants_something, named
 from app.capture.memory_search import CompanyIndex
 from app.capture.redaction import Finding, Redacted, redact
 from app.capture.retrieval import Candidate, load_approved, load_index, retrieve, retrieve_in_memory
-from app.capture.seal_existing import seal_chunks, seal_document_titles, seal_topic_texts, seal_turns, still_readable
+from app.capture.seal_existing import (
+    rekey_chunks,
+    rekey_turns,
+    seal_chunks,
+    seal_document_titles,
+    seal_topic_texts,
+    seal_turns,
+    still_on_old_key,
+    still_readable,
+)
 from app.capture.sealed_chunks import (
     SEALED_COLUMNS,
     VERSION_TEXT,
@@ -23,6 +32,7 @@ from app.capture.sealed_chunks import (
     open_item_title,
     open_source_title,
     open_topic,
+    retired_company_keys,
     row_key,
     seal_source_title,
     seal_topic,
@@ -67,6 +77,9 @@ __all__ = [
            "open_source_title",
            "open_topic",
            "redact",
+           "rekey_chunks",
+           "rekey_turns",
+           "retired_company_keys",
            "retrieve",
            "retrieve_in_memory",
            "row_key",
@@ -77,6 +90,7 @@ __all__ = [
            "seal_topic_texts",
            "seal_turns",
            "source_title_columns",
+           "still_on_old_key",
            "still_readable",
            "topic_condition",
            "topic_name_match",
