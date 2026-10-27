@@ -27,6 +27,7 @@ RUN npm ci --no-audit --no-fund
 COPY web/index.html web/vite.config.ts web/tsconfig.json ./
 COPY web/public ./public
 COPY web/scripts ./scripts
+COPY web/sw ./sw
 COPY web/src ./src
 RUN npm run build
 
