@@ -932,6 +932,27 @@ Details: decision D42; `09-batch-c-prepared.md`, feature 9.
 - Not covered: a card number deliberately written in the shape of an id (8-4-4-4-12 characters) is not masked. Card
   numbers are written as LGY-XXXX-XXXX-XXXX-XXXX.
 
+## Step 35 — Offline reading tested in Firefox's and Safari's engines (2026-10-27)
+
+The founder chose to close the "only Chromium" gap of step 33.
+- The browser tests now also run the offline file in Firefox and WebKit (Safari's engine, as Playwright builds it for
+  Linux), after all the Chromium files. CI installs the two browsers of the same Playwright release; no new library.
+- Firefox: the whole offline test passes as it is - taking a copy, the installed application opening with the network
+  switched off (its service worker included), search, "as of", clock set back, expiry, sign-out.
+- WebKit: it cannot sign in to the test server. Measured: the sign-in answer sets the session cookie, Firefox keeps
+  it, WebKit drops it - the cookie is "Secure" and the test server is plain http on localhost. In production the
+  address is https. So a new test, run in all three engines, needs no sign-in: it puts a locked copy on the device
+  exactly as the application stores it, cuts off `/v1`, and checks that the copy opens with "as of", is searchable,
+  holds nothing readable, has a key that cannot be exported, is refused while the clock is behind and is removed at its
+  expiry. Passes in all three.
+- Not tested in WebKit: signing in, taking a copy, and the service worker with the network switched off (Playwright's
+  WebKit refused such pages until a fix in a later release, younger than 60 days: issue 42775, fix 42894). Not tested
+  at all: Safari itself on an iPhone, iPad or Mac.
+- Measured locally: whole browser suite 46 passed, 2 skipped (the two WebKit tests that need signing in, with the
+  reason written in the test).
+- Side effect: Firefox and WebKit run only after every Chromium test has passed (the files build on each other), so
+  one failing Chromium test means they do not run in that build.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

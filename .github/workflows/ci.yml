@@ -234,12 +234,12 @@ jobs:
             services/api/package-lock.json
             web/package-lock.json
       - run: pip install -r services/ai/requirements.txt
-      - name: Build the web application and install the test browser
+      - name: Build the web application and install the test browsers (Chromium; Firefox and WebKit for offline reading)
         working-directory: web
         run: |
           npm ci
           npm run build
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chromium firefox webkit
       - name: Start PostgreSQL 18 and build the schema
         working-directory: services/api
         run: |

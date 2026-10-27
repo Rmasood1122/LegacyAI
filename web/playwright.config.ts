@@ -17,5 +17,11 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // Every file in Chromium. Offline reading (D42) also in Firefox and WebKit (Safari's engine, as Playwright builds it for
+  // Linux), after Chromium, so the files that build on each other keep their order.
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] }, testMatch: /offline\.spec\.ts$/, dependencies: ['chromium'] },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] }, testMatch: /offline\.spec\.ts$/, dependencies: ['chromium'] },
+  ],
 });
