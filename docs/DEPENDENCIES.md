@@ -200,6 +200,14 @@ move to it and remove the ignores.
 
 **pillow, 2026-10-24: 2 more advisories accepted by ID (D32, the same rule).** CVE-2026-114501, CVE-2026-112398 - fixed only in pillow 13.0.0; fastembed 0.9.0 still requires `pillow<13`. Same re-check date, 2026-12-15.
 
+**pillow, 2026-10-27: 1 more advisory accepted by ID (D32, the same rule).** PYSEC-2026-4327 (CVE-2026-112394,
+GHSA-4558-3h8r-v8xp: the P;2L and P;4L raw decoders can read past the end of a buffer), fixed only in pillow 13.0.0
+(read https://api.osv.dev/v1/vulns/PYSEC-2026-4327 on 2026-10-27). The installed fastembed 0.8.1 still requires
+`pillow<13` (read https://pypi.org/pypi/fastembed/0.8.1/json on 2026-10-27); the service still never imports pillow.
+**New fact:** fastembed 0.9.1 (uploaded 2026-10-24) allows `pillow<14`, so a way to pillow 13 now exists - but
+fastembed 0.9.1 is 3 days old and pillow 13.0.0 11 days old (D2 says 60: 2026-12-23 and 2026-12-15). Re-check on
+2026-12-23: move to fastembed 0.9.1 (or later) with pillow 13 and remove every pillow ignore.
+
 ### 9.2 TypeScript
 
 | Purpose | Package and version | Released | Licence | Evidence |
