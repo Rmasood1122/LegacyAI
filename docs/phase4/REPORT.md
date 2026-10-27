@@ -886,6 +886,40 @@ offline for 7 days, and only verified knowledge at levels 0 and 1.
 - **Not done:** the web app itself (part 2): installing it, storing the pack sealed on the device, reading and
   searching offline, "as of" on every page, refusing the pack after 7 days.
 
+## Step 33 — Offline mode, part 2: the installable web app (2026-10-27)
+
+Details: decision D42; `09-batch-c-prepared.md`, feature 9.
+
+- **Installable:** a manifest, icons, and a service worker that keeps the application's own files (the list comes from
+  the build) so it opens without a connection. It never answers or keeps anything under `/v1`; the build check fails
+  if it would. The browser policy names the service worker (`worker-src 'self'`).
+- **The screen "Offline"** (for cards that may read knowledge): choose a job role, take a copy, see what is on this
+  device, remove it. Without a connection the application says it cannot reach LegacyAI and shows the copy: a list,
+  search (every word must appear, accents and case ignored, titles first), a topic filter, each item. Every one of
+  these views says "As of <date>", that the copy is not updated offline, and until when it can be opened.
+- **On the device:** the copy is encrypted (AES-GCM) with a key made for it; the browser refuses to give the key's
+  bytes to any script. The card, "as of" and expiry are bound to it. Refused and removed from its expiry on; refused
+  (kept) while the device's clock is behind its last opening; removed when the API answers that nobody, or another
+  card, is signed in, and on signing out. A copy that claims more than 7 days is not kept.
+- **Measured locally:**
+  - web unit tests: 23 new (9 for the store: locked content, a key that cannot be taken out, a key and start value per
+    copy, expiry, the clock set back, tampered card/dates/content, more than 7 days, a copy already expired, the card
+    rule; 4 for search; 6 for the screen; 4 for the frame). Whole web suite: 243 passed.
+  - browser tests (real Chromium, real API, AI service with the fake provider): 2 new - a copy taken while connected
+    is read and searched with the network switched off, with "as of" on the list and the item; what the browser keeps
+    holds nothing readable and its key cannot be exported; with the clock set back it is refused and kept; at the
+    expiry it is refused and removed; signing out removes it. Accessibility scans of both screens: no problems found
+    by the automated rules. Whole browser suite: 41 passed.
+  - without the change: the 4 new frame tests fail (the copy is neither shown without the API nor removed); the store,
+    search and screen tests cannot run (the modules do not exist).
+  - a bug found by the browser test and fixed: the screen asked for 100 job roles; the API allows 50.
+- **Not proven / not covered:** Safari on iPhone or iPad, and Firefox (only Chromium is tested); installing from the
+  browser's menu (the browser's own step; only the parts it needs are tested); a phone short of space removing the copy.
+- **Accepted limits** (said in `09-batch-c-prepared.md` and to customers in `docs/customers/your-own-key.md`): someone
+  who may read the copy can copy what is shown; someone in control of the unlocked device can use the browser's key as
+  the application does; a clock set back before the next opening (not behind the last one) gains that much time; a
+  switched-off company key does not remove copies already on devices (a new copy is refused).
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

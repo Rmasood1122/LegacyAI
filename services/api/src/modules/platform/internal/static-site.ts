@@ -19,11 +19,12 @@ export interface StaticAsset {
 
 /**
  * The browser may load scripts, styles, images and fonts from this address only, talk to this
- * address only, and may not be framed. No inline script and no inline style are allowed.
+ * address only, and may not be framed. No inline script and no inline style are allowed. The one
+ * service worker (offline reading, D42) comes from this address too.
  */
 export const WEB_APP_CSP = [
   "default-src 'none'", "script-src 'self'", "style-src 'self'", "img-src 'self' data:", "font-src 'self'",
-  "connect-src 'self'", "manifest-src 'self'", "form-action 'self'", "base-uri 'none'", "frame-ancestors 'none'",
+  "connect-src 'self'", "manifest-src 'self'", "worker-src 'self'", "form-action 'self'", "base-uri 'none'", "frame-ancestors 'none'",
 ].join('; ');
 
 const CONTENT_TYPES: Readonly<Record<string, string>> = {

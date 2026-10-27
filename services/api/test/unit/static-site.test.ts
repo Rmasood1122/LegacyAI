@@ -183,6 +183,7 @@ describe('the HTTP server with and without the web application', () => {
     expect(WEB_APP_CSP).toContain("default-src 'none'");
     expect(WEB_APP_CSP).toContain("script-src 'self'");
     expect(WEB_APP_CSP).toContain("frame-ancestors 'none'");
+    expect(WEB_APP_CSP).toContain("worker-src 'self'");   // the one service worker (offline reading, D42)
     expect(WEB_APP_CSP).not.toMatch(/unsafe-inline|unsafe-eval|\*|https?:/);
   });
 });

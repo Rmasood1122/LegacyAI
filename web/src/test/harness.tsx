@@ -1,11 +1,14 @@
 // Test helpers: render a screen with a stand-in API (no network) and a fixed session.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, type RenderResult } from '@testing-library/react';
+import { webcrypto } from 'node:crypto';
 import type { ReactElement } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { ApiError, type Api } from '../api/client.ts';
 import { ApiProvider } from '../api/context.tsx';
 import { operations, type OperationId, type OperationTypes, type Session } from '../api/generated.ts';
+import { OfflineProvider } from '../offline/context.tsx';
+import { MemoryPackStorage, OfflineStore } from '../offline/store.ts';
 import { StaticSessionProvider, type SessionContextValue } from '../session/session.tsx';
 
 type Handler<K extends OperationId> = (args: { path?: Record<string, string>; query?: Record<string, unknown>; body?: unknown; contentType?: string }) =>
@@ -59,7 +62,19 @@ export function sessionValue(session: Session | null, spies: Partial<Pick<Sessio
   };
 }
 
+/** An offline store kept in memory, with Node's WebCrypto and a clock the test sets. */
+export function memoryOfflineStore(clock: { now: number } = { now: Date.now() }): { store: OfflineStore; storage: MemoryPackStorage; clock: { now: number } } {
+  const storage = new MemoryPackStorage();
+  const store = new OfflineStore({
+    storage, subtle: webcrypto.subtle as unknown as SubtleCrypto,
+    randomBytes: (length) => webcrypto.getRandomValues(new Uint8Array(length)), now: () => clock.now,
+  });
+  return { store, storage, clock };
+}
+
 export interface RenderOptions {
+  /** The offline store (default: an empty one in memory). */
+  offline?: OfflineStore;
   api?: FakeApi;
   session?: SessionContextValue;
   /** The address the screen is shown at, and the route pattern it is mounted on. */
@@ -73,14 +88,16 @@ export function renderScreen(ui: ReactElement, options: RenderOptions = {}): Ren
   const result = render(
     <QueryClientProvider client={client}>
       <ApiProvider api={api}>
-        <StaticSessionProvider value={options.session ?? sessionValue(makeSession([]))}>
-          <MemoryRouter initialEntries={[options.at ?? '/']}>
-            <Routes>
-              <Route path={options.route ?? '*'} element={ui} />
-              <Route path="*" element={<p>other screen</p>} />
-            </Routes>
-          </MemoryRouter>
-        </StaticSessionProvider>
+        <OfflineProvider store={options.offline ?? memoryOfflineStore().store}>
+          <StaticSessionProvider value={options.session ?? sessionValue(makeSession([]))}>
+            <MemoryRouter initialEntries={[options.at ?? '/']}>
+              <Routes>
+                <Route path={options.route ?? '*'} element={ui} />
+                <Route path="*" element={<p>other screen</p>} />
+              </Routes>
+            </MemoryRouter>
+          </StaticSessionProvider>
+        </OfflineProvider>
       </ApiProvider>
     </QueryClientProvider>,
   );

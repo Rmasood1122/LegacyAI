@@ -30,6 +30,11 @@ Said plainly, because it matters:
 - **People and cards:** names, roles and card details are not locked with your key.
 - **While a question is being answered,** the service holds the opened content it needs in memory, for at most 5
   minutes. A compromised running service could see it during that time.
+- **Offline copies on devices:** a person may keep a copy of verified, low-level knowledge (levels 0 and 1) on their
+  device, to read without a connection for up to 7 days. That copy is locked with a key made on the device, not with
+  your key. A copy already on a device stays readable until its 7 days are over, even if you switch your key off in
+  the meantime (while your key is off, no new copy can be taken). A copy is removed when its card signs out or is no
+  longer signed in while the device is connected.
 - **The AI model:** when an answer is written with an AI model, the question and the pieces of your content used to
   answer it are sent to the model provider in readable form. (Today no paid AI model is switched on.)
 

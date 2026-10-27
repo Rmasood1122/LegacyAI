@@ -336,7 +336,7 @@ than the rule requires.
 | @playwright/test | **1.62.1** (2026-07-30) | MEASURED: latest 1.63.0 (2026-09-04); Apache-2.0 | Browser tests in CI (Chromium). |
 | playwright-core | **1.62.1** | MEASURED: pinned explicitly so that @axe-core/playwright uses the same copy as @playwright/test (npm otherwise installs 1.63.0 beside it and the types clash) | |
 | @axe-core/playwright | **4.12.1** (2026-06-23) | MEASURED: major 4 since 2021-06-23; latest 4.13.0; MPL-2.0 (a test tool, not shipped) | Automated accessibility scan in the browser tests. |
-| `eslint` (web) | **10.11.0** | see section 2 | Lint, including the rules "only the API client talks to the network", "no browser storage", "no inline style or raw HTML". |
+| `eslint` (web) | **10.11.0** | see section 2 | Lint, including the rules "only the API client talks to the network", "no browser storage" (one file excepted: the locked offline copy, D42), "no inline style or raw HTML". |
 | `typescript-eslint` (web) | **8.71.0** | see section 2 | |
 | @types/react | **19.0.14** (2025-04-02) | MEASURED: newest 19.0.x; MIT | Types. |
 | @types/react-dom | **19.0.6** (2025-04-02) | MEASURED: newest 19.0.x; MIT | Types. |

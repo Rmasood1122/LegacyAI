@@ -21,6 +21,7 @@ import { InterviewScreen } from './features/interviews/InterviewScreen.tsx';
 import { InterviewsScreen } from './features/interviews/InterviewsScreen.tsx';
 import { KnowledgeItemScreen } from './features/knowledge/KnowledgeItemScreen.tsx';
 import { KnowledgeScreen } from './features/knowledge/KnowledgeScreen.tsx';
+import { OfflineScreen } from './features/offline/OfflineScreen.tsx';
 import { OperatorScreen } from './features/operator/OperatorScreen.tsx';
 import { CardScreen } from './features/people/CardScreen.tsx';
 import { CardsScreen } from './features/people/CardsScreen.tsx';
@@ -62,6 +63,7 @@ const COMPONENTS: Readonly<Record<ScreenKey, ComponentType>> = {
   readiness: ReadinessScreen,
   attempt: AttemptScreen,
   report: ReportScreen,
+  offline: OfflineScreen,
   scenarios: ScenariosScreen,
   scenarioRun: ScenarioRunScreen,
   scenarioGrade: ScenarioGradeScreen,

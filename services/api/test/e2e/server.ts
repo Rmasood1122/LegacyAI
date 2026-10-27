@@ -156,6 +156,8 @@ async function main(): Promise<void> {
       }
       if (url.pathname === '/billing-term') return reply(200, await setTermEnd(Number(url.searchParams.get('days') ?? '5')));
       if (url.pathname === '/payment-event') return reply(200, await providerSays(url.searchParams.get('outcome') ?? 'paid'));
+      // offline reading (web/e2e/offline.spec.ts): the browser's clock is set to the server's, which runs ahead of real time
+      if (url.pathname === '/now') return reply(200, { now: t.clock.now().toISOString() });
       if (url.pathname === '/code') return reply(200, { code: await freshCode(t, url.searchParams.get('secret') ?? '') });
       if (url.pathname === '/new-card') {
         t.clock.advance(31_000); // the owner's previous code must not be reused
