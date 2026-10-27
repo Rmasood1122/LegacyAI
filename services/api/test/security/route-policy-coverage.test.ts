@@ -107,15 +107,15 @@ describe('the list of routes that skip the session check is short and pinned', (
     const known = new Set((await su.query('SELECT permission_key FROM permissions')).rows.map((r) => r.permission_key as string));
     await su.end();
     const session = t.app.http.registeredRoutes().filter((r) => r.kind === 'session' || r.kind === 'gateway');
-    expect(session).toHaveLength(182);   // + the eight webhook operations, + the three SSO connection operations, + the seven SCIM operations, + the two company-key operations
+    expect(session).toHaveLength(183);   // + the eight webhook operations, + the three SSO connection operations, + the seven SCIM operations, + the two company-key operations, + the offline pack
     for (const r of session) expect(known.has(r.permission!), `${r.operationId} uses unknown permission ${r.permission}`).toBe(true);
   });
 
-  it('routes registered in the server == operations in openapi.yaml (191, no more, no fewer)', () => {
+  it('routes registered in the server == operations in openapi.yaml (192, no more, no fewer)', () => {
     const registered = t.app.http.registeredRoutes().map((r) => `${r.method} ${r.path}`).sort();
     const contract = [...t.app.http.contract.operations.values()].map((o) => `${o.method} ${o.path}`).sort();
     expect(registered).toEqual(contract);
-    expect(registered).toHaveLength(191);
+    expect(registered).toHaveLength(192);
     // and Fastify itself knows no route beyond those (HEAD/OPTIONS helpers aside)
     const printed = t.app.http.app.printRoutes({ commonPrefix: false });
     expect(printed).not.toMatch(/rogue/);
@@ -245,6 +245,7 @@ describe('a read of a whole collection must say how it is narrowed to what the c
       listReadinessAttempts: 'applied', listAnomalyEvents: 'applied', getRetirementRadar: 'applied',
       askKnowledge: 'delegated', listKnowledgeItems: 'delegated', getGapReport: 'delegated', listExpertQuestions: 'delegated',
       listQuizQuestions: 'delegated', getGraphNeighbourhood: 'delegated', listScenarios: 'delegated', listScenarioAttempts: 'delegated',
+      getOfflinePack: 'delegated',
       listRoles: 'unfiltered', listDepartments: 'unfiltered', listTenants: 'unfiltered', listAuditEvents: 'unfiltered',
       verifyAuditChain: 'unfiltered', listRedactionAllowlist: 'unfiltered', getKnowledgeSettings: 'unfiltered', getAiBudget: 'unfiltered',
       getPlatformStorage: 'unfiltered', getQualitySummary: 'unfiltered', listAnswerFeedback: 'unfiltered',
@@ -299,7 +300,7 @@ describe('a read of a whole collection must say how it is narrowed to what the c
 });
 
 describe('real app: a card with almost no permissions cannot get a 2xx from anything it is not granted', () => {
-  it('walks all 182 protected operations as a Successor', async () => {
+  it('walks all 183 protected operations as a Successor', async () => {
     const su = await superuser();
     const granted = new Set((await su.query(`SELECT permission_key FROM role_permissions WHERE role_key = 'successor'`)).rows.map((r) => r.permission_key as string));
     await su.end();
@@ -381,6 +382,7 @@ describe('real app: a card with almost no permissions cannot get a 2xx from anyt
     // Phase 4 (SSO): nothing of it - the company's connection is the Owner's.
     // Phase 4 (SCIM): nothing of it - only a directory key can use person:scim.
     // Phase 4 (bring-your-own-key): nothing of it - a company's key is the platform operator's to set.
+    // Phase 4 (feature 9, offline packs): it may take one (knowledge:read, narrowed by its own filters): not denied.
     expect(denied).toBe(28 + 57 + 2 + 6 + 2 + 9 + 8 + 4 + 8 + 3 + 7 + 2);
   });
 });

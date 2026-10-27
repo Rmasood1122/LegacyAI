@@ -11,6 +11,7 @@ import { personHoldingsLoader } from './internal/holdings.ts';
 import { adminRoutes, knowledgePolicySettings } from './internal/routes-admin.ts';
 import { insightRoutes } from './internal/routes-insight.ts';
 import { knowledgeRoutes } from './internal/routes-knowledge.ts';
+import { offlineRoutes } from './internal/routes-offline.ts';
 import { qualityRoutes } from './internal/routes-quality.ts';
 import { scenarioRoutes } from './internal/routes-scenarios.ts';
 import { workflowRoutes } from './internal/routes-workflow.ts';
@@ -53,7 +54,7 @@ export function createKnowledgeGateway(deps: KnowledgeGatewayDeps): KnowledgeGat
   deps.authorizer.useKnowledgeSettings(knowledgePolicySettings);
   const g = { db: deps.db, authorizer: deps.authorizer, ai, notifier: deps.notifier, rateLimiter: deps.rateLimiter };
   return {
-    routes: [...knowledgeRoutes(g), ...workflowRoutes(g), ...adminRoutes(g), ...qualityRoutes(g), ...insightRoutes(g), ...scenarioRoutes(g)],
+    routes: [...knowledgeRoutes(g), ...workflowRoutes(g), ...adminRoutes(g), ...qualityRoutes(g), ...insightRoutes(g), ...scenarioRoutes(g), ...offlineRoutes(g)],
     personHoldings: personHoldingsLoader(deps.authorizer),
     upkeep: async (tenantId, requestId) => {
       const res = await ai.call<{ done?: Record<string, number> }>({

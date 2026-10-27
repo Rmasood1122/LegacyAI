@@ -11,7 +11,7 @@ written design only, and the reason is given.
 | 4 | NFC cards | The card screen writes the card's sign-in address to an NFC tag (Web NFC); a stand-in in tests | Real tags and phones; Web NFC exists only in Chrome on Android |
 | 7, 25 | Voice; scanned documents (OCR) | The reader interface for speech and images, a refusing default and a test stand-in, strict file-type checks, the same text shape a PDF becomes | A speech / OCR model (cost), its own measured evaluation, and four wiring steps below |
 | 6 | Passive capture (chats, tickets, e-mail) | **Design only** | Legal review first (the feature list says so); consent design; real accounts |
-| 9 | Shadow / offline mode | **Design only** | An offline app is a product of its own |
+| 9 | Shadow / offline mode | **Server side built (2026-10-27, D42)**; web app next | The founder chose an installable web app, 7-day packs, verified level 0-1 only |
 | 21 | Regional hosting | **Design only** (the key part of 21 is built: `08-bring-your-own-key.md`) | Real cloud resources in a second region |
 
 ## 4 — NFC cards (prepared)
@@ -70,7 +70,14 @@ When the review allows it, the shape is: a `MessageSource` connector (pull new m
 passed through the existing consent gate, redaction and chunking as a source of kind `conversation`, and nothing kept
 unredacted.
 
-## 9 — Shadow / offline mode: design only, and why
+## 9 — Shadow / offline mode
+
+**Update 2026-10-27 (decision D42):** the founder chose an installable web app (no store apps), packs that open offline
+for 7 days, and only verified level-0/1 knowledge. Part 1, the server side, is built: `GET /v1/offline-pack?job_role=`
+(`services/api/src/modules/knowledge-gateway/internal/routes-offline.ts`, `services/ai/app/knowledge/offline.py`).
+Not signed: in a web app the pack and the code that would check a signature come from the same server over the same
+connection, so a signature adds nothing a device-side attacker could not also remove; the pack is sealed on the device
+instead (part 2). The design as first written:
 
 An offline app for phones or tablets is a product of its own: its own platform builds, store accounts, device
 management and updates. What the server side would need, and the questions it raises:

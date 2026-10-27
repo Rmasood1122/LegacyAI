@@ -27,7 +27,7 @@ from app.ai_gateway import Caller, ChatProvider, Embedder, FakeProvider, Gateway
 from app.ai_gateway.remote import AnthropicProvider, OpenAIProvider
 from app.capture import SearchCache, ingest, interviews, topics, withdrawal
 from app.capture.gaps import gap_report
-from app.knowledge import analytics, answers, expert, graph, items, quality, readiness, reads, scenarios, upkeep
+from app.knowledge import analytics, answers, expert, graph, items, offline, quality, readiness, reads, scenarios, upkeep
 from app.platform import (
     ConfigError,
     ContentKeys,
@@ -147,6 +147,10 @@ class InterviewStatus(Body):
 
 
 class GapQuery(Body):
+    job_role: str = Field(min_length=1, max_length=120)
+
+
+class OfflinePackQuery(Body):
     job_role: str = Field(min_length=1, max_length=120)
 
 
@@ -614,6 +618,12 @@ def create_app(services: Services | None = None) -> FastAPI:
         with svc().db.tenant_tx(ctx.tenant_id) as cur:
             report = gap_report(cur, tenant_id=ctx.tenant_id, job_role=body.job_role, item_spec=ctx.filter, topic_spec=ctx.filter)
         return {"job_role": body.job_role, "topics": [g.public() for g in report]}
+
+    # ------------------------------------------------------------------ offline packs (feature 9)
+    @app.post("/internal/offline/pack")
+    def offline_pack(body: OfflinePackQuery, ctx: Annotated[ServiceContext, Depends(token("offline.pack"))]) -> dict[str, Any]:
+        """Verified level-0/1 knowledge of a job role that the caller may read, opened for this request (offline.py)."""
+        return offline.pack(svc().db, ctx, body.job_role)
 
     # Topic names and descriptions are written and read only here (D41 step 6 part 4b); the API checked the caller's right.
     @app.post("/internal/topics", status_code=201)

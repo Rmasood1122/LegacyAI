@@ -132,6 +132,7 @@ const DEFAULTS: Record<string, Answer> = {
   'interview.turn': (c) => ({ interview_id: c.claims.subject, status: 'active', next_question: 'And then?', turn_count: 1, candidate_item_id: null }),
   'interview.status': (c) => ({ id: c.claims.subject, status: c.body.status }),
   'gap.report': (c) => ({ job_role: c.body.job_role, topics: [] }),
+  'offline.pack': (c) => ({ job_role: c.body.job_role, topics: [], items: [], truncated: false }),
   'topic.embed': (c) => ({ id: c.claims.subject }),
   'topic.create': (c) => asAiService(c.claims.tenant_id, async (q) => {
     const made = await q.query(

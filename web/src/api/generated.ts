@@ -388,6 +388,27 @@ export interface KTurn {
   candidate_item_id: string | null;
 }
 
+export interface KOfflinePack {
+  job_role: string;
+  as_of: string;
+  expires_at: string;
+  max_sensitivity: 1;
+  topics: {
+    topic_id: string;
+    name: string;
+  }[];
+  items: Array<{
+    id: string;
+    title: string;
+    body: string;
+    status: "verified" | "corrected";
+    sensitivity: number;
+    verified_at: string | null;
+    topic_ids: string[];
+  }>;
+  truncated: boolean;
+}
+
 export interface KGapReport {
   job_role: string;
   topics: Array<{
@@ -1701,6 +1722,7 @@ export const operations = {
   resumeInterview: { method: "POST", path: "/v1/interviews/{interview_id}/resume", status: 200, idempotent: true, public: false, permission: "capture:interview", contentTypes: [] },
   completeInterview: { method: "POST", path: "/v1/interviews/{interview_id}/complete", status: 200, idempotent: true, public: false, permission: "capture:interview", contentTypes: [] },
   getGapReport: { method: "GET", path: "/v1/gaps", status: 200, idempotent: false, public: false, permission: "gap:read", contentTypes: [] },
+  getOfflinePack: { method: "GET", path: "/v1/offline-pack", status: 200, idempotent: false, public: false, permission: "knowledge:read", contentTypes: [] },
   listTopics: { method: "GET", path: "/v1/topics", status: 200, idempotent: false, public: false, permission: "topic:read", contentTypes: [] },
   createTopic: { method: "POST", path: "/v1/topics", status: 201, idempotent: true, public: false, permission: "topic:manage", contentTypes: ["application/json"] },
   updateTopic: { method: "PATCH", path: "/v1/topics/{topic_id}", status: 200, idempotent: true, public: false, permission: "topic:manage", contentTypes: ["application/json"] },
@@ -2410,6 +2432,12 @@ export interface OperationTypes {
     query: { job_role: JobRoleName };
     body: undefined;
     response: KGapReport;
+  };
+  getOfflinePack: {
+    path: undefined;
+    query: { job_role: JobRoleName };
+    body: undefined;
+    response: KOfflinePack;
   };
   listTopics: {
     path: undefined;

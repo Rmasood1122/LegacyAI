@@ -863,6 +863,29 @@ Details: `10-content-under-company-key.md`, step 7; decision D41.
   backup is designed to work while the key works but is not tested end to end. With step 7, D41 is built except
   step 5 part 2 (dropping the readable columns), which waits until production shows nothing readable is left.
 
+## Step 32 — Offline mode, part 1: the offline pack on the server (2026-10-27)
+
+Details: decision D42; `09-batch-c-prepared.md`, feature 9. The founder chose an installable web app, packs that open
+offline for 7 days, and only verified knowledge at levels 0 and 1.
+
+- New operation `GET /v1/offline-pack?job_role=`: the verified (or corrected) knowledge of one job role that is not
+  past its review date, at level 0 or 1 only, that the person may read, linked to the role's active topics that the
+  person may read; at most 500 items (`truncated` says when there were more). Titles, texts and topic names are
+  opened for the request only. The pack says when it was made and that it may be opened until 7 days later.
+- A person's card only: a machine's key is refused. Every download is written to the audit log with the number of
+  items and nothing of the content. With the company's key off there is no pack (503 `company-key-unavailable`).
+- Measured locally: 3 new AI tests (only verified, current, level 0-1 knowledge of the role's active topics goes in,
+  opened, with its topics; the person's own read rights narrow it further, and a level-0 reader gets only level 0; no
+  topic rights means an empty pack; the cap of 500 sets `truncated`; the service refuses a machine's key) and 5 new
+  API tests (the dates and contents; the person's own filters are used; the audit entry has the count only; key off
+  gives no pack and no audit entry; a machine's key is refused). The contract walk with the real AI service now also
+  takes a pack and finds the verified, corrected item in it - run locally against the real AI service: passed.
+  Without the change the AI tests cannot run (the module does not exist) and the API server refuses to start (every
+  operation of the contract must have a route). Changed on purpose: the route counts and the list of routes whose
+  read filter the AI service applies gain the new operation; the web app's generated API list is regenerated.
+- **Not done:** the web app itself (part 2): installing it, storing the pack sealed on the device, reading and
+  searching offline, "as of" on every page, refusing the pack after 7 days.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in
