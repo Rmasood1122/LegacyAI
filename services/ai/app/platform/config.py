@@ -57,6 +57,9 @@ class Settings:
     key_service: Literal["none", "local", "google-kms"] = "none"
     local_keys: tuple[tuple[str, Secret], ...] = ()      # name -> base64 key; KEY_SERVICE=local only, never in production
     platform_content_key: str | None = None              # the platform's content key: a Cloud KMS key name, or local:<name>
+    # Voice and scanned documents (features 7 and 25): none = refuse recordings and images, until a speech or text-
+    # recognition model is chosen (Gate 2); fake = the test stand-in, only when ENVIRONMENT=test.
+    media_reader: Literal["none", "fake"] = "none"
 
     def local_key_bytes(self) -> dict[str, bytes]:
         return {name: base64.b64decode(secret.reveal()) for name, secret in self.local_keys}
@@ -161,6 +164,12 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         # every company's content is sealed (decision D41): without a platform content key nothing could be written
         raise ConfigError("PLATFORM_CONTENT_KEY is required in production (with KEY_SERVICE=google-kms)")
 
+    media_reader = merged.get("MEDIA_READER", "none")
+    if media_reader not in ("none", "fake"):
+        raise ConfigError("MEDIA_READER must be none (or fake, only when ENVIRONMENT=test)")
+    if media_reader == "fake" and environment != "test":
+        raise ConfigError("MEDIA_READER=fake understands no speech and no image and is allowed only when ENVIRONMENT=test")
+
     return Settings(
         environment=environment,  # type: ignore[arg-type]
         database_url=Secret(need("DATABASE_URL")),
@@ -178,4 +187,5 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         key_service=key_service,  # type: ignore[arg-type]
         local_keys=tuple(local_keys),
         platform_content_key=platform_content_key,
+        media_reader=media_reader,  # type: ignore[arg-type]
     )

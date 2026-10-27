@@ -27,6 +27,7 @@ from app.ai_gateway import Caller, ChatProvider, Embedder, FakeProvider, Gateway
 from app.ai_gateway.remote import AnthropicProvider, OpenAIProvider
 from app.capture import SearchCache, ingest, interviews, topics, withdrawal
 from app.capture.gaps import gap_report
+from app.capture.media import media_reader
 from app.knowledge import analytics, answers, expert, graph, items, offline, quality, readiness, reads, scenarios, upkeep
 from app.platform import (
     ConfigError,
@@ -303,6 +304,7 @@ class Services:
         self.replay = ReplayGuard()
         self.search = SearchCache(max_bytes=settings.search_memory_bytes, log=logger) if settings.search_engine == "memory" else None
         # content keys (D41 step 4b): the company's own key, or the platform's content key
+        self.media = media_reader(settings.media_reader, settings.environment)   # voice and scans (features 7, 25)
         self.content_keys = ContentKeys(key_service_from(settings.key_service, settings.local_key_bytes()), settings.platform_content_key)
         if settings.platform_content_key is not None:
             use_content_keys(self.content_keys)   # new content is sealed from now on (D41 step 4b); required in production
@@ -437,7 +439,7 @@ def create_app(services: Services | None = None) -> FastAPI:
 
         s = svc()
         result = await run_in_threadpool(ingest.process_upload, s.db, ctx, s.embedder, source_id, bytes(data), mime,
-                                         s.settings.storage_budget_bytes, deadline())
+                                         s.settings.storage_budget_bytes, deadline(), s.media)
         return JSONResponse(result)
 
     @app.post("/internal/sources/{source_id}/withdraw")

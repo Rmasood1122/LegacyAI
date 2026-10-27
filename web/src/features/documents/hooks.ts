@@ -5,7 +5,15 @@ import { useActivePeople, useApiList, useApiMutation, useApiQuery, useRefresh } 
 import type { KUploadResult } from '../../api/generated.ts';
 import type { BadgeTone } from '../../ui/index.tsx';
 
-export const ACCEPTED_FILES: Readonly<Record<string, string>> = { '.txt': 'text/plain', '.md': 'text/markdown', '.pdf': 'application/pdf' };
+export const ACCEPTED_FILES: Readonly<Record<string, string>> = {
+  '.txt': 'text/plain', '.md': 'text/markdown', '.pdf': 'application/pdf',
+  // a recording, or a photo or scan of one page (features 7 and 25): read by the AI service's media reader, if one is switched on
+  '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.webm': 'audio/webm', '.m4a': 'audio/mp4',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+};
+
+/** A recording: its "pages" are the minutes in which its words were heard. */
+export const isRecording = (mime: string | null): boolean => mime !== null && mime.startsWith('audio/');
 
 /** The type to send for a file, from its name (browsers often report none for .md). Null = not accepted. */
 export function contentTypeForFileName(name: string): string | null {
@@ -91,7 +99,11 @@ export function useAddDocument(): { state: AddDocumentState; add(doc: NewDocumen
 
 const FAILURES: Readonly<Record<string, string>> = {
   consent_missing: 'The contributor has not given consent for documents (or has withdrawn it).',
-  no_text_layer: 'The PDF has no text in it (it is probably a scan). Scanned documents are not supported yet.',
+  no_text_layer: 'The PDF has no text in it (it is probably a scan). Scanned PDFs are not supported; a photo or scan of each page (PNG or JPEG) can be added instead, once reading pages is switched on.',
+  voice_not_available: 'Recordings cannot be turned into text yet: no speech-to-text service is switched on for LegacyAI. Nothing was kept.',
+  ocr_not_available: 'Photos and scans of pages cannot be read yet: no text-recognition service is switched on for LegacyAI. Nothing was kept.',
+  type_mismatch: 'The file is not what its name says (for example, a picture named .mp3).',
+  unreadable_media: 'The recording or picture could not be read.',
   empty: 'No text was found in the file.',
   too_large: 'The file is too large.',
   too_many_pages: 'The document has too many pages.',

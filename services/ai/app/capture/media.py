@@ -1,4 +1,4 @@
-"""Voice and scanned documents (features 7 and 25) - PREPARED, not complete (docs/phase4/09-batch-c-prepared.md).
+"""Voice and scanned documents (features 7 and 25; docs/phase4/09-batch-c-prepared.md).
 
 Speech-to-text and text-from-images (OCR) need a model: paid, or one much larger than this service's machine. What is
 built here is everything around it, so that switching it on is one adapter plus the steps listed in the document:
@@ -9,8 +9,9 @@ built here is everything around it, so that switching it on is one adapter plus 
   sniff_media      the declared type is not trusted: the first bytes must agree (as for PDFs)
   extract_media    the reader's text in the same shape a PDF becomes (Extracted), normalised and limited the same way
 
-Nothing here is reachable through the API yet: the contract's upload types, the database's accepted types
-(sources.mime) and the call in ingest.process_upload are the remaining steps, each listed in the document.
+Wired through (2026-10-27): the upload operation accepts these types, the database records them (sources.mime) and
+ingest.process_upload reads them with the service's reader (MEDIA_READER). Until a real reader exists (a speech or OCR
+model: the founder's Gate 2), every recording and image is refused with voice_not_available / ocr_not_available.
 """
 
 from __future__ import annotations

@@ -272,9 +272,23 @@ describe('uploads', () => {
     expect(call.claims.subject).toBe(id);
   });
 
+  it('a recording or a photo of a page is passed on as bytes with its type (features 7, 25)', async () => {
+    for (const [type, bytes] of [['audio/mpeg', Buffer.from('ID3 synthetic recording')], ['image/jpeg', Buffer.from([0xff, 0xd8, 0xff, 0x00])]] as const) {
+      stub.reset();
+      const id = await waitingSource();
+      const res = await put(id, bytes, type);
+      expect(res.status, res.raw).toBe(200);
+      const call = stub.ofAction('source.content')[0]!;
+      expect(call.contentType).toBe(type);
+      expect(call.bytes).toBe(bytes.length);
+    }
+  });
+
   it('other types and oversized files are refused by the API', async () => {
     const id = await waitingSource();
     expect((await put(id, Buffer.from('PK\u0003\u0004'), 'application/zip')).status).toBeGreaterThanOrEqual(400);
+    expect((await put(id, Buffer.from('GIF89a'), 'image/gif')).status).toBeGreaterThanOrEqual(400);
+    expect((await put(id, Buffer.from('fLaC'), 'audio/flac')).status).toBeGreaterThanOrEqual(400);
     expect((await put(id, Buffer.alloc(10 * 1024 * 1024 + 10, 97), 'text/plain')).status).toBe(413);
     expect((await tenant.owner.request('PUT', `/v1/sources/${id}/content`, { text: 'json is not a file' })).status).toBe(400);
     expect(stub.ofAction('source.content')).toHaveLength(0);

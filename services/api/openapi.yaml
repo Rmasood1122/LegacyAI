@@ -1727,7 +1727,8 @@ paths:
   /v1/sources/{source_id}/content:
     put:
       operationId: "uploadSourceContent"
-      summary: "Send the file (plain text, Markdown or a PDF with a text layer). It is parsed, redacted, split and embedded; the file itself is not kept."
+      summary: "Send the file (plain text, Markdown, a PDF with a text layer, a recording or a photo of a page). It is parsed, redacted, split and embedded; the file itself is not kept."
+      description: "Recordings (WAV, MP3, OGG, WebM, MP4 audio) and photos of a page (PNG, JPEG) are turned into text by the AI service's media reader. Until a speech or text-recognition model is switched on, they end as failed with failure_code voice_not_available or ocr_not_available. Other failure codes of these types: type_mismatch (the bytes are not the declared type), unreadable_media, empty."
       tags:
         - "capture"
       x-permission: "capture:upload"
@@ -1747,6 +1748,34 @@ paths:
               type: "string"
               format: "binary"
           "application/pdf":
+            schema:
+              type: "string"
+              format: "binary"
+          "audio/wav":
+            schema:
+              type: "string"
+              format: "binary"
+          "audio/mpeg":
+            schema:
+              type: "string"
+              format: "binary"
+          "audio/ogg":
+            schema:
+              type: "string"
+              format: "binary"
+          "audio/webm":
+            schema:
+              type: "string"
+              format: "binary"
+          "audio/mp4":
+            schema:
+              type: "string"
+              format: "binary"
+          "image/png":
+            schema:
+              type: "string"
+              format: "binary"
+          "image/jpeg":
             schema:
               type: "string"
               format: "binary"

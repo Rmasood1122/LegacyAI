@@ -9,7 +9,7 @@ written design only, and the reason is given.
 | # | Feature | What is prepared | What is missing before it is real |
 |---|---|---|---|
 | 4 | NFC cards | The card screen writes the card's sign-in address to an NFC tag (Web NFC); a stand-in in tests | Real tags and phones; Web NFC exists only in Chrome on Android |
-| 7, 25 | Voice; scanned documents (OCR) | The reader interface for speech and images, a refusing default and a test stand-in, strict file-type checks, the same text shape a PDF becomes | A speech / OCR model (cost), its own measured evaluation, and four wiring steps below |
+| 7, 25 | Voice; scanned documents (OCR) | **Wired through (2026-10-27)**: uploads of recordings and photos of a page reach the reader and go on like any document; the default reader refuses them | A speech / OCR model (cost, Gate 2) and its own measured evaluation |
 | 6 | Passive capture (chats, tickets, e-mail) | **Design only** | Legal review first (the feature list says so); consent design; real accounts |
 | 9 | Shadow / offline mode | **Built (2026-10-27, D42)**: the server side and the installable web app | The founder chose an installable web app, 7-day packs, verified level 0-1 only |
 | 21 | Regional hosting | **Design only** (the key part of 21 is built: `08-bring-your-own-key.md`) | Real cloud resources in a second region |
@@ -48,6 +48,16 @@ written design only, and the reason is given.
   5. one dispatch in `ingest.process_upload` (`sniff_media` / `extract_media` for those types).
 
   Redaction, chunking, consent and labels then apply as to any document.
+
+  **Steps 3 to 5 are done (2026-10-27):** migration `20261027000200_media_sources.sql` (sources.mime), the upload
+  operation's types in `openapi.yaml` (and the API's body parser), the dispatch in `ingest.process_upload`, the AI
+  service's setting `MEDIA_READER` (`none` by default; `fake` only when `ENVIRONMENT=test`), and the documents screen
+  (accepts .wav .mp3 .ogg .webm .m4a .png .jpg; says plainly when a recording or picture cannot be read; counts a
+  recording in minutes). With `MEDIA_READER=none` - the setting everywhere today - every recording and picture ends as
+  failed with `voice_not_available` or `ocr_not_available`, and nothing is kept. Steps 1 and 2 (a real reader and its
+  evaluation) wait for the founder's choice of a model (Gate 2). Limits that stay: at most 10 MB per file (the company
+  setting is 5 MB by default, about 5 minutes of MP3), and knowledge items quoting a recording still say "page" for
+  the minute.
 - **Scanned PDFs** (a PDF with no text layer is refused today as `looks_like_scan`) also need the pages rendered to
   images first. That is a further library (to be checked under D2) and is not prepared.
 - **Voice interviewer** (the interviewer speaking and listening) is more than transcription. It needs speech output

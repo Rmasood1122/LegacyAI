@@ -84,3 +84,12 @@ def test_content_key_settings_fail_closed() -> None:
             load_settings({**BASE, **bad})
     with pytest.raises(ConfigError):                                               # the stand-in is never allowed in production
         load_settings({**prod, "KEY_SERVICE": "local", "LOCAL_KEY_SERVICE_KEYS": json.dumps({"platform": key})})
+
+
+def test_the_media_reader_refuses_by_default_and_the_stand_in_exists_only_in_tests() -> None:
+    assert load_settings(BASE).media_reader == "none"
+    assert load_settings({**BASE, "MEDIA_READER": "fake"}).media_reader == "fake"
+    with pytest.raises(ConfigError, match="MEDIA_READER"):
+        load_settings({**BASE, "MEDIA_READER": "whisper"})
+    with pytest.raises(ConfigError, match="only when ENVIRONMENT=test"):
+        load_settings({**BASE, "ENVIRONMENT": "development", "MEDIA_READER": "fake"})

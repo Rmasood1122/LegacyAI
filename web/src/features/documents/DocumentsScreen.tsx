@@ -48,7 +48,7 @@ function AddDocument() {
   const [contributor, setContributor] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [formKey, setFormKey] = useState(0);
-  const fileProblem = file !== null && contentTypeForFileName(file.name) === null ? 'Choose a .txt, .md or .pdf file.' : null;
+  const fileProblem = file !== null && contentTypeForFileName(file.name) === null ? 'Choose a text, Markdown or PDF file, a recording (.wav, .mp3, .ogg, .webm, .m4a) or a photo of a page (.png, .jpg).' : null;
   const busy = state.step === 'creating' || state.step === 'uploading';
 
   const onSubmit = (e: FormEvent): void => {
@@ -106,7 +106,7 @@ function AddDocument() {
             </SelectField>
           )}
           {mayNamePeople && people.hasMore && <PartialListNote shown={people.items?.length ?? 0} noun="people" busy={people.isLoadingMore} onLoadMore={people.loadMore} />}
-          <TextField label="File" type="file" accept={Object.keys(ACCEPTED_FILES).join(',')} error={fileProblem} hint="Plain text, Markdown, or a PDF that contains text. The file itself is not kept."
+          <TextField label="File" type="file" accept={Object.keys(ACCEPTED_FILES).join(',')} error={fileProblem} hint="Plain text, Markdown, a PDF that contains text, a recording (WAV, MP3, OGG, WebM, M4A) or a photo of a page (PNG, JPEG). Recordings and photos are turned into text only where that is switched on. The file itself is not kept."
             onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
           {state.step === 'failed' && <ErrorNote error={state.error} />}
           {busy && <p role="status" className="muted">{state.step === 'creating' ? 'Creating the document…' : 'Sending and processing the file…'}</p>}

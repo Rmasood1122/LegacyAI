@@ -1685,7 +1685,7 @@ export const operations = {
   getExport: { method: "GET", path: "/v1/exports/{export_id}", status: 200, idempotent: false, public: false, permission: "export:read", contentTypes: [] },
   createSource: { method: "POST", path: "/v1/sources", status: 201, idempotent: true, public: false, permission: "capture:upload", contentTypes: ["application/json"] },
   listSources: { method: "GET", path: "/v1/sources", status: 200, idempotent: false, public: false, permission: "source:read", contentTypes: [] },
-  uploadSourceContent: { method: "PUT", path: "/v1/sources/{source_id}/content", status: 200, idempotent: false, public: false, permission: "capture:upload", contentTypes: ["text/plain","text/markdown","application/pdf"] },
+  uploadSourceContent: { method: "PUT", path: "/v1/sources/{source_id}/content", status: 200, idempotent: false, public: false, permission: "capture:upload", contentTypes: ["text/plain","text/markdown","application/pdf","audio/wav","audio/mpeg","audio/ogg","audio/webm","audio/mp4","image/png","image/jpeg"] },
   getSource: { method: "GET", path: "/v1/sources/{source_id}", status: 200, idempotent: false, public: false, permission: "source:read", contentTypes: [] },
   confirmSource: { method: "POST", path: "/v1/sources/{source_id}/confirm", status: 200, idempotent: true, public: false, permission: "source:confirm", contentTypes: [] },
   withdrawSource: { method: "POST", path: "/v1/sources/{source_id}/withdraw", status: 200, idempotent: true, public: false, permission: "source:withdraw", contentTypes: [] },
