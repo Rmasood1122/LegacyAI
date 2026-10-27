@@ -952,6 +952,12 @@ The founder chose to close the "only Chromium" gap of step 33.
   reason written in the test).
 - Side effect: Firefox and WebKit run only after every Chromium test has passed (the files build on each other), so
   one failing Chromium test means they do not run in that build.
+- **Changed the same day (founder's choice):** the Firefox tests that sign in failed now and then in CI (1 build so
+  far). Measured locally: Playwright's Firefox sometimes lost the first page load or click of a new window - also in an
+  unrelated existing sign-in test (1 in 60), with the service worker blocked, and with a fresh browser each time (1 in
+  30); never in Chromium; a retry did not cure it (one test failed on its retry too). Firefox and WebKit now run only
+  the test that needs no sign-in, which never failed in more than 100 runs. Signing in, taking a copy and the installed
+  application offline are tested in Chromium on every build; in Firefox they passed locally only.
 
 ## Step 36 — Voice and scanned documents wired through, against a stand-in reader (2026-10-27)
 

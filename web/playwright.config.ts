@@ -18,10 +18,13 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   // Every file in Chromium. Offline reading (D42) also in Firefox and WebKit (Safari's engine, as Playwright builds it for
-  // Linux), after Chromium, so the files that build on each other keep their order.
+  // Linux), after Chromium, so the files that build on each other keep their order - there only the test that needs no
+  // sign-in (founder's choice, 2026-10-27): Playwright's Firefox sometimes lost the first page load or click of a new
+  // window (measured: 1 sign-in in 60 in an unrelated test; a retry did not help), and WebKit cannot sign in to the
+  // plain-http test server at all. Signing in, taking a copy and the installed application offline are tested in Chromium.
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    { name: 'firefox', use: { ...devices['Desktop Firefox'] }, testMatch: /offline\.spec\.ts$/, dependencies: ['chromium'] },
-    { name: 'webkit', use: { ...devices['Desktop Safari'] }, testMatch: /offline\.spec\.ts$/, dependencies: ['chromium'] },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] }, testMatch: /offline\.spec\.ts$/, grep: /a copy already on the device/, dependencies: ['chromium'] },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] }, testMatch: /offline\.spec\.ts$/, grep: /a copy already on the device/, dependencies: ['chromium'] },
   ],
 });

@@ -99,10 +99,12 @@ service worker), `web/public/manifest.webmanifest`.
   beside it and bound to it: changing any of them makes the copy fail to open, and it is removed.
 - **Opening:** only while the API cannot be reached, or for the card that took it; refused and removed from its expiry
   on; refused (kept) while the device's clock is behind its last opening. Every offline view says "as of".
-- **Tested in three browser engines (2026-10-27):** everything above in Chromium and Firefox, with the network
-  switched off; in WebKit (Safari's engine as Playwright builds it for Linux), the device side only - a copy on the
-  device, the API unreachable, the clock guard, the expiry - because WebKit there drops the Secure session cookie on
-  the plain-http test server and so cannot sign in. Not tested: Safari itself on iPhone, iPad or Mac.
+- **Tested in three browser engines (2026-10-27):** everything above in Chromium, with the network switched off. In
+  Firefox and WebKit (Safari's engine as Playwright builds it for Linux), in CI, the device side only - a copy on the
+  device, the API unreachable, search, "as of", the clock guard, the expiry. WebKit there cannot sign in to the
+  plain-http test server; Firefox's sign-in tests passed locally but Playwright's Firefox sometimes lost the first page
+  load or click of a new window, so they were taken out of CI (founder's choice, 2026-10-27). Not tested: Safari itself
+  on iPhone, iPad or Mac.
 - **What this does not protect against**, said plainly: a person who may read the copy can copy what is shown;
   someone in control of the unlocked device and browser profile can use the browser's key the way the application
   does; a clock set back before the next opening (not behind the last one) gains that much time; a revoked card or a

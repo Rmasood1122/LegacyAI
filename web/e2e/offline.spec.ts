@@ -3,10 +3,8 @@
 // refused while the device's clock is behind its last opening, and from its expiry on it is refused and removed.
 // Against the real API and the AI service with the FAKE provider. Synthetic company and people only.
 //
-// Run in Chromium, Firefox and WebKit (Safari's engine, as Playwright builds it for Linux - not Safari on an iPhone).
-// WebKit there does not keep the session cookie on the plain-http test server (it is "Secure"; checked: the cookie
-// arrives and is dropped), so it cannot sign in; the last test, which needs no sign-in, covers the device side in all
-// three engines.
+// The first two tests run in Chromium. The last one, which needs no sign-in, also runs in Firefox and WebKit (Safari's
+// engine, as Playwright builds it for Linux - not Safari on an iPhone): see playwright.config.ts for why.
 import { expect, test, type Page } from '@playwright/test';
 import { checkScreen, keepPageTextOnFailure, SEED_TOPIC, seedReadiness, serverNow, signIn } from './support.ts';
 
@@ -53,10 +51,7 @@ const storedCopy = (page: Page) => page.evaluate(async () => {
   return { sealed: new TextDecoder().decode(record.sealed as ArrayBuffer), extractable: key.extractable, exported, expires_at: record.expires_at as string };
 });
 
-const NEEDS_SIGN_IN = 'WebKit on Linux drops the Secure session cookie on the plain-http test server; see the last test';
-
-test('a copy taken while connected is read and searched without a connection, locked on the device, and refused after 7 days', async ({ page, context, browserName }) => {
-  test.skip(browserName === 'webkit', NEEDS_SIGN_IN);
+test('a copy taken while connected is read and searched without a connection, locked on the device, and refused after 7 days', async ({ page, context }) => {
   const { job_role: jobRole, item_id: itemId } = await seedReadiness();
   await signIn(page, 'owner');
   await linkSeededItem(page, itemId);
@@ -70,7 +65,7 @@ test('a copy taken while connected is read and searched without a connection, lo
   await expect(page.getByRole('heading', { name: 'On this device' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Relief valve check' })).toBeVisible();
   await expect(page.getByText(/^As of /)).toBeVisible();
-  await checkScreen(page, browserName === 'chromium' ? '60-offline' : `60-offline-${browserName}`);
+  await checkScreen(page, '60-offline');
 
   // locked: nothing of the content in what the browser keeps, and the key cannot be taken out
   const stored = await storedCopy(page);
@@ -96,7 +91,7 @@ test('a copy taken while connected is read and searched without a connection, lo
   await page.getByRole('button', { name: 'Relief valve check' }).click();
   await expect(page.getByText(SEEDED_TEXT)).toBeVisible();
   await expect(page.getByText(/^As of /)).toBeVisible();
-  await checkScreen(page, browserName === 'chromium' ? '61-offline-reading' : `61-offline-reading-${browserName}`);
+  await checkScreen(page, '61-offline-reading');
 
   // the clock set back behind the last opening: refused, and kept
   await page.clock.setFixedTime(now + 1 * DAY);
@@ -114,8 +109,7 @@ test('a copy taken while connected is read and searched without a connection, lo
   await context.setOffline(false);
 });
 
-test('signing out removes the copy from the device', async ({ page, browserName }) => {
-  test.skip(browserName === 'webkit', NEEDS_SIGN_IN);
+test('signing out removes the copy from the device', async ({ page }) => {
   await signIn(page, 'owner');
   await page.clock.setFixedTime(await serverNow());
   const { job_role: jobRole } = await seedReadiness();
