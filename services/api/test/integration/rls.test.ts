@@ -238,7 +238,7 @@ const OUR_FUNCTIONS = [
   'citations_guard', 'company_data_keys_guard', 'consent_is_valid', 'consents_guard', 'consents_hide_on_withdrawal', 'content_data_keys_guard', 'content_rekey_allowed', 'content_write_key', 'erase_version',
   'expert_questions_guard',
   'interviews_guard', 'invoices_guard', 'knowledge_items_end_conflicts', 'knowledge_items_guard', 'knowledge_items_outbox', 'knowledge_items_touch_scenarios', 'knowledge_versions_immutable',
-  'purge_login_attempts', 'quiz_attempts_guard', 'quiz_items_guard', 'relabel', 'reseal_version', 'resolve_card', 'resolve_sso_company', 'review_tasks_guard',
+  'purge_login_attempts', 'quiz_attempts_guard', 'quiz_items_guard', 'relabel', 'reseal_answer_log', 'reseal_version', 'resolve_card', 'resolve_sso_company', 'review_tasks_guard',
   'scenario_attempts_guard', 'scenario_is_hidden', 'scenario_parts_guard', 'scenarios_guard', 'seal_answer_log', 'seal_version', 'sources_guard',
   'sso_connections_guard', 'topics_delete_guard', 'topics_guard', 'webhook_endpoints_guard',
 ];
@@ -254,9 +254,10 @@ const OUR_DEFINER_FUNCTIONS = [
   // knowledge_items_outbox: the same reason - every change of an item, from any session, writes its webhook event;
   // neither service has a right on the outbox itself (docs/phase4/06)
   'knowledge_items_end_conflicts', 'knowledge_items_guard', 'knowledge_items_outbox', 'knowledge_items_touch_scenarios', 'purge_login_attempts',
-  // reseal_version: the AI service has no right to change a knowledge version; this seals one version of the caller's
-  // company again with the company's current key, only away from a retired own key (the trigger checks; D41, re-keying)
-  'reseal_version', 'resolve_card',
+  // reseal_answer_log, reseal_version: the AI service has no right to change an answer log or a knowledge version; these
+  // seal one row of the caller's company again with the company's current key, only away from a retired own key
+  // (reseal_answer_log checks the rule itself, a version's trigger checks it; D41, re-keying)
+  'reseal_answer_log', 'reseal_version', 'resolve_card',
   // resolve_sso_company: answers, before anyone is signed in, only whether a named company has a live SSO connection
   'resolve_sso_company',
   // seal_answer_log, seal_version: the AI service has no right to change an answer log or a knowledge version; these

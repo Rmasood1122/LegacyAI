@@ -10,12 +10,24 @@ the next call. The answer says how much was sealed and how much is still readabl
 
 from __future__ import annotations
 
+import functools
 import time
 from collections.abc import Callable
 from typing import Any
 
 from app.capture import rekey_chunks, rekey_turns, seal_chunks, seal_document_titles, seal_topic_texts, seal_turns, still_on_old_key, still_readable
-from app.knowledge import item_conflicts, items, quality, scenario_erasure, scenarios, sealed_questions, sealed_quiz, sealed_scenarios, sealed_titles
+from app.knowledge import (
+    item_conflicts,
+    items,
+    quality,
+    rekey,
+    scenario_erasure,
+    scenarios,
+    sealed_questions,
+    sealed_quiz,
+    sealed_scenarios,
+    sealed_titles,
+)
 from app.platform import Database, KeyUnavailable, housekeeping
 
 SEAL_BATCH = 200
@@ -42,8 +54,8 @@ def seal_existing(db: Database, tenant_id: str, *, batch: int = SEAL_BATCH, seco
     questions to experts, readers' comments, item titles, the words stored conflicts quote, readiness questions and
     answers, scenario texts and answers, document titles, and topic names and descriptions, of ONE company. When the company's key cannot be used (switched off,
     permission taken back), nothing is sealed and `seal_key_unavailable` is 1; the rows stay as they are until the key
-    is back. Then (re-keying) chunks, knowledge versions and interview turns still sealed with a RETIRED own key of the
-    company are sealed again with its current key: `rekeyed_*` say how many, `old_key_*` how many are left, and
+    is back. Then (re-keying) everything still sealed with a RETIRED own key of the company is sealed again with its
+    current key (the same kinds as above): `rekeyed_*` say how many, `old_key_*` how many are left, and
     `old_key_unavailable` is 1 when the old key cannot be used any more. Without content keys (development) nothing is
     sealed."""
     steps: dict[str, Callable[[Any, str, int], int]] = {
@@ -59,6 +71,7 @@ def seal_existing(db: Database, tenant_id: str, *, batch: int = SEAL_BATCH, seco
     # Re-keying (section 4 of the plan): what is still sealed with a retired own key of the company is sealed again with
     # its current key. Separate rounds, so a company whose old key no longer works still has its readable rows sealed.
     rekeys: dict[str, Callable[[Any, str, int], int]] = {"chunks": rekey_chunks, "versions": items.rekey_versions, "turns": rekey_turns}
+    rekeys.update({kind: functools.partial(_rekey, spec) for kind, spec in rekey.STEPS.items()})
     rekeyed, old_unavailable = _rounds(db, tenant_id, rekeys, batch, clock() + seconds, clock)
     with db.tenant_tx(tenant_id) as cur:
         left = still_readable(cur, tenant_id)
@@ -67,11 +80,15 @@ def seal_existing(db: Database, tenant_id: str, *, batch: int = SEAL_BATCH, seco
         left.update(sealed_titles.still_readable(cur, tenant_id))
         left.update(sealed_quiz.still_readable(cur, tenant_id))
         left.update(sealed_scenarios.still_readable(cur, tenant_id))
-        on_old = {**still_on_old_key(cur, tenant_id), "versions": items.versions_on_old_key(cur, tenant_id)}
+        on_old = {**still_on_old_key(cur, tenant_id), "versions": items.versions_on_old_key(cur, tenant_id), **rekey.on_old_key(cur, tenant_id)}
     return {**{f"sealed_{k}": v for k, v in sealed.items()}, **{f"readable_{k}": v for k, v in left.items()},
             "seal_key_unavailable": unavailable,
             **{f"rekeyed_{k}": v for k, v in rekeyed.items()}, **{f"old_key_{k}": v for k, v in on_old.items()},
             "old_key_unavailable": old_unavailable}
+
+
+def _rekey(spec: rekey.SealedColumns, cur: Any, tenant_id: str, limit: int) -> int:
+    return rekey.rekey(cur, tenant_id, spec, limit)
 
 
 def _rounds(db: Database, tenant_id: str, steps: dict[str, Callable[[Any, str, int], int]], batch: int, until: float,

@@ -821,6 +821,25 @@ Details: `10-content-under-company-key.md`, step 5 ("re-keying") and section 4; 
   scenario texts, document titles, topic names) are not locked again yet - part 2. A company that destroys its old
   key before the command reaches 0 loses what was still on it; this is told to the operator, not prevented.
 
+## Step 30 — Locking again after a company clears its own key, part 2 (2026-10-27)
+
+Details: `10-content-under-company-key.md`, step 5 ("re-keying", part 2); decision D41.
+
+- After a company clears its own key, housekeeping now also locks again, with the company's current key, everything
+  step 6 locked: questions asked, questions to experts, readers' comments, item titles, the words stored conflicts
+  quote, readiness questions and answers, scenario texts and answers, document titles, and topic names and
+  descriptions (with the fingerprint that keeps names unique). With part 1, every kind of locked content is covered.
+- The database checks the same rule as in part 1 for the tables it guards; an asked question, which the AI service
+  may not change itself, goes through a function that checks the rule.
+- Measured locally: 2 new AI tests (all twelve kinds are on the company's own key, then after clearing it they are all
+  on the current key, and with the old key switched off every screen shows the same words and a topic name is still
+  used only once; the database refuses the change while the own key is live and to a key that is not the current
+  one). Without the change both fail. Changed on purpose: the API's list of database functions gains the new one.
+  Whole AI suite: 389 passed; the 1 failure is the known one of this machine. The function-list test was checked
+  locally: its only difference is the known id function stand-in.
+- **Not done or proven:** a company that destroys its old key before the command reaches 0 still loses what was on
+  it (told to the operator, not prevented); the time a large company needs was not measured.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in
