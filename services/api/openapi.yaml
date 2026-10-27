@@ -8150,8 +8150,11 @@ paths:
         company (authenticator-app seeds, webhook signing secrets, SSO client secrets) are sealed with that data key.
         Secrets sealed earlier keep opening with the key they were sealed with. When the company switches its key off
         at its key service, those secrets cannot be opened (sign-ins with an authenticator app, webhook signatures and
-        SSO sign-ins of that company stop) and nothing new is sealed (503 `company-key-unavailable`). Documents and
-        knowledge are not covered: see docs/phase4/08-bring-your-own-key.md.
+        SSO sign-ins of that company stop) and nothing new is sealed (503 `company-key-unavailable`). The company's
+        documents and knowledge are sealed with the same data key (decision D41): while the key is off they can be
+        neither read nor added, and every request that needs them answers 503 `company-key-unavailable`. Clearing or
+        changing the key leaves what was sealed before on the old key until housekeeping seals it again; keep the old
+        key working until then (docs/runbooks/company-key.md).
       tags:
         - tenants
       x-permission: tenant:encryption_key
@@ -8509,7 +8512,7 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
     CompanyKeyUnavailable:
-      description: "The company's own encryption key cannot be used right now (switched off at its key service, or the service cannot be reached): nothing new is sealed (`company-key-unavailable`)."
+      description: "The company's own encryption key cannot be used right now (switched off or destroyed at its key service, or the service cannot be reached): its secrets, documents and knowledge can be neither opened nor added (`company-key-unavailable`)."
       content:
         application/problem+json:
           schema:

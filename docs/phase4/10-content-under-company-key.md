@@ -1,6 +1,6 @@
 # Documents and knowledge under the company's key — design (decision D41, 2026-10-24)
 
-> **Status: steps 2 to 4b, the first part of step 5, parts 1 to 4 of step 6 built (2026-10-25).** The AI service locks documents, items'
+> **Status: steps 2 to 4b, the first part of step 5 with re-keying, all of step 6 and step 7 built (2026-10-27); step 5 part 2 waits for production.** The AI service locks documents, items'
 > texts and interview turns with the company's key when they are saved (`services/ai/app/platform/sealing.py`,
 > `services/ai/app/capture/sealed_chunks.py`), answers questions with the in-memory search
 > (`services/ai/app/capture/memory_search.py`, `search_cache.py`), and the housekeeping command locks what was saved
@@ -240,13 +240,21 @@ which unlocks a company's content into memory for a few minutes while it is bein
      opening. Older names are sealed by housekeeping job 6 (`sealed_topics` / `readable_topics`). Limit: the
      fingerprint uses Python's lower case and the readable index PostgreSQL's; they agree for ordinary letters, not
      necessarily for every rare character.
-7. **Key off and key destroyed, end to end:**
-   - the answers people see;
-   - the operator's runbook;
-   - backups and restore with sealed content;
-   - documentation for customers.
+7. **Key off and key destroyed, end to end - built 2026-10-27:**
+   - the answers people see: when the AI service cannot use the company's key it answers 503
+     `company_key_unavailable`, and the API now passes that on as `company-key-unavailable` ("The company's own
+     encryption key cannot be used right now") instead of "AI is not available right now";
+   - the operator's runbook: `docs/runbooks/company-key.md` (switched off, back on, changed or cleared, destroyed,
+     backups, the platform's own key);
+   - backups and restore: documented there. A backup opens only while the keys that wrapped its data keys work.
+     **Not proven end to end:** opening restored sealed content (the restore test checks rows, row-level security and
+     triggers);
+   - documentation for customers: `docs/customers/your-own-key.md`.
 
-Only after step 7 may anyone promise "your documents under your key".
+Only after step 7 may anyone promise "your documents under your key". **Step 7 is built (2026-10-27).** Before that
+sentence is said to a customer, three things are still needed and not done: this code deployed to production; for
+that company, housekeeping showing 0 readable and 0 `old_key_` rows (older content is still readable until then); and
+one real Google Cloud KMS key tried end to end (only stand-in keys were ever used).
 
 ## Step 3: what was measured (2026-10-24)
 
