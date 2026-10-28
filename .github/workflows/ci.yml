@@ -234,12 +234,32 @@ jobs:
             services/api/package-lock.json
             web/package-lock.json
       - run: pip install -r services/ai/requirements.txt
-      - name: Build the web application and install the test browsers (Chromium; Firefox and WebKit for offline reading)
+      - name: Build the web application
         working-directory: web
         run: |
           npm ci
           npm run build
+      # The test browsers and the system packages they need (about 120 MB, mostly for WebKit) are kept between runs, so a
+      # slow package mirror cannot use up the job's time again (it did once: 30 minutes downloading, no test run). Both
+      # are keyed on the lock file, which pins the Playwright version and so the browsers it needs.
+      - name: Restore the test browsers and their system packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/playwright-debs
+          key: playwright-${{ runner.os }}-ubuntu-24.04-${{ hashFiles('web/package-lock.json') }}
+      - name: Install the test browsers (Chromium; Firefox and WebKit for offline reading)
+        working-directory: web
+        timeout-minutes: 12
+        run: |
+          mkdir -p ~/.cache/playwright-debs
+          # use the kept packages, and keep what is downloaded for the next run
+          echo 'APT::Keep-Downloaded-Packages "true";' | sudo tee /etc/apt/apt.conf.d/99keep-downloaded-packages > /dev/null
+          if ls ~/.cache/playwright-debs/*.deb > /dev/null 2>&1; then sudo cp ~/.cache/playwright-debs/*.deb /var/cache/apt/archives/; fi
           npx playwright install --with-deps chromium firefox webkit
+          cp /var/cache/apt/archives/*.deb ~/.cache/playwright-debs/ 2>/dev/null || true
+          echo "kept system packages: $(ls ~/.cache/playwright-debs | wc -l)"
       - name: Start PostgreSQL 18 and build the schema
         working-directory: services/api
         run: |

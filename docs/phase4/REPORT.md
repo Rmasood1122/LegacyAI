@@ -986,6 +986,18 @@ real speech or text-recognition model and its evaluation) wait for Gate 2.
 - Not done: a real reader and its measured accuracy (Gate 2); scanned PDFs (they need their pages turned into images
   first: a further library); the voice interviewer; "page" is still the word used where an item quotes a recording.
 
+## Step 37 — The browser tests keep their browsers between runs (2026-10-28)
+
+The founder chose this item. Since step 35 the browser-test job also installs Firefox and WebKit and about 120 MB of
+system packages; once (PR 31) a slow package mirror used up the job's 30 minutes before any test ran.
+- The job now keeps the test browsers and the downloaded system packages between runs (GitHub's cache action, v6.1.0,
+  pinned to its commit and recorded in `docs/DEPENDENCIES.md`; both majors older than 60 days). The key is the web
+  lock file, which pins the Playwright version. On a run that finds them, the packages are installed from the kept
+  copies; the package lists are still fetched.
+- The install step has its own limit of 12 minutes, so a slow mirror fails the job early instead of using all 30.
+- Not proven before merging: the effect can only be measured on GitHub. The first run saves the copies; a later run
+  should restore them (the PR says what was measured).
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in

@@ -356,6 +356,7 @@ know, and CI fails if the committed file differs from the contract.
 | Action | Pin | Evidence |
 |---|---|---|
 | actions/upload-artifact | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` (v7.0.1) | MEASURED 2026-10-03: `git ls-remote --tags https://github.com/actions/upload-artifact` |
+| actions/cache | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` (v6.1.0) | MEASURED 2026-10-28: `git ls-remote --tags https://github.com/actions/cache`; releases page (https://github.com/actions/cache/releases, read 2026-10-28): v6.0.0 2026-06-23, v6.1.0 2026-06-26, both older than 60 days (D2). Used only by the browser-test job, to keep the test browsers and their system packages between runs. |
 
 ### Not verified
 
