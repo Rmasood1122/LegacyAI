@@ -94,7 +94,8 @@ def get_item(db: Database, ctx: ServiceContext, item_id: str) -> dict[str, Any]:
         versions = [_iso({**dict(v), "body": version_text(fields, v)}, "erased_at", "created_at") for v in cur.fetchall()]
         swhere, sparams = condition(ctx.filter, "sources", ctx.tenant_id)
         cur.execute(
-            f"""SELECT DISTINCT s.id::text AS source_id, {source_title_columns("s")}, c.page_from, c.page_to
+            f"""SELECT DISTINCT s.id::text AS source_id, {source_title_columns("s")}, c.page_from, c.page_to,
+                       CASE WHEN starts_with(s.mime, 'audio/') THEN 'minute' ELSE 'page' END AS unit
                   FROM citations ci
                   {CITED_PASSAGE_AND_DOCUMENT}
                  WHERE ci.tenant_id = %s AND {CITES_ITEM_VERSION} AND ci.subject_id = %s AND {readable_document(swhere)}""",

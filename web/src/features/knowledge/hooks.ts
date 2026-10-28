@@ -27,6 +27,13 @@ export const useSetItemTopics = () => useApiMutation('setItemTopics', [...REFRES
 /** The API's own limit (maxItems of topic_ids). */
 export const MAX_TOPICS_PER_ITEM = 20;
 
+/** Where in a document an item comes from: " — page 3", " — pages 3–4", or for a recording " — minute 2", " — minutes 2–3". Pure. */
+export function placeInSource(p: { page_from: number | null; page_to: number | null; unit: 'page' | 'minute' }): string {
+  if (p.page_from === null) return '';
+  const range = p.page_to !== null && p.page_to !== p.page_from;
+  return ` — ${p.unit}${range ? 's' : ''} ${p.page_from}${range ? `–${p.page_to}` : ''}`;
+}
+
 /** What each state means to a reader: only "verified" and "corrected" have been checked by a person. */
 export const itemTone = (status: string): BadgeTone =>
   status === 'verified' || status === 'corrected' ? 'success' : status === 'rejected' ? 'danger' : status === 'withdrawn' || status === 'retired' ? 'neutral' : 'warning';

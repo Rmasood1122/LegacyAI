@@ -15,10 +15,13 @@ from fastapi.testclient import TestClient
 from app.ai_gateway import FakeEmbedder, FakeProvider
 from app.capture import ingest
 from app.capture.media import FAKE_MARKER, FakeMediaReader
+from app.knowledge import reads
+from app.knowledge.items import create_item
 from app.main import Services, create_app
 from app.platform import Database, Logger
 from tests.conftest import World, make_settings, mint, needs_db
-from tests.integration.helpers import chunk_texts, search
+from tests.integration.helpers import chunk_ids_of_source, chunk_texts, search
+from tests.integration.test_item_topics import may_read_topics
 
 pytestmark = [pytest.mark.db, needs_db]
 
@@ -93,6 +96,22 @@ def test_the_recording_or_image_itself_is_stored_nowhere(db: Database, world: Wo
         for signature in (b"\x89PNG", b"RIFF", FAKE_MARKER):
             hit = admin.execute(f'SELECT count(*) AS n FROM "{col["table_name"]}" WHERE position(%s IN "{col["column_name"]}") > 0', (signature,)).fetchone()
             assert hit["n"] == 0, f"{col['table_name']}.{col['column_name']} holds bytes of the uploaded file"
+
+
+def test_an_item_from_a_recording_counts_minutes_and_from_a_scan_pages(db: Database, world: World, embedder: FakeEmbedder,
+                                                                         admin: psycopg.Connection[dict[str, Any]]) -> None:
+    heard = new_source(db, world, "Synthetic walk-through")
+    scanned = new_source(db, world, "Synthetic scan")
+    upload(db, world, embedder, heard, RECORDING, "audio/wav", FakeMediaReader())
+    upload(db, world, embedder, scanned, SCAN, "image/png", FakeMediaReader())
+    cited = [chunk_ids_of_source(admin, heard)[0], chunk_ids_of_source(admin, scanned)[0]]
+    with db.tenant_tx(world.tenant_id) as cur:
+        item = create_item(cur, tenant_id=world.tenant_id, title="Synthetic start-up", body="Check the oil, open valve V4.", origin="manual",
+                           ai_extracted=False, department_id=None, sensitivity=1, owner_person_id=None, consent_id=None, created_by_card_id=None,
+                           author_card_id=None, author_person_id=None, change_kind="written", provenance=[(c, 0, 1, b"0" * 32) for c in cited])
+    page = reads.get_item(db, world.ctx("owner", "item.read", subject=item, topic_filter=may_read_topics(world)), item)
+    units = {p["source_id"]: p["unit"] for p in page["provenance"]}
+    assert units == {heard: "minute", scanned: "page"}
 
 
 def test_the_service_uses_its_configured_reader(db: Database, world: World) -> None:

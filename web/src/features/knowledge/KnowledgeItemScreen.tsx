@@ -8,7 +8,7 @@ import { ScreenLink } from '../../navigation/ScreenLink.tsx';
 import { useSession } from '../../session/session.tsx';
 import { Badge, Banner, Button, Card, DataTable, ErrorNote, formatDate, humanize, Loading, Page, sensitivityLabel, TextArea } from '../../ui/index.tsx';
 import { ItemTopics } from './ItemTopics.tsx';
-import { ITEM_STATUS_TEXT, itemTone, useCorrectItem, useKnowledgeItem, useRejectItem, useReopenItem, useSubmitItem, useVerifyItem } from './hooks.ts';
+import { ITEM_STATUS_TEXT, itemTone, placeInSource, useCorrectItem, useKnowledgeItem, useRejectItem, useReopenItem, useSubmitItem, useVerifyItem } from './hooks.ts';
 
 export function KnowledgeItemScreen() {
   const { itemId = '' } = useParams();
@@ -102,7 +102,7 @@ export function KnowledgeItemScreen() {
                 {i.provenance.map((p) => (
                   <li key={`${p.source_id}:${p.page_from ?? 0}`}>
                     <ScreenLink screen="document" id={p.source_id}>{p.title || 'Untitled document'}</ScreenLink>
-                    {p.page_from !== null && ` — page ${p.page_from}${p.page_to !== null && p.page_to !== p.page_from ? `–${p.page_to}` : ''}`}
+                    {placeInSource(p)}
                   </li>
                 ))}
               </ul>

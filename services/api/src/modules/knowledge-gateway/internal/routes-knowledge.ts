@@ -270,7 +270,7 @@ export function knowledgeRoutes(deps: GatewayDeps): RouteDef[] {
         map: (r) => ({
           ...pick(r, [...ITEM_SUMMARY, 'body', 'self_verified']),
           versions: (r.versions ?? []).map((v: any) => pick(v, ['version_no', 'change_kind', 'author_person_id', 'created_at', 'erased_at', 'current'])),
-          provenance: (r.provenance ?? []).map((p: any) => pick(p, ['source_id', 'title', 'page_from', 'page_to'])),
+          provenance: (r.provenance ?? []).map((p: any) => pick(p, ['source_id', 'title', 'page_from', 'page_to', 'unit'])),
           topics: (r.topics ?? []).map((t: any) => pick(t, ['topic_id', 'name', 'link_source'])),
           // a conflict with an item this card may not read arrives as one entry with restricted = true and nothing else
           conflicts: (r.conflicts ?? []).map((c: any) => ({

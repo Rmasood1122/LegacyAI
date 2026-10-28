@@ -56,8 +56,8 @@ written design only, and the reason is given.
   recording in minutes). With `MEDIA_READER=none` - the setting everywhere today - every recording and picture ends as
   failed with `voice_not_available` or `ocr_not_available`, and nothing is kept. Steps 1 and 2 (a real reader and its
   evaluation) wait for the founder's choice of a model (Gate 2). Limits that stay: at most 10 MB per file (the company
-  setting is 5 MB by default, about 5 minutes of MP3), and knowledge items quoting a recording still say "page" for
-  the minute.
+  setting is 5 MB by default, about 5 minutes of MP3). Knowledge items quoting a recording say "minute" (step 38 of
+  the report).
 - **Scanned PDFs** (a PDF with no text layer is refused today as `looks_like_scan`) also need the pages rendered to
   images first. That is a further library (to be checked under D2) and is not prepared.
 - **Voice interviewer** (the interviewer speaking and listening) is more than transcription. It needs speech output

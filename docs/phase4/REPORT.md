@@ -984,7 +984,7 @@ real speech or text-recognition model and its evaluation) wait for Gate 2.
   - Browser (real API, real AI service with no reader): a recording and a photo are refused with the reason shown.
     Whole browser suite: 47 passed, 2 skipped (WebKit sign-in, step 35).
 - Not done: a real reader and its measured accuracy (Gate 2); scanned PDFs (they need their pages turned into images
-  first: a further library); the voice interviewer; "page" is still the word used where an item quotes a recording.
+  first: a further library); the voice interviewer. ("Page" was still the word used where an item quotes a recording; fixed in step 38.)
 
 ## Step 37 — The browser tests keep their browsers between runs (2026-10-28)
 
@@ -997,6 +997,21 @@ system packages; once (PR 31) a slow package mirror used up the job's 30 minutes
 - The install step has its own limit of 12 minutes, so a slow mirror fails the job early instead of using all 30.
 - Not proven before merging: the effect can only be measured on GitHub. The first run saves the copies; a later run
   should restore them (the PR says what was measured).
+
+## Step 38 — An item quoting a recording says "minute", not "page" (2026-10-28)
+
+The founder chose this item. A recording is read one minute at a time (step 36), and the document's own page already
+said "minutes", but an item's "Where it comes from" list still said "page 2" for words heard in the second minute.
+- The AI service now says, for each document an item comes from, whether its numbers count pages or minutes (from the
+  document's type: any audio type counts minutes). The API passes this on as a new field, `unit` ("page" or
+  "minute"), in `openapi.yaml`; the screen writes "page 3", "pages 3–4", "minute 2" or "minutes 5–6".
+- Tests: AI 1 new (against the real database, with the test stand-in reader: an item citing a recording and a scan
+  gets "minute" and "page"); web 1 new (the three wordings). Both were run first without the fix and failed (the field
+  was missing; the screen said "page"). Whole AI suite on a fresh local database: 400 passed, 1 left out (the test
+  known to fail on this machine only). Whole web suite: 246 passed. Whole API suite: 1344 passed, 8 failed — the 4
+  files known to fail on this machine only, plus the contract walk, which passed alone (46 of 46) with and without
+  this change; GitHub's run is the test of record.
+- Not covered: answers' citations name a document but give no page or minute, so they had nothing to change.
 
 ## Not built yet (from the plan)
 
