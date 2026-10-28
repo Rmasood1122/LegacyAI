@@ -4,7 +4,7 @@ import { useParams } from 'react-router';
 import { ScreenLink } from '../../navigation/ScreenLink.tsx';
 import { useSession } from '../../session/session.tsx';
 import { Badge, Banner, Button, Card, DataTable, ErrorNote, formatDate, humanize, Loading, Page, sensitivityLabel } from '../../ui/index.tsx';
-import { AWAITING_CONFIRMATION_TEXT, documentStatusTone, failureText, useConfirmDocument, useDocument, useWithdrawDocument } from './hooks.ts';
+import { AWAITING_CONFIRMATION_TEXT, documentStatusTone, failureText, isRecording, useConfirmDocument, useDocument, useWithdrawDocument } from './hooks.ts';
 
 export function DocumentDetailScreen() {
   const { sourceId = '' } = useParams();
@@ -26,7 +26,7 @@ export function DocumentDetailScreen() {
               <dt>Status</dt><dd><Badge tone={documentStatusTone(d.status)}>{humanize(d.status)}</Badge> {d.failure_code !== null && failureText(d.failure_code)}{d.status === 'awaiting_confirmation' && AWAITING_CONFIRMATION_TEXT}</dd>
               <dt>Who may read it</dt><dd>{sensitivityLabel(d.sensitivity)}</dd>
               <dt>Kind</dt><dd>{d.company_document ? 'Company document' : 'A person’s own material (needs their consent)'}</dd>
-              <dt>Size</dt><dd>{d.page_count ?? '—'} pages, {d.chunk_count} passages</dd>
+              <dt>Size</dt><dd>{d.page_count ?? '—'} {isRecording(d.mime) ? 'minutes' : 'pages'}, {d.chunk_count} passages</dd>
               <dt>Added</dt><dd>{formatDate(d.created_at)}</dd>
             </dl>
           </Card>

@@ -45,12 +45,12 @@ connection.
 ## What was tested
 
 Automated tests with stand-in data, in the engines of Chrome, Firefox and Safari:
-- in Chrome's and Firefox's engines: taking a copy, reading and searching it with the network switched off, "as of"
-  on every view, the copy refused and removed after 7 days, refused while the clock is set back, removed on signing
-  out, and nothing readable in what the browser keeps;
-- in Safari's engine (WebKit, as built for testing on Linux): a copy on the device opens while LegacyAI cannot be
-  reached, with "as of", is searchable, keeps nothing readable, is refused while the clock is set back and removed after
-  7 days. Signing in, taking a copy and opening the installed application with the network switched off were not
-  tested there (a limit of the test setup).
+- in Chrome's engine: taking a copy, reading and searching it with the network switched off, "as of" on every view,
+  the copy refused and removed after 7 days, refused while the clock is set back, removed on signing out, and nothing
+  readable in what the browser keeps;
+- in Firefox's and Safari's engines (Safari's as built for testing on Linux): a copy on the device opens while
+  LegacyAI cannot be reached, with "as of", is searchable, keeps nothing readable, is refused while the clock is set back
+  and removed after 7 days. Signing in, taking a copy and opening the installed application with the network switched
+  off are not tested there on every build (limits of the test tools).
 
 **Not tested:** Safari itself on an iPhone, iPad or Mac, and a device removing the copy for lack of space.

@@ -331,7 +331,9 @@ export async function createHttpServer(deps: HttpDeps): Promise<HttpServer> {
   await app.register(cookie);
   // Raw files (uploads) arrive as bytes. Only operations whose contract lists the type accept them;
   // any other operation refuses a non-JSON body in validateRequest.
-  app.addContentTypeParser(['application/pdf', 'text/plain', 'text/markdown'], { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
+  // Documents: text, PDF, and (features 7 and 25) a recording or a photo of a page, which the AI service reads with its media reader.
+  app.addContentTypeParser(['application/pdf', 'text/plain', 'text/markdown', 'audio/wav', 'audio/mpeg', 'audio/ogg', 'audio/webm', 'audio/mp4', 'image/png', 'image/jpeg'],
+    { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
   // A company directory (SCIM, RFC 7644) sends JSON as application/scim+json: read exactly like application/json.
   app.addContentTypeParser('application/scim+json', { parseAs: 'string' }, app.getDefaultJsonParser('error', 'error'));
   const rawBodies = new WeakMap<FastifyRequest, Buffer>();

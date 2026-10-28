@@ -952,6 +952,39 @@ The founder chose to close the "only Chromium" gap of step 33.
   reason written in the test).
 - Side effect: Firefox and WebKit run only after every Chromium test has passed (the files build on each other), so
   one failing Chromium test means they do not run in that build.
+- **Changed the same day (founder's choice):** the Firefox tests that sign in failed now and then in CI (1 build so
+  far). Measured locally: Playwright's Firefox sometimes lost the first page load or click of a new window - also in an
+  unrelated existing sign-in test (1 in 60), with the service worker blocked, and with a fresh browser each time (1 in
+  30); never in Chromium; a retry did not cure it (one test failed on its retry too). Firefox and WebKit now run only
+  the test that needs no sign-in, which never failed in more than 100 runs. Signing in, taking a copy and the installed
+  application offline are tested in Chromium on every build; in Firefox they passed locally only.
+
+## Step 36 — Voice and scanned documents wired through, against a stand-in reader (2026-10-27)
+
+The founder chose this item (features 7 and 25). Steps 3 to 5 of `09-batch-c-prepared.md` are done; steps 1 and 2 (a
+real speech or text-recognition model and its evaluation) wait for Gate 2.
+- A document may be a recording (WAV, MP3, OGG, WebM, M4A) or a photo or scan of one page (PNG, JPEG): accepted by the
+  screen, the API contract and the database (migration `20261027000200`, with a working rollback), and sent to the AI
+  service, which reads it with its media reader (`MEDIA_READER`). The text then goes through redaction, chunking,
+  sealing, consent and labels like any document. The file itself is kept nowhere.
+- The reader everywhere today is `none`: it refuses, and the screen says "Recordings cannot be turned into text yet: no
+  speech-to-text service is switched on" (or the same for pictures). The stand-in `fake` reads text a test put inside
+  the file; it is allowed only when `ENVIRONMENT=test`.
+- Measured locally:
+  - AI: 6 new pipeline tests with the stand-in - a scanned page read, redacted (an e-mail and a phone number blanked),
+    stored sealed and found by search; a recording as one page per minute heard; without a reader both refused and
+    nothing stored; a declared type that does not match the bytes refused; neither the image nor the recording found
+    in any stored bytes; the service uses the reader it is configured with. Plus 1 settings test (the stand-in only in
+    tests). Without the dispatch the 6 fail; with it they pass. Whole AI suite: 399 passed (1 failure known on this
+    machine only).
+  - API: 1 new test (a recording and a picture are passed on with their type); GIF and FLAC still refused. Whole API
+    suite: 1346 passed; the 6 failures are the 4 files known to fail on this machine only (timing, local database).
+  - Web: 2 new tests (a recording sent with its type and the plain-words refusal; minutes instead of pages), 2 changed
+    (a .png is no longer the example of a refused file). Whole web suite: 245 passed.
+  - Browser (real API, real AI service with no reader): a recording and a photo are refused with the reason shown.
+    Whole browser suite: 47 passed, 2 skipped (WebKit sign-in, step 35).
+- Not done: a real reader and its measured accuracy (Gate 2); scanned PDFs (they need their pages turned into images
+  first: a further library); the voice interviewer; "page" is still the word used where an item quotes a recording.
 
 ## Not built yet (from the plan)
 

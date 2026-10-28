@@ -168,13 +168,34 @@ describe('documents', () => {
     });
     renderScreen(<DocumentsScreen />, { api, session: as('listSources', 'createSource', 'uploadSourceContent') });
     await user.type(await screen.findByLabelText('Title'), 'Scan');
-    await user.upload(screen.getByLabelText('File'), new File(['x'], 'photo.png', { type: 'image/png' }));
-    expect(screen.getByText('Choose a .txt, .md or .pdf file.')).toBeTruthy();
+    await user.upload(screen.getByLabelText('File'), new File(['x'], 'animation.gif', { type: 'image/gif' }));
+    expect(screen.getByText(/^Choose a text, Markdown or PDF file/)).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Add document' }) as HTMLButtonElement).disabled).toBe(true);
     await user.upload(screen.getByLabelText('File'), new File(['%PDF'], 'scan.pdf', { type: 'application/pdf' }));
     await user.click(screen.getByRole('button', { name: 'Add document' }));
     expect(await screen.findByText('The document could not be used')).toBeTruthy();
     expect(screen.getByText(/no text in it/)).toBeTruthy();
+  });
+
+  it('sends a recording or a photo of a page with its type, and explains plainly when it cannot be read (features 7, 25)', async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    const api = new FakeApi({
+      listSources: () => page<KSource>([]),
+      createSource: () => ({ id: ID(24), status: 'awaiting_content', title: 'Walk-through' }),
+      uploadSourceContent: () => ({ status: 'failed', failure_code: 'voice_not_available', chunk_count: null, pending_chunks: null, duplicate_of: null }),
+    });
+    renderScreen(<DocumentsScreen />, { api, session: as('listSources', 'createSource', 'uploadSourceContent') });
+    await user.type(await screen.findByLabelText('Title'), 'Walk-through');
+    await user.upload(screen.getByLabelText('File'), new File(['ID3'], 'Walk-Through.MP3', { type: '' }));
+    await user.click(screen.getByRole('button', { name: 'Add document' }));
+    expect(await screen.findByText(/no speech-to-text service is switched on/)).toBeTruthy();
+    expect(api.callsTo('uploadSourceContent')[0]?.contentType).toBe('audio/mpeg');
+  });
+
+  it('counts a recording in minutes, not pages', async () => {
+    renderScreen(<DocumentDetailScreen />, { api: new FakeApi({ getSource: () => ({ ...doc(), redactions: [], mime: 'audio/mpeg', page_count: 12 }) }),
+      session: as('getSource'), at: `/documents/${ID(20)}`, route: '/documents/:sourceId' });
+    expect(await screen.findByText(/12 minutes/)).toBeTruthy();
   });
 
   it('shows what was blanked out, and withdraws only after a second click', async () => {

@@ -68,7 +68,7 @@ describe('ApiClient', () => {
     expect(request(1).url).toBe('/v1/sources/s1/content');
     expect(request(1).headers['content-type']).toBe('text/plain');
     expect(request(1).init.body).toBe(file);
-    await expect(client.call('uploadSourceContent', { path: { source_id: 's1' }, body: file, contentType: 'image/png' })).rejects.toMatchObject({ kind: 'invalid' });
+    await expect(client.call('uploadSourceContent', { path: { source_id: 's1' }, body: file, contentType: 'image/gif' })).rejects.toMatchObject({ kind: 'invalid' });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 

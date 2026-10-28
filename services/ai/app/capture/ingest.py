@@ -3,6 +3,7 @@
     create_source()     the description: title (redacted), labels, contributor or company declaration
     confirm_source()    a named contributor confirms "this is mine"
     process_upload()    the file: sniff -> parse -> redact -> chunk -> store (pending) -> embed -> ready
+                        (a recording or a photo of a page is read by the media reader first; features 7 and 25)
     continue_embedding()  the rest of the embedding, on a later status request
 
 The uploaded bytes exist only in memory during process_upload(); they are never written anywhere.
@@ -24,6 +25,7 @@ from app.ai_gateway import Embedder
 from app.capture.chunking import chunk_pages
 from app.capture.files import UploadRejected, extract, sniff
 from app.capture.filters import condition
+from app.capture.media import AUDIO, IMAGE, MediaReader, NoMediaReader, extract_media, sniff_media
 from app.capture.redaction import Finding, redact
 from app.capture.sealed_chunks import (
     SEALED_COLUMNS,
@@ -176,7 +178,8 @@ def _duplicate_visible(cur: psycopg.Cursor[Any], ctx: ServiceContext, digest: by
 
 
 def process_upload(db: Database, ctx: ServiceContext, embedder: Embedder, source_id: str, data: bytes, declared_mime: str,
-                   storage_budget_bytes: int, deadline: float) -> dict[str, Any]:
+                   storage_budget_bytes: int, deadline: float, media: MediaReader | None = None) -> dict[str, Any]:
+    """`media` reads recordings and images (default: the reader that refuses them)."""
     digest = hashlib.sha256(data).digest()
     with db.tenant_tx(ctx.tenant_id) as cur:
         cur.execute("SELECT status, kind FROM sources WHERE tenant_id = %s AND id = %s FOR UPDATE", (ctx.tenant_id, source_id))
@@ -194,8 +197,13 @@ def process_upload(db: Database, ctx: ServiceContext, embedder: Embedder, source
     try:
         if len(data) > limits.max_upload_bytes:
             raise UploadRejected("too_large")
-        mime = sniff(data, declared_mime)
-        doc = extract(data, mime, limits.max_pdf_pages)
+        if declared_mime in AUDIO | IMAGE:
+            # a recording (its pages are the minutes it was heard in) or a photo of one page; then like any document
+            mime = sniff_media(data, declared_mime)
+            doc = extract_media(media or NoMediaReader(), data, mime)
+        else:
+            mime = sniff(data, declared_mime)
+            doc = extract(data, mime, limits.max_pdf_pages)
         numbering: dict[str, dict[str, int]] = {}
         redacted_pages: list[tuple[int, str]] = []
         findings: list[Finding] = []
