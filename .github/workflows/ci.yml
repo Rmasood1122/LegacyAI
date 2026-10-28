@@ -122,9 +122,9 @@ jobs:
       - name: Internal contract file matches the code (contracts/ai-internal.openapi.json)
         run: EVIDENCE='^ai-contract:' bash ../../scripts/ci-run.sh "internal contract" python -m app.contract --check
       - name: Dependency vulnerability audit (Python)
-        # The pillow advisories below (8, then 16, 11, 2 and 1 more) are accepted BY ID, nothing wider (decision D32, docs/DEPENDENCIES.md 9.1):
+        # The pillow advisories below (8, then 16, 11, 2, 1 and 1 more) are accepted BY ID, nothing wider (decision D32, docs/DEPENDENCIES.md 9.1):
         # pillow comes in only through fastembed, which refuses pillow 13 (the only fixed version) in every release, and
-        # the service never imports or runs pillow (text embeddings only). 8 IDs accepted 2026-10-21, 16 more 2026-10-22, 11 more 2026-10-23, 2 more 2026-10-24, 1 more 2026-10-27 (D32).
+        # the service never imports or runs pillow (text embeddings only). 8 IDs accepted 2026-10-21, 16 more 2026-10-22, 11 more 2026-10-23, 2 more 2026-10-24, 1 more 2026-10-27, 1 more 2026-10-28 (D32).
         # Any other advisory - pillow included - fails.
         run: >-
           EVIDENCE='ulnerabilit' bash ../../scripts/ci-run.sh "pip-audit" python -m pip_audit -r requirements.txt
@@ -133,6 +133,7 @@ jobs:
           --ignore-vuln CVE-2026-96638 --ignore-vuln CVE-2026-96641 --ignore-vuln CVE-2026-96640 --ignore-vuln CVE-2026-96642 --ignore-vuln CVE-2026-96639 --ignore-vuln CVE-2026-96643 --ignore-vuln CVE-2026-96637 --ignore-vuln CVE-2026-96644 --ignore-vuln CVE-2026-96778 --ignore-vuln CVE-2026-96636 --ignore-vuln GHSA-78g4-xqwv-q3g8
           --ignore-vuln CVE-2026-114501 --ignore-vuln CVE-2026-112398
           --ignore-vuln PYSEC-2026-4327
+          --ignore-vuln PYSEC-2026-4332
 
   both-services:
     name: Contract - API and AI service together (every Phase 2 operation, fake AI only)
