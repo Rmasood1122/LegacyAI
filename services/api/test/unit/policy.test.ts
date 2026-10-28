@@ -77,7 +77,7 @@ const LIVE_COMPANY_CARD = { state: 'active' as const, expires_at: new Date(NOW.g
 
 function ctx(over: Partial<PolicyContext> = {}): PolicyContext {
   return {
-    now: NOW, ip: '10.0.0.5', tenant: { status: 'active' },
+    now: NOW, ip: '10.0.0.5', tenant: { status: 'active', served_here: true },
     settings: { enabled_roles: ['company_owner', 'admin', 'expert', 'successor'], pilot_reviewer_grant: true },
     matrix, companyCard: LIVE_COMPANY_CARD, restrictions: [], usage: new Map(), planAllows: true, ...over,
   };
@@ -120,7 +120,10 @@ const rows: Row[] = [
   { name: 'admin suspends another card', s: subject([role('admin')]), action: 'card:suspend', r: res({ target_rank: 30 }), effect: 'allow', reason: 'ALLOW' },
   { name: 'cross-tenant resource', s: subject([role('company_owner')]), action: 'card:read', r: res({ tenant_id: T2 }), effect: 'deny', reason: 'DENY_TENANT_MISMATCH' },
   { name: 'resource without a tenant', s: subject([role('company_owner')]), action: 'card:read', r: res({ tenant_id: undefined as never }), effect: 'deny', reason: 'DENY_TENANT_MISMATCH' },
-  { name: 'tenant suspended', s: subject([role('company_owner')]), action: 'card:read', r: res(), c: ctx({ tenant: { status: 'suspended' } }), effect: 'deny', reason: 'DENY_TENANT_INACTIVE' },
+  { name: 'tenant suspended', s: subject([role('company_owner')]), action: 'card:read', r: res(), c: ctx({ tenant: { status: 'suspended', served_here: true } }), effect: 'deny', reason: 'DENY_TENANT_INACTIVE' },
+  // regional hosting (D43): a company of another region's copy gets nothing here, not even its Owner, whatever its status
+  { name: 'company kept in another region', s: subject([role('company_owner')]), action: 'card:read', r: res(), c: ctx({ tenant: { status: 'active', served_here: false } }), effect: 'deny', reason: 'DENY_TENANT_OTHER_REGION' },
+  { name: 'company of another region, also suspended', s: subject([role('company_owner')]), action: 'card:read', r: res(), c: ctx({ tenant: { status: 'suspended', served_here: false } }), effect: 'deny', reason: 'DENY_TENANT_OTHER_REGION' },
   { name: 'platform-only permission outside the platform tenant', s: subject([role('company_owner')]), action: 'tenant:create', r: res({ type: 'tenant', collection: true }), effect: 'deny', reason: 'DENY_PLATFORM_ONLY' },
   { name: 'platform-only permission inside the platform tenant', s: subject([role('company_owner')], { is_platform_tenant: true }), action: 'tenant:create', r: res({ type: 'tenant', collection: true }), effect: 'allow', reason: 'ALLOW' },
 

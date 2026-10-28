@@ -364,3 +364,26 @@ CONSEQUENCES:
     is refused while the key is off. Stated in `docs/customers/your-own-key.md`.
   - the rule "nothing is kept in browser storage" (Phase 3) now has one exception: this copy, in one file
     (`web/src/offline/storage.ts`), which the lint rules enforce.
+
+**D43 — Regional hosting (feature 21, the hosting part): one complete copy per region (2026-10-28).**
+- The founder's choices of 2026-10-28: (1) each region is a **separate complete copy** - its own Google Cloud project,
+  its own Neon database, buckets, backups, secrets, content key, services and jobs - set up from the same Terraform with
+  one setting, `home_region` ("us" or "eu"), and applied by the founder separately (the recommended option, rather than
+  one project holding both regions side by side); (2) the second region prepared is **EU, Belgium** (Google's
+  `europe-west1`).
+- The API of a copy serves only companies kept in its region (`HOSTING_REGION`, required in production; Terraform sets
+  it from `home_region`): it writes its region on every company it creates; it refuses to start on a database that
+  holds a company of another region (another copy's database, or another copy's backup restored here); and the policy
+  decision point refuses every request for one (`DENY_TENANT_OTHER_REGION`, also when signing in). The operator's own
+  company is in every copy and is never refused for its region.
+- Rules that follow, not chosen separately: everything in a copy sits in its home region, including the secrets
+  (replicated to that one region, not Google's "automatic" placement - billed the same, read on Google's pricing page
+  2026-10-28); the guardrail check fails if anything is placed elsewhere. Moving a company from one region to the other
+  is not built: it would be an export from one copy and an import into the other, which does not exist yet.
+- Accepted costs: an EU copy has no Cloud Storage free allowance (only us-central1, us-east1 and us-west1 have it), so
+  its backups and audit anchors are paid from the first byte. Free allowances count per billing account, not per
+  project, so two copies on one billing account share them: 4 scheduler jobs where 3 are free (one paid job, $0.10 a
+  month: cloud.google.com/scheduler/pricing, read 2026-10-28) and 10 active secret versions where 6 are free (four paid,
+  $0.06 each a month). Its content key is a second key at about $0.06 a month. Cloud Run in `europe-west1` is priced as
+  Tier 1, like `us-central1` (cloud.google.com/run/pricing, read 2026-10-28). The total is an estimate; only a real bill
+  proves it.

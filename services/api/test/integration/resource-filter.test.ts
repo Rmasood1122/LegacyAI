@@ -84,7 +84,7 @@ function subject(roles: SubjectRole[], over: Partial<CardSubject> = {}): CardSub
 }
 function ctx(over: Partial<PolicyContext> = {}): PolicyContext {
   return {
-    now: NOW, ip: '10.1.1.1', tenant: { status: 'active' }, settings: { enabled_roles: ALL_ROLES, pilot_reviewer_grant: true }, matrix,
+    now: NOW, ip: '10.1.1.1', tenant: { status: 'active', served_here: true }, settings: { enabled_roles: ALL_ROLES, pilot_reviewer_grant: true }, matrix,
     companyCard: { state: 'active', expires_at: new Date(NOW.getTime() + 60 * DAY), grace_until: new Date(NOW.getTime() + 74 * DAY) },
     restrictions: [], usage: new Map(), planAllows: true, ...over,
   };
@@ -127,7 +127,8 @@ describe('buildResourceFilter agrees with decide() on every row', () => {
     variants.push({ name: 'no roles', s: subject([]), c: ctx() });
     variants.push({ name: 'suspended owner', s: subject([role('company_owner')], { card_state: 'suspended' }), c: ctx() });
     variants.push({ name: 'locked owner', s: subject([role('company_owner')], { locked: true }), c: ctx() });
-    variants.push({ name: 'owner, tenant suspended', s: subject([role('company_owner')]), c: ctx({ tenant: { status: 'suspended' } }) });
+    variants.push({ name: 'owner, tenant suspended', s: subject([role('company_owner')]), c: ctx({ tenant: { status: 'suspended', served_here: true } }) });
+    variants.push({ name: 'owner, company of another region (D43)', s: subject([role('company_owner')]), c: ctx({ tenant: { status: 'active', served_here: false } }) });
     variants.push({ name: 'owner, plan limit reached', s: subject([role('company_owner')]), c: ctx({ planAllows: false }) });
     variants.push({ name: 'owner, read-only card', s: subject([role('company_owner')]), c: ctx({ restrictions: [readOnly] }) });
     variants.push({ name: 'owner, off-site', s: subject([role('company_owner')]), c: ctx({ restrictions: [offSite] }) });

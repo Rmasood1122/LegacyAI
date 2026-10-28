@@ -92,7 +92,18 @@ export interface Config {
    * this installation's service account; nothing more to configure here.
    */
   keyService: { kind: 'none' | 'local' | 'google-kms'; localKeys: ReadonlyMap<string, Secret<Buffer>> };
+  /**
+   * Regional hosting (feature 21, decision D43): the region this copy of LegacyAI runs in. Each region is a separate
+   * copy with its own database. The copy serves only companies kept in its region: it writes its region on every
+   * company it creates, refuses to start on a database that holds a company of another region, and refuses every
+   * request for one. Required in production; 'us' elsewhere.
+   */
+  hostingRegion: HostingRegion;
 }
+
+/** The regions a company may be kept in. The database allows exactly these (tenants.region). */
+export const HOSTING_REGIONS = ['us', 'eu'] as const;
+export type HostingRegion = (typeof HOSTING_REGIONS)[number];
 
 export class ConfigError extends Error {
   readonly problems: string[];
@@ -320,7 +331,10 @@ export function loadConfig(env: Env): Config {
     },
     sso: { redirectUri: raw('SSO_REDIRECT_URI') ?? `${allowedOrigins[0] ?? 'http://localhost:3000'}/sso/return` },
     keyService: { kind: oneOf('KEY_SERVICE', ['none', 'local', 'google-kms'] as const, 'none'), localKeys: new Map() },
+    hostingRegion: oneOf('HOSTING_REGION', HOSTING_REGIONS, 'us'),
   };
+  // A copy that does not say where it is could serve another region's companies' data: never guess in production.
+  if (nodeEnv === 'production' && raw('HOSTING_REGION') === undefined) problems.push('HOSTING_REGION must be set (us or eu) when NODE_ENV=production');
   if (config.keyService.kind === 'local') {
     if (nodeEnv === 'production') problems.push('KEY_SERVICE=local keeps keys in the configuration and is not allowed when NODE_ENV=production');
     const text = raw('LOCAL_KEY_SERVICE_KEYS');

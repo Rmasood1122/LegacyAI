@@ -86,6 +86,7 @@ export const UNCOUNTED_REASONS: ReadonlySet<string> = new Set([
   'DENY_CARD_RESTRICTION_INVALID',                                                  // a restriction that cannot be read: not the card holder's doing
   'DENY_CARD_EXPIRED', 'DENY_CARD_STATE', 'DENY_CARD_LOCKED', 'DENY_GRACE_READ_ONLY', // the card's phase: it ends by itself or by renewal
   'DENY_TENANT_EXPIRED', 'DENY_TENANT_GRACE_READ_ONLY', 'DENY_TENANT_INACTIVE',       // the company's phase: everybody meets it at once
+  'DENY_TENANT_OTHER_REGION',                                                       // a company of another region's copy: ours to fix, not probing
   'DENY_PLAN_LIMIT',                                                                // the plan's limit: an upgrade matter, not probing
   'DENY_PDP_ERROR', 'DENY_UNKNOWN_ACTION', 'DENY_UNKNOWN_OBLIGATION', 'DENY_LIST_FILTER_UNDECLARED', // faults of ours, not of the card
   'DENY_RESOURCE_NOT_FOUND',                                                        // old links; decided before the policy is asked

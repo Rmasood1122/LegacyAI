@@ -12,7 +12,7 @@ written design only, and the reason is given.
 | 7, 25 | Voice; scanned documents (OCR) | **Wired through (2026-10-27)**: uploads of recordings and photos of a page reach the reader and go on like any document; the default reader refuses them | A speech / OCR model (cost, Gate 2) and its own measured evaluation |
 | 6 | Passive capture (chats, tickets, e-mail) | **Design only** | Legal review first (the feature list says so); consent design; real accounts |
 | 9 | Shadow / offline mode | **Built (2026-10-27, D42)**: the server side and the installable web app | The founder chose an installable web app, 7-day packs, verified level 0-1 only |
-| 21 | Regional hosting | **Design only** (the key part of 21 is built: `08-bring-your-own-key.md`) | Real cloud resources in a second region |
+| 21 | Regional hosting | **Built for a separate copy per region (2026-10-28, D43)**: Terraform places a copy in one region; the API serves only its region's companies (the key part of 21: `08-bring-your-own-key.md`) | The founder applying a European copy (a second project and Neon database) |
 
 ## 4 — NFC cards (prepared)
 
@@ -123,13 +123,14 @@ management and updates. What the server side would need, and the questions it ra
 - what is shown offline is not refreshed: every page must say "as of <date>";
 - questions asked offline cannot use the AI service. Offline is reading and searching only.
 
-## 21 — Regional hosting: design only
+## 21 — Regional hosting: built as a separate copy per region (2026-10-28, D43)
 
-Infrastructure in a second region, applied by the founder; Terraform here is plan-only. `06-infra-and-cost.md`
-already says that adding a region to `var.regions` gives compute, **not** data residency. Residency needs, per region:
-a database, buckets, the scheduled jobs, the key service location, and a rule in the API that it serves only
-companies whose `tenants.region` is its own. That rule is the one code change, and it is not made yet: today every
-company is `us`, so the rule would have nothing to check.
+The founder chose one complete copy per region, and EU (Belgium) as the second region. Terraform's `home_region`
+("us" or "eu") places everything a copy creates in that one region, secrets included; the guardrail check fails if
+anything is placed elsewhere. The API rule is made: a copy writes its region on every company it creates, refuses to
+start on a database holding another region's company, and refuses every request and sign-in for one
+(`DENY_TENANT_OTHER_REGION`). Not built: moving a company between copies. Not applied: no European project or database
+exists; the founder sets it up by hand (`infra/README.md`, Part F).
 
 ## What this step did not do
 

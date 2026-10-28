@@ -10,7 +10,7 @@ import type { RequestContext, ResourceRef, RoleKey, CardSubject } from '../../..
 import {
   countAuditRows, createTenant, decodeIdCursor, encodeCursor, getPlan, getSettings, getTenant, listTenants, toApiTenant, updateSettings,
   writeAudit,
-  type Database, type Notifier, type RouteDef, type Tx,
+  type Database, type HostingRegion, type Notifier, type RouteDef, type Tx,
 } from '../../platform/index.ts';
 import { sessionBody, type AuthService } from './auth.ts';
 import type { Authorizer } from './authz.ts';
@@ -32,6 +32,8 @@ export interface IdentityRouteDeps {
   notifier: Notifier;
   /** For the seats line of the usage page (numbers of cards, never money). */
   billing: BillingPort;
+  /** Every company this copy creates is kept in this copy's region (D43). */
+  hostingRegion: HostingRegion;
 }
 
 const CARD_DESCRIPTOR: ResourceDescriptor = {
@@ -726,7 +728,7 @@ export function identityRoutes(deps: IdentityRouteDeps): RouteDef[] {
         // idempotency record commit together or not at all. The transaction is switched to the new
         // tenant's id while its rows are written, so row-level security checks every insert.
         const created = await db.withinTenant(tx, tenantId, async () => {
-          const tenant = await createTenant(tx, { id: tenantId, name: body.name, slug: body.slug });
+          const tenant = await createTenant(tx, { id: tenantId, name: body.name, slug: body.slug, region: deps.hostingRegion });
           const settings = await getSettings(tx, tenantId);
           const person = await tx.query<PersonRow>(
             `INSERT INTO people (tenant_id, display_name, email) VALUES ($1, $2, $3) RETURNING ${PERSON_COLUMNS}`,

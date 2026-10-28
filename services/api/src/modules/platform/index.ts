@@ -2,7 +2,7 @@
 // Other modules may import ONLY from this file - never from ./internal/*.
 // Enforced by dependency-cruiser (see .dependency-cruiser.cjs).
 
-export { ARGON2_FLOOR, ConfigError, loadConfig, Secret, type Config, type Keyring } from './internal/config.ts';
+export { ARGON2_FLOOR, ConfigError, HOSTING_REGIONS, loadConfig, Secret, type Config, type HostingRegion, type Keyring } from './internal/config.ts';
 export { SealingCipher } from './internal/sealing.ts';
 export { KeyUnavailable, LocalKeyService, NoKeyService, type KeyService } from './internal/key-service.ts';
 export { crc32c, GoogleKmsKeyService, keyServiceFrom, KMS_API, metadataToken, type TokenSource } from './internal/gcp-kms.ts';
@@ -25,7 +25,7 @@ export {
   type IdempotencyStore, type NotificationEvent, type Notifier, type RateLimiter, type RateLimitResult,
 } from './internal/support.ts';
 export {
-  createTenant, ExportRegistry, getPlan, getSettings, getTenant, listTenants, toApiTenant, updateSettings,
+  assertOwnRegionOnly, companiesOfOtherRegions, createTenant, ExportRegistry, getPlan, getSettings, getTenant, listTenants, toApiTenant, updateSettings,
   type ExportTable, type TenantRow, type TenantSettings,
 } from './internal/tenants.ts';
 export {

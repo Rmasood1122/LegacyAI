@@ -46,6 +46,7 @@ Each step can only deny or narrow. Allow is reached only at the end.
 | 0 | Any exception, missing input, unknown action or malformed subject | `DENY_PDP_ERROR` / `DENY_UNKNOWN_ACTION` |
 | 1 | Subject must be authenticated for a non-public action | `DENY_UNAUTHENTICATED` |
 | 2 | **Tenant match:** `resource.tenant_id` must equal `subject.tenant_id` (the only exception: `platform_only` permissions used by the platform tenant) | `DENY_TENANT_MISMATCH` |
+| 3a | **Region (feature 21, D43, since 2026-10-28):** the company must be kept in this copy's region (`tenants.region` = `HOSTING_REGION`); the operator's own company is served by every copy | `DENY_TENANT_OTHER_REGION` |
 | 3 | **Tenant status** must be `active` | `DENY_TENANT_INACTIVE` |
 | 4 | **Card state:** `active` continues. `issued`, `suspended`, `revoked`, `replaced` are denied. | `DENY_CARD_STATE` |
 | 5 | **Expiry and grace** (the only place this is enforced): before `expires_at` → continue. In grace → continue with obligation `read_only`; any permission with `is_write = true` is denied, except `export:create`. After grace → denied, except `export:create` / `export:read` for a Company Owner (obligation `export_only`). | `DENY_GRACE_READ_ONLY`, `DENY_CARD_EXPIRED` |

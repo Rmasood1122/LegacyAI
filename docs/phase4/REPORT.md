@@ -1013,6 +1013,34 @@ said "minutes", but an item's "Where it comes from" list still said "page 2" for
   this change; GitHub's run is the test of record.
 - Not covered: answers' citations name a document but give no page or minute, so they had nothing to change.
 
+## Step 39 — Regional hosting: one copy per region (2026-10-28, decision D43)
+
+The founder chose this item, a separate complete copy per region, and EU (Belgium) as the second region.
+- Terraform: one setting, `home_region` ("us" → `us-central1`, "eu" → `europe-west1`), replaces `primary_region` and
+  the `regions` map (which gave EU compute but not EU data residency). Everything a copy creates sits in that region;
+  the secrets are now kept in that one region instead of Google's "automatic" placement (billed the same). The API
+  service gets `HOSTING_REGION`. The guardrail check now fails if anything is placed outside the home region, if a
+  secret is replicated anywhere, if the default copy is not "us", or if the "us" copy leaves `us-central1`; its
+  self-test breaks each of these on purpose (22 breaks, all detected). `terraform fmt` and `terraform validate` pass
+  (Terraform 1.16.4, provider 7.46.1, no credentials); `terraform console` gives `us-central1` for "us" and
+  `europe-west1` for "eu", and refuses any other value. No `terraform plan` or `apply` was run.
+- API: `HOSTING_REGION` (us or eu; required in production, "us" elsewhere). A copy writes its region on every company
+  it creates; refuses to start on a database holding a company of another region; and the policy decision point
+  refuses every request for one, sign-in included (`DENY_TENANT_OTHER_REGION`, not counted by the anomaly radar). The
+  operator's own company is served by every copy.
+- Tests: API 4 new integration tests against the test database (a "us" copy creates "us" companies; an "eu" copy
+  creates "eu" companies; an "eu" copy refuses a database with "us" companies, and the reverse; a company moved to
+  "eu" by hand gets 403 and cannot sign in in the "us" copy, while the operator still can), 2 new policy cases, 1 new
+  configuration test, 1 new resource-filter variant. Without the code change, 6 of them fail (the "us" case passes,
+  because "us" was already the default). Whole API suite: 1352 passed, 7 failed — the 4 files known to fail on this
+  machine only, plus the contract walk, which passed alone (with the region tests: 50 of 50); GitHub's run is the test
+  of record.
+- Not covered: moving a company from one copy to the other (an export and import between copies, not built); the
+  European copy itself (no project, database or key exists; `infra/README.md`, Part F, is the founder's procedure).
+  Checked per request: everything a signed-in card or an API key does, and signing in. Not checked per request:
+  enrolling a sign-in method with a one-time token, the payment provider's messages, and the background jobs; these
+  rely on the start-up check and on new companies getting the copy's region.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in
