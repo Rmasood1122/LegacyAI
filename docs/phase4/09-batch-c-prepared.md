@@ -65,6 +65,9 @@ written design only, and the reason is given.
 
 ## 6 — Passive capture: design only, and why
 
+**Update 2026-10-28:** the questions for a lawyer about capture from chats are written out in
+`11-chat-capture-legal-questions.md` (the founder's choice: questions first, nothing built until they are answered).
+
 Reading people's chats, tickets and e-mail is capture of communications. The feature list itself says it needs consent
 design and **legal review first**. Writing the connectors before that review would build exactly what the review may
 forbid. What the design asks the review to decide:
