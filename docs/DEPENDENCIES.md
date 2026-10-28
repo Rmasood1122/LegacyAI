@@ -208,6 +208,14 @@ GHSA-4558-3h8r-v8xp: the P;2L and P;4L raw decoders can read past the end of a b
 fastembed 0.9.1 is 3 days old and pillow 13.0.0 11 days old (D2 says 60: 2026-12-23 and 2026-12-15). Re-check on
 2026-12-23: move to fastembed 0.9.1 (or later) with pillow 13 and remove every pillow ignore.
 
+**pillow, 2026-10-28: 1 more advisory accepted by ID (D32, the same rule).** PYSEC-2026-4332 (CVE-2026-112403,
+GHSA-8g5g-8vmr-9782: the JPEG decoder can write a full scanline into a buffer sized for a smaller draft scale), fixed
+only in pillow 13.0.0 (read https://api.osv.dev/v1/vulns/PYSEC-2026-4332 on 2026-10-28). The service still never
+imports pillow (checked: no `PIL` import in `services/ai/app`). **New since 2026-10-27:** JPEG files can now be uploaded
+(voice and scanned documents, step 36), but nothing decodes them: the media reader refuses them (`MEDIA_READER=none`)
+and the test stand-in only searches the bytes for a marker. **A real text-recognition reader must not be switched on
+while any pillow ignore remains** unless it is shown not to decode images with pillow. Same re-check date, 2026-12-23.
+
 ### 9.2 TypeScript
 
 | Purpose | Package and version | Released | Licence | Evidence |
@@ -356,6 +364,7 @@ know, and CI fails if the committed file differs from the contract.
 | Action | Pin | Evidence |
 |---|---|---|
 | actions/upload-artifact | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` (v7.0.1) | MEASURED 2026-10-03: `git ls-remote --tags https://github.com/actions/upload-artifact` |
+| actions/cache | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` (v6.1.0) | MEASURED 2026-10-28: `git ls-remote --tags https://github.com/actions/cache`; releases page (https://github.com/actions/cache/releases, read 2026-10-28): v6.0.0 2026-06-23, v6.1.0 2026-06-26, both older than 60 days (D2). Used only by the browser-test job, to keep the test browsers and their system packages between runs. |
 
 ### Not verified
 
