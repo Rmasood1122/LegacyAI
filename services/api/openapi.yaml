@@ -9686,6 +9686,7 @@ components:
               - "title"
               - "page_from"
               - "page_to"
+              - "unit"
             properties:
               source_id:
                 type: "string"
@@ -9700,6 +9701,12 @@ components:
                 type:
                   - "integer"
                   - "null"
+              unit:
+                description: "What page_from and page_to count: pages of a document, or minutes of a recording (a recording is read one minute at a time)."
+                type: "string"
+                enum:
+                  - "page"
+                  - "minute"
         topics:
           description: "The topics this item is linked to, limited to topics the reader may see. Links to retired topics are left out (they are kept, and are not changed by setting the topics)."
           type: "array"

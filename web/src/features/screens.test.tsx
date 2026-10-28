@@ -247,6 +247,19 @@ describe('knowledge', () => {
     }));
   });
 
+  it('says where an item comes from: pages of a document, minutes of a recording', async () => {
+    const provenance = [
+      { source_id: ID(40), title: 'Boiler manual', page_from: 3, page_to: 4, unit: 'page' as const },
+      { source_id: ID(41), title: 'Walk-through recording', page_from: 2, page_to: 2, unit: 'minute' as const },
+      { source_id: ID(42), title: 'Long recording', page_from: 5, page_to: 6, unit: 'minute' as const },
+    ];
+    renderScreen(<KnowledgeItemScreen />, { api: new FakeApi({ getKnowledgeItem: () => detail({ provenance }) }), session: as('getKnowledgeItem'), ...at });
+    const list = (await screen.findByText('Boiler manual')).closest('ul');
+    expect([...(list?.querySelectorAll('li') ?? [])].map((li) => li.textContent)).toEqual([
+      'Boiler manual — pages 3–4', 'Walk-through recording — minute 2', 'Long recording — minutes 5–6',
+    ]);
+  });
+
   it('a reviewer can verify or reject an item in review; the author\'s card sees neither button', async () => {
     const user = userEvent.setup();
     const api = new FakeApi({ getKnowledgeItem: () => detail(), verifyKnowledgeItem: () => ({ id: ID(30), status: 'verified' }) });

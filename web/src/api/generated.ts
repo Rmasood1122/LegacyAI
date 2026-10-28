@@ -315,6 +315,7 @@ export interface KItemDetail {
     title: string;
     page_from: number | null;
     page_to: number | null;
+    unit: "page" | "minute";
   }>;
   topics: Array<{
     topic_id: string;
