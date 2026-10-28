@@ -1041,6 +1041,16 @@ The founder chose this item, a separate complete copy per region, and EU (Belgiu
   enrolling a sign-in method with a one-time token, the payment provider's messages, and the background jobs; these
   rely on the start-up check and on new companies getting the copy's region.
 
+## Step 40 — Capture from chats: the questions for a lawyer (2026-10-28)
+
+The founder chose to start feature 6 with the legal questions, as the feature list requires. `11-chat-capture-legal-questions.md`
+describes the feature in plain words (two ways: an expert's own messages from an export file, or a whole channel),
+what the product already does (consent, redaction and its limits, no originals kept, withdrawal, audit, regions), nine
+questions with what would be built under each answer, and what is needed back. Recommendation put to the lawyer: the
+expert's own messages only, from export files, no live connection to the chat tool. No code; nothing is built until
+the answers come back. Laws named in it are marked "for the lawyer to confirm": Claude did not check them, and the
+paper says what the law is nowhere.
+
 ## Not built yet (from the plan)
 
 Batch A is complete (features 23, 22, 5, 11, 26, 4, 27, 30, 8 — each within the limits stated above; NFC is prepared in
