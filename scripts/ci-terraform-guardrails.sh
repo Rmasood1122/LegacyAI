@@ -49,8 +49,19 @@ buckets="$(count '^resource "google_storage_bucket" ')"
 [ "$(count '^ *public_access_prevention *= *"enforced"$')" -eq "$buckets" ] || fail "every bucket must enforce public access prevention"
 [ "$(count '^ *uniform_bucket_level_access *= *true$')" -eq "$buckets" ] || fail "every bucket must use uniform bucket-level access"
 [ "$(count '^ *retention_policy \{$')" -eq "$buckets" ] || fail "every bucket needs a retention policy"
-[ "$(count '^ *location *= *var\.primary_region$')" -ge "$buckets" ] || fail "buckets must be in the primary (free-allowance) region"
-[ "$(default_of primary_region)" = '"us-central1"' ] || fail "primary_region must default to us-central1 (free Cloud Storage allowance)"
+# Data residency (decision D43): ONE home region per copy. Every location and region in the code is that home region
+# (or a service's own, which is built from it), secrets are replicated there only, and the default copy is the US one,
+# whose region has the free Cloud Storage allowance.
+[ "$(default_of home_region)" = '"us"' ] || fail "home_region must default to \"us\""
+printf '%s\n' "$(block "$code" '^  region_locations = [{]' '^  [}]')" | grep -Eq '^ +us += +"us-central1"' \
+  || fail "the us copy must live in us-central1 (free Cloud Storage allowance)"
+printf '%s\n' "$(block "$code" '^  region_locations = [{]' '^  [}]')" | grep -Eq '^ +eu += +"europe-[a-z]+[0-9]+"' \
+  || fail "the eu copy must live in a europe- region"
+[ "$(count '^ *location *= *local\.location$')" -ge "$buckets" ] || fail "buckets must be in the home region"
+placed="$(printf '%s\n' "$code" "$(sed -e 's/[[:space:]]*#.*$//' versions.tf)" | grep -E '^ *(location|region) *=' \
+  | grep -Ev '= *(local\.location|local\.region_locations\[var\.home_region\]|each\.value|each\.value\.location)$' || true)"
+[ -z "$placed" ] || fail "something is placed outside the home region: $(printf '%s' "$placed" | head -1 | sed 's/^ *//')"
+if printf '%s\n' "$code" | grep -Eq '^ *auto *[{]'; then fail "a secret uses automatic replication (copies anywhere); keep it in the home region"; fi
 secrets="$(block "$code" '^  secrets = [{]' '^  [}]' | grep -Ec '^ +[a-z-]+ += +"')"
 [ "$secrets" -eq 5 ] || fail "expected exactly 5 secrets (inside the free 6), found $secrets"
 [ "$(count '^resource "google_cloud_scheduler_job" ')" -le 3 ] || fail "more than 3 scheduler jobs (only 3 are free)"
@@ -76,4 +87,4 @@ if printf '%s\n' "$kms_key" | grep -Eq 'rotation_period'; then fail "the content
 printf '%s\n' "$(block "$code" '^resource "google_kms_crypto_key_iam_member" "content_platform_ai"')" \
   | grep -q 'member *= *"serviceAccount:${google_service_account.ai.email}"' || fail "only the AI service may use the content key"
 
-echo "terraform-guardrails: PASS (min 0 x2, max api=$api_max ai=1, request-based billing x2, AI service invokable only by the API, AI memory <= 2Gi, one software KMS key for the AI service only, fake AI provider by default, budget alert, $secrets empty secrets, $buckets private buckets with retention, risky flags default to false)"
+echo "terraform-guardrails: PASS (min 0 x2, max api=$api_max ai=1, request-based billing x2, AI service invokable only by the API, AI memory <= 2Gi, one software KMS key for the AI service only, fake AI provider by default, budget alert, $secrets empty secrets, $buckets private buckets with retention, risky flags default to false, everything in the home region)"

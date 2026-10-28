@@ -4,7 +4,10 @@
 #   - Cloud Run: min instances 0 (nothing runs when idle), a hard max-instances cap,
 #     CPU only allocated while a request is being handled.
 #   - Artifact Registry: old images deleted automatically (0.5 GB free).
-#   - Buckets: us-central1, Standard class, automatic deletion of old backups (5 GB free).
+#   - Buckets: in the home region (us-central1 by default, which has the 5 GB free allowance), Standard class,
+#     automatic deletion of old backups.
+#   - Data residency (decision D43): everything below sits in ONE region, var.home_region. A second region is a
+#     second copy of this whole file in its own project, never a second set of resources here.
 #   - Secrets: exactly 5 (the free allowance is 6 active versions; Phase 2 regrouped them).
 #   - Scheduler: 2 jobs (3 are free per billing account).
 #   - A budget alert. An alert is an email - it does NOT stop spending.
@@ -41,9 +44,16 @@ locals {
   # The AI service may read these two.
   ai_secrets = ["service-token-key", "ai-service-config"]
 
-  registry = "${var.primary_region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.containers.repository_id}"
+  # The two regions a company may be kept in (the database allows exactly these: tenants.region IN ('us', 'eu')).
+  region_locations = {
+    us = "us-central1"  # one of the three regions with the Cloud Storage free allowance
+    eu = "europe-west1" # Belgium; no free storage allowance
+  }
+  location = local.region_locations[var.home_region]
 
-  service_regions = var.deploy_services ? var.regions : {}
+  registry = "${local.location}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.containers.repository_id}"
+
+  service_regions = var.deploy_services ? { (var.home_region) = local.location } : {}
 }
 
 resource "google_project_service" "enabled" {
@@ -57,7 +67,7 @@ resource "google_project_service" "enabled" {
 
 resource "google_artifact_registry_repository" "containers" {
   project       = var.project_id
-  location      = var.primary_region
+  location      = local.location
   repository_id = "legacyai"
   format        = "DOCKER"
   description   = "LegacyAI container images"
@@ -139,7 +149,7 @@ resource "google_kms_key_ring" "content" {
   count    = var.deploy_services ? 1 : 0
   project  = var.project_id
   name     = "legacyai-content"
-  location = var.primary_region
+  location = local.location
 
   depends_on = [google_project_service.enabled]
 }
@@ -184,8 +194,14 @@ resource "google_secret_manager_secret" "secret" {
     purpose = each.value
   }
 
+  # Kept in the home region only (decision D43). "auto" would let Google keep copies anywhere. One location is
+  # billed like "auto" (both count as a single location: cloud.google.com/secret-manager/pricing, read 2026-10-28).
   replication {
-    auto {}
+    user_managed {
+      replicas {
+        location = local.location
+      }
+    }
   }
 
   depends_on = [google_project_service.enabled]
@@ -228,7 +244,7 @@ resource "google_secret_manager_secret_iam_member" "anchor_reads" {
 resource "google_storage_bucket" "backups" {
   project                     = var.project_id
   name                        = "${var.project_id}-legacyai-backups"
-  location                    = var.primary_region
+  location                    = local.location
   storage_class               = "STANDARD"
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
@@ -256,7 +272,7 @@ resource "google_storage_bucket" "backups" {
 resource "google_storage_bucket" "audit_anchors" {
   project                     = var.project_id
   name                        = "${var.project_id}-legacyai-audit-anchors"
-  location                    = var.primary_region
+  location                    = local.location
   storage_class               = "STANDARD"
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
@@ -348,6 +364,12 @@ resource "google_cloud_run_v2_service" "api" {
       env {
         name  = "EXPORT_DIR"
         value = "/tmp/exports"
+      }
+      env {
+        # This copy serves only companies kept in its own region (decision D43): the API refuses to start on a
+        # database that holds another region's company, and refuses every request for one.
+        name  = "HOSTING_REGION"
+        value = var.home_region
       }
       env {
         name = "DATABASE_URL"
@@ -533,7 +555,7 @@ resource "google_cloud_run_v2_job" "backup" {
   count               = var.deploy_services ? 1 : 0
   project             = var.project_id
   name                = "legacyai-backup"
-  location            = var.primary_region
+  location            = local.location
   deletion_protection = true
 
   template {
@@ -589,7 +611,7 @@ resource "google_cloud_run_v2_job" "anchor" {
   count               = var.deploy_services ? 1 : 0
   project             = var.project_id
   name                = "legacyai-audit-anchor"
-  location            = var.primary_region
+  location            = local.location
   deletion_protection = true
 
   template {
@@ -654,7 +676,7 @@ resource "google_cloud_run_v2_job" "anchor" {
 resource "google_cloud_run_v2_job_iam_member" "scheduler_runs_backup" {
   count    = var.deploy_services ? 1 : 0
   project  = var.project_id
-  location = var.primary_region
+  location = local.location
   name     = google_cloud_run_v2_job.backup[0].name
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.scheduler.email}"
@@ -663,7 +685,7 @@ resource "google_cloud_run_v2_job_iam_member" "scheduler_runs_backup" {
 resource "google_cloud_run_v2_job_iam_member" "scheduler_runs_anchor" {
   count    = var.deploy_services ? 1 : 0
   project  = var.project_id
-  location = var.primary_region
+  location = local.location
   name     = google_cloud_run_v2_job.anchor[0].name
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.scheduler.email}"
@@ -672,7 +694,7 @@ resource "google_cloud_run_v2_job_iam_member" "scheduler_runs_anchor" {
 resource "google_cloud_scheduler_job" "nightly_backup" {
   count       = var.deploy_services ? 1 : 0
   project     = var.project_id
-  region      = var.primary_region
+  region      = local.location
   name        = "legacyai-nightly-backup"
   description = "Runs the encrypted backup once a night. One short run: it wakes the database once."
   schedule    = "15 3 * * *"
@@ -684,7 +706,7 @@ resource "google_cloud_scheduler_job" "nightly_backup" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://run.googleapis.com/v2/projects/${var.project_id}/locations/${var.primary_region}/jobs/${google_cloud_run_v2_job.backup[0].name}:run"
+    uri         = "https://run.googleapis.com/v2/projects/${var.project_id}/locations/${local.location}/jobs/${google_cloud_run_v2_job.backup[0].name}:run"
 
     oauth_token {
       service_account_email = google_service_account.scheduler.email
@@ -695,7 +717,7 @@ resource "google_cloud_scheduler_job" "nightly_backup" {
 resource "google_cloud_scheduler_job" "daily_anchor" {
   count       = var.deploy_services ? 1 : 0
   project     = var.project_id
-  region      = var.primary_region
+  region      = local.location
   name        = "legacyai-daily-audit-anchor"
   description = "Copies audit chain heads to the anchor bucket once a day."
   schedule    = "45 3 * * *"
@@ -707,7 +729,7 @@ resource "google_cloud_scheduler_job" "daily_anchor" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://run.googleapis.com/v2/projects/${var.project_id}/locations/${var.primary_region}/jobs/${google_cloud_run_v2_job.anchor[0].name}:run"
+    uri         = "https://run.googleapis.com/v2/projects/${var.project_id}/locations/${local.location}/jobs/${google_cloud_run_v2_job.anchor[0].name}:run"
 
     oauth_token {
       service_account_email = google_service_account.scheduler.email
@@ -821,7 +843,7 @@ resource "google_service_account_iam_member" "ci_deployer_from_github" {
 resource "google_artifact_registry_repository_iam_member" "ci_pushes_images" {
   count      = var.enable_ci_deploy ? 1 : 0
   project    = var.project_id
-  location   = var.primary_region
+  location   = local.location
   repository = google_artifact_registry_repository.containers.repository_id
   role       = "roles/artifactregistry.writer"
   member     = "serviceAccount:${google_service_account.ci_deployer[0].email}"

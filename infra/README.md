@@ -23,7 +23,7 @@ You do **not** need any of this to run or test the product on your own computer.
 
 ## Part A — Create the database (Neon)
 
-1. Go to <https://neon.com>, sign up, and create a **project**. Choose PostgreSQL **18** and a US region (for example *AWS US East*). Name the database `legacyai`.
+1. Go to <https://neon.com>, sign up, and create a **project**. Choose PostgreSQL **18** and a US region (for example *AWS US East*). Name the database `legacyai`. (For the European copy, see Part F: a separate Neon project in a European region.)
 2. Neon shows a **connection string** for a role it created for you (often called `neondb_owner`). This role is powerful: it can bypass the tenant walls. **It is for setup, migrations and backups only. The running API must never use it** — the API checks and refuses to start if you give it this role.
 3. Make three long random passwords (at least 20 characters each). On your computer, in a terminal:
    ```
@@ -114,7 +114,7 @@ Backups are encrypted so that the backup job itself cannot read them.
 1. Build and push the three images (replace PROJECT with your project id):
    ```
    gcloud auth configure-docker us-central1-docker.pkg.dev
-   R=us-central1-docker.pkg.dev/PROJECT/legacyai
+   R=us-central1-docker.pkg.dev/PROJECT/legacyai   # the European copy: europe-west1-docker.pkg.dev (Part F)
    docker build -f services/api/Dockerfile -t $R/api:v1 . && docker push $R/api:v1   # from the repository root: the image includes the screens
    docker build -t $R/ai:v1 services/ai && docker push $R/ai:v1
    docker build -f scripts/backup-tools.Dockerfile -t $R/backup-tools:v1 scripts && docker push $R/backup-tools:v1
@@ -141,13 +141,33 @@ Backups are encrypted so that the backup job itself cannot read them.
 
 ---
 
+## Part F — A second copy in Europe (only when a company must be kept in the EU)
+
+Each region is a **separate, complete copy** of LegacyAI (decision D43). The European copy has its own Google Cloud project, its own Neon database, its own secrets, keys and backups. Nothing is shared with the US copy except the program images you build. **Nothing here has been applied or tried against a real account.**
+
+1. **Neon:** create a **second Neon project** in a European region (for example *AWS Europe (Frankfurt)*) and repeat Part A against it, with **new** passwords.
+2. **Google Cloud:** create a **second project** (Part B, steps 1 and 2). Using the same billing account is allowed, but the free allowances are then shared between both copies (decision D43 lists what that costs).
+3. **Terraform:** use a **separate folder or state** for this copy so the two copies never share Terraform's state. The simplest way: copy `infra/terraform` to a folder outside the repository, and in its `terraform.tfvars` set the new project id and:
+   ```
+   home_region = "eu"
+   ```
+   Then `terraform init` and `terraform plan`. Read the plan: every location in it must be `europe-west1` (or `europe-west1-docker.pkg.dev` for the registry). Then `terraform apply` - by hand, as before.
+4. **Secrets (Part C) and the backup key (Part D):** generate **new** values for this copy. Never copy a key from the US copy; a separate backup key means a European backup cannot be opened with the US key.
+5. **Images and services (Part E):** push the images to `europe-west1-docker.pkg.dev/EU_PROJECT/legacyai`, then set `deploy_services = true` and apply. Terraform gives this copy's API `HOSTING_REGION=eu`.
+6. **The first operator card** of this copy: Part E step 4, against the European database. Companies created in this copy are kept in `eu`; they sign in at **this copy's address**, which is on their cards' QR codes.
+
+**What the European API refuses** (proven by tests on a test database): to start, if its database holds any company kept in `us`; any request, and any sign-in, for a company kept in `us`. The US API refuses the same for `eu` companies. Moving a company from one copy to the other is **not built**.
+
+---
+
 ## Things that are irreversible or cost money — stop and think
 
 | Action | Why to pause |
 |---|---|
 | `lock_audit_anchor_retention = true` | **Permanent.** Nobody can ever shorten or remove the retention rule on that bucket. Leave `false` during the pilot. |
 | Raising `api_max_instances` above 2 | The cap bounds CPU and memory charges (about $126/month at 2 instances flat-out — an estimate). It does **not** cap per-request or data charges: there is no hard ceiling on the bill under attack. |
-| Adding an `eu` region | EU regions have **no** Cloud Storage free allowance. |
+| Setting up the European copy (Part F) | EU regions have **no** Cloud Storage free allowance, and the two copies share one set of free allowances when they use the same billing account (decision D43). |
+| Changing `home_region` on a copy that holds data | Terraform would try to **re-create** the buckets, the registry, the secrets and the services in the other region. Never do it: a second region is a second copy. |
 | Adding a 7th secret, or a 4th scheduled job | Small monthly charges begin. |
 | `terraform destroy` | Buckets with retention refuse to be deleted until every object has aged out. The services and jobs have deletion protection switched on, so destroying or replacing them fails until you turn it off deliberately. |
 
@@ -159,5 +179,7 @@ Backups are encrypted so that the backup job itself cannot read them.
 | The guardrails are in the code (min 0, max caps, request-based billing, budget, 5 empty secrets, private buckets, AI service invokable only by the API, fake AI provider by default) | **Proven** by `scripts/ci-terraform-guardrails.sh` |
 | `terraform plan` succeeds against a real project | **Not proven** — needs your account |
 | Anything works on Google Cloud or Neon | **Not proven** — nothing was deployed |
+| Everything a copy creates sits in its home region (`home_region`), secrets included | **Proven in the code** by the guardrail check (it fails if anything is placed elsewhere); `terraform console` shows `us` → `us-central1`, `eu` → `europe-west1`. **Not proven** against a real project. |
+| A copy serves only its own region's companies | **Proven by tests** against the test database (start-up refusal, requests and sign-in refused, new companies get the copy's region) |
 | Backup → encrypt → restore → verify works | **Proven locally** against the Docker database; **not proven** against Neon or a real bucket (the upload-to-bucket step in particular has never run) |
 | Monthly cost is $0 | **Estimate.** Only a real bill proves it. |

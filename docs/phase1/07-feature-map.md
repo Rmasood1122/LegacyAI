@@ -37,7 +37,7 @@ Phases (from your list): **P1** Foundation · **P2** Core value (capture, AI, ve
 | 18 | Sensitive-data redaction | P2 (basic) | Only redaction of **our own logs** (not this feature). Designed in `docs/phase2/05` | (P2) capture | (P2) `redaction_findings` | (P2) | `security/no-secrets` covers logs only |
 | 19 | Expert consent and ownership controls | P2 | Nothing yet. Designed in `docs/phase2/05`. **Needs legal review; code cannot settle it.** | (P2) | (P2) `consents` | (P2) | (P2) |
 | 20 | Tamper-evident audit log | P1 | **Built** | platform | `audit_log`, `audit_chain_heads`, `audit_anchors` | `/v1/audit/events`, `/v1/audit/verify` | `integration/audit`, `security/no-secrets` |
-| 21 | Regional hosting and bring-your-own-key | LATER (hook in P1) | **Hook only** | platform | `tenants.region`, `tenants.encryption_key_ref`; Terraform `var.regions` | — | — |
+| 21 | Regional hosting and bring-your-own-key | LATER (hook in P1) | **Hook only** | platform | `tenants.region`, `tenants.encryption_key_ref`; Terraform `var.regions` (replaced by `home_region`, D43) | — | — |
 | 22 | Answer quality monitor | LATER (basic logging in P2) | Nothing yet | (P2) knowledge | (P2) `answer_logs` | — | (P2) |
 | 23 | Contradiction and staleness detection | LATER | Nothing. (P2 adds a `stale` item status by age only — not detection.) | — | — | — | — |
 | 24 | Human review queue | P2 | Reviewer role and permission seeded; nothing else. Designed in `docs/phase2/06` | (P2) API gateway | (P2) `review_tasks` | (P2) | (P2) |
@@ -138,6 +138,6 @@ Buying-urgency tools (Risk Calculator, free gap scan, Clock Dashboard, pricing) 
 | 4 | QR / NFC / wallet formats | `card_tokens` table | `02-data-model.md` §E |
 | 16 | SSO + SCIM | `sso_connections`; `people.external_id`, `people.scim_managed` | `02-data-model.md` §E |
 | 17 | Permission-aware answers | `buildResourceFilter` — **implemented and tested** on an example resource | `04-policy-decision-point.md` |
-| 21 | Regional hosting + BYOK | `tenants.region`, `tenants.encryption_key_ref`; Terraform `var.regions` | `02`, `06` |
+| 21 | Regional hosting + BYOK | `tenants.region`, `tenants.encryption_key_ref`; Terraform `var.regions` (replaced by `home_region`, D43) | `02`, `06` |
 | 27 | Outcome analytics | `analytics_events` table | `02-data-model.md` §E |
 | 28 | Webhooks / connectors | `outbox_events`, `webhook_endpoints` | `02-data-model.md` §E |

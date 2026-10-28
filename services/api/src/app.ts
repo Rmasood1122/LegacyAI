@@ -7,7 +7,7 @@ import { createKnowledgeGateway, type KnowledgeGateway } from './modules/knowled
 import { createMail, type MailModule, type MailSender } from './modules/mail/index.ts';
 import { createWebhooks, type WebhookTransport, type WebhooksModule } from './modules/webhooks/index.ts';
 import {
-  createHttpServer, createLogger, Database, ExportRegistry, keyServiceFrom, LogNotifier, platformRoutes, PostgresIdempotencyStore,
+  assertOwnRegionOnly, createHttpServer, createLogger, Database, ExportRegistry, keyServiceFrom, LogNotifier, platformRoutes, PostgresIdempotencyStore,
   PostgresRateLimiter, SealingCipher, StaticSite, TenantSealing, type Config, type HttpServer, type KeyService, type Logger, type Notifier, type RateLimiter,
 } from './modules/platform/index.ts';
 import { systemClock, type Clock } from './shared/clock.ts';
@@ -61,9 +61,11 @@ export async function createApp(config: Config, overrides: AppOverrides = {}): P
   const staticSite = config.webDistDir === null ? undefined : StaticSite.load(config.webDistDir);
   const db = new Database(config.databaseUrl.reveal(), config.dbPoolMax);
 
-  // Refuse to run with a database role that could bypass tenant isolation.
+  // Refuse to run with a database role that could bypass tenant isolation, or on a database that holds a company of
+  // another region (D43: each region is its own copy, and a copy serves its own region's companies only).
   try {
     await db.assertSafeRole();
+    await assertOwnRegionOnly(db, config.hostingRegion);
   } catch (err) {
     await db.close();
     throw err;

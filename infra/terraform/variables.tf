@@ -28,25 +28,20 @@ variable "alert_email" {
   }
 }
 
-variable "primary_region" {
-  description = "Region for shared resources. us-central1 is one of the three regions with the Cloud Storage free allowance."
-  type        = string
-  default     = "us-central1"
-}
-
-variable "regions" {
+variable "home_region" {
   description = <<-EOT
-    Regions to deploy the services into, keyed by a short name. Today: US only.
-    To add Europe later, add  eu = "europe-west1"  - a parallel stack is created.
-    NOTE: only us-central1, us-east1 and us-west1 have the Cloud Storage free allowance.
-    An EU region is NOT free.
+    Which region this copy of LegacyAI lives in: "us" (us-central1) or "eu" (europe-west1, Belgium).
+    EVERYTHING this file creates sits in that one place: registry, buckets, backups, the content key, services and
+    jobs. A second region is a second copy - its own Google project, its own Neon database, applied separately with
+    home_region = "eu" (decision D43, infra/README.md Part F). The API of a copy serves only companies of its region.
+    NOTE: only us-central1, us-east1 and us-west1 have the Cloud Storage free allowance. An "eu" copy is NOT free.
   EOT
-  type        = map(string)
-  default     = { us = "us-central1" }
+  type        = string
+  default     = "us"
 
   validation {
-    condition     = length(var.regions) >= 1 && contains(keys(var.regions), "us")
-    error_message = "regions must contain at least the key \"us\"."
+    condition     = contains(["us", "eu"], var.home_region)
+    error_message = "home_region must be \"us\" or \"eu\" (the two regions the database allows for a company)."
   }
 }
 

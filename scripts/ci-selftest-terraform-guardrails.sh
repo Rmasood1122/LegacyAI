@@ -36,4 +36,8 @@ try "an HSM content key (17 times the price)"    main.tf      's/protection_leve
 try "a second Cloud KMS key"                     main.tf      '$a resource "google_kms_crypto_key" "extra" {}'
 try "automatic rotation of the content key"      main.tf      's/purpose  = "ENCRYPT_DECRYPT"/purpose  = "ENCRYPT_DECRYPT"\n  rotation_period = "7776000s"/'
 
+try "a bucket placed outside the home region"   main.tf      '0,/location                    = local.location/s//location                    = "us-east1"/'
+try "secrets replicated anywhere"                main.tf      's/^    user_managed {/    auto {}\n    user_managed {/'
+try "the default copy moved to Europe"           variables.tf '/^variable "home_region"/,/^}/s/default     = "us"/default     = "eu"/'
+try "the us copy moved out of the free region"   main.tf      's/us = "us-central1"/us = "us-east4"/'
 echo "guardrails-selftest: PASS ($fired deliberate breaks, all detected)"

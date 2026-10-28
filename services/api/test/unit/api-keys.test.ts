@@ -204,7 +204,7 @@ const LIVE = { state: 'active' as const, expires_at: new Date(NOW.getTime() + 60
 const OWNER = [role('company_owner')];
 /** The policy context of a request with a key: `maker` is the key's maker as loaded from the database ('none' = a card's own request). */
 const ctx = (maker: CardSubject | null | 'none' = card(OWNER), over: Partial<PolicyContext> = {}): PolicyContext => ({
-  now: NOW, ip: '10.0.0.5', tenant: { status: 'active' }, settings: { enabled_roles: ['company_owner', 'expert'], pilot_reviewer_grant: false },
+  now: NOW, ip: '10.0.0.5', tenant: { status: 'active', served_here: true }, settings: { enabled_roles: ['company_owner', 'expert'], pilot_reviewer_grant: false },
   matrix, companyCard: LIVE, restrictions: [], usage: new Map(), planAllows: true, ...(maker === 'none' ? {} : { keyMaker: maker }), ...over,
 });
 const item = (sensitivity: number, over: Partial<ResourceRef> = {}): ResourceRef =>

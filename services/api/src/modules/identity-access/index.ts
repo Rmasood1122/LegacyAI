@@ -103,7 +103,7 @@ export function createIdentityAccess(deps: IdentityAccessDeps): IdentityAccess {
   const hmacKey = config.hmacIndexKey.reveal();
   const hasher = new SecretCodeHasher(config.scPepper, config.argon2);
   const cards = new CardService({ hasher, notifier: deps.notifier, hmacKey });
-  const authorizer = new Authorizer(deps.billing);
+  const authorizer = new Authorizer(deps.billing, config.hostingRegion);
   let holdings: PersonHoldingsLoader | null = null;
   const anomaly = new AnomalyGuard({ cards, notifier: deps.notifier, hmacKey, defaults: deps.anomalyDefaults });
   const apiKeys = new ApiKeyService(deps.rateLimiter, deps.notifier);
@@ -133,7 +133,7 @@ export function createIdentityAccess(deps: IdentityAccessDeps): IdentityAccess {
 
   return {
     routes: [
-      ...identityRoutes({ db, auth, cards, authorizer, notifier: deps.notifier, billing: deps.billing }),
+      ...identityRoutes({ db, auth, cards, authorizer, notifier: deps.notifier, billing: deps.billing, hostingRegion: config.hostingRegion }),
       ...safetyRoutes({ authorizer, anomaly }),
       ...leavingRoutes({ authorizer, notifier: deps.notifier, holdings: () => holdings }),
       ...apiKeyRoutes({ authorizer, apiKeys }),

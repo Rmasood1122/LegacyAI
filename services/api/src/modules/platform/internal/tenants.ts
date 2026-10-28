@@ -5,7 +5,8 @@ import path from 'node:path';
 import { isUuid } from '../../../shared/crypto.ts';
 import { problems } from '../../../shared/errors.ts';
 import type { RoleKey } from '../../../shared/policy-types.ts';
-import type { Tx } from './db.ts';
+import type { HostingRegion } from './config.ts';
+import { PLATFORM_TENANT_ID, type Database, type Tx } from './db.ts';
 
 export interface TenantRow {
   id: string;
@@ -47,16 +48,38 @@ export async function getSettings(tx: Tx, tenantId: string): Promise<TenantSetti
   return row;
 }
 
-/** Must be called inside withTenantTx(newTenantId): the INSERT is checked by row-level security. */
-export async function createTenant(tx: Tx, p: { id: string; name: string; slug: string }): Promise<TenantRow> {
+/**
+ * Must be called inside withTenantTx(newTenantId): the INSERT is checked by row-level security. `region` is the region
+ * of the copy creating it (D43): a copy creates companies of its own region only.
+ */
+export async function createTenant(tx: Tx, p: { id: string; name: string; slug: string; region: HostingRegion }): Promise<TenantRow> {
   try {
     const { rows } = await tx.query<TenantRow>(
-      `INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3) RETURNING ${TENANT_COLUMNS}`, [p.id, p.name, p.slug]);
+      `INSERT INTO tenants (id, name, slug, region) VALUES ($1, $2, $3, $4) RETURNING ${TENANT_COLUMNS}`, [p.id, p.name, p.slug, p.region]);
     await tx.query('INSERT INTO tenant_settings (tenant_id) VALUES ($1)', [p.id]);
     return rows[0] as TenantRow;
   } catch (err) {
     if ((err as { code?: string }).code === '23505') throw problems.conflict('slug-taken', 'That tenant slug is already in use');
     throw err;
+  }
+}
+
+/**
+ * How many companies this database holds that are kept in another region than `region` (the operator's own company,
+ * which every copy has, is not counted). Requires a transaction opened with platformScope. Start-up refuses a database
+ * where this is not 0 (D43): it belongs to another region's copy, or a backup of one was restored into it.
+ */
+export async function companiesOfOtherRegions(tx: Tx, region: HostingRegion): Promise<number> {
+  const { rows } = await tx.query<{ n: number }>('SELECT count(*)::int AS n FROM tenants WHERE NOT is_platform AND region <> $1', [region]);
+  return rows[0]?.n ?? 0;
+}
+
+/** Start-up check (D43): stops the API before it listens when its database holds another region's company. */
+export async function assertOwnRegionOnly(db: Database, region: HostingRegion): Promise<void> {
+  const others = await db.withTenantTx(PLATFORM_TENANT_ID, (tx) => companiesOfOtherRegions(tx, region), { platformScope: true });
+  if (others > 0) {
+    throw new Error(`this database holds ${others} company(ies) kept in another region than this copy's (${region}); `
+      + 'it belongs to that region\'s copy, or a backup of it was restored here');
   }
 }
 

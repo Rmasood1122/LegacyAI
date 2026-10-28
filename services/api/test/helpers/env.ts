@@ -41,6 +41,8 @@ export function testEnv(overrides: Record<string, string | undefined> = {}): Rec
     // the stand-in payment provider (takes no money) and the fake key its messages are signed with
     PAYMENT_PROVIDER: 'fake',
     PAYMENT_EVENT_KEY: fakeKey('payment-ev-'),
+    // the copy's region (D43); required in production, so a complete configuration names it
+    HOSTING_REGION: 'us',
     ...overrides,
   };
 }

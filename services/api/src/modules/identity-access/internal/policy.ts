@@ -45,7 +45,8 @@ export interface Restriction {
 export interface PolicyContext {
   now: Date;
   ip: string;
-  tenant: { status: string };
+  /** served_here: whether this copy serves the company - its own region's, or the operator's (D43). */
+  tenant: { status: string; served_here: boolean };
   settings: {
     enabled_roles: readonly RoleKey[];
     pilot_reviewer_grant: boolean;
@@ -227,6 +228,8 @@ function evaluateSubject(asking: Subject, action: string, ctx: PolicyContext): D
   if (!permission) return deny('DENY_UNKNOWN_ACTION');
   if (KEY_ONLY_PERMISSIONS.has(action) && asking.kind !== 'api_key') return deny('DENY_KEY_ONLY');
 
+  // A company kept in another region is served by that region's copy only (D43): nothing at all here.
+  if (!ctx.tenant.served_here) return deny('DENY_TENANT_OTHER_REGION');
   if (ctx.tenant.status !== 'active') return deny('DENY_TENANT_INACTIVE');
 
   // Card state. Only a card that was activated and is active (or expired, see below) may act.

@@ -29,6 +29,17 @@ describe('config loader fails closed', () => {
     expect(loadConfig(testEnv({ PAYMENT_PROVIDER: undefined, PAYMENT_EVENT_KEY: undefined })).payment).toEqual({ provider: 'none', eventKey: null, stripe: null });
   });
 
+  it('knows the region of its copy (D43): us or eu, never guessed in production', () => {
+    expect(loadConfig(testEnv()).hostingRegion).toBe('us');
+    expect(loadConfig(testEnv({ HOSTING_REGION: 'eu' })).hostingRegion).toBe('eu');
+    expect(loadConfig(testEnv({ HOSTING_REGION: undefined })).hostingRegion).toBe('us');
+    expect(() => loadConfig(testEnv({ HOSTING_REGION: 'asia' }))).toThrow(/HOSTING_REGION/);
+    expect(() => loadConfig(testEnv({ HOSTING_REGION: 'EU' }))).toThrow(/HOSTING_REGION/);
+    expect(() => loadConfig(testEnv({ NODE_ENV: 'production', PAYMENT_PROVIDER: undefined, HOSTING_REGION: undefined })))
+      .toThrow(/HOSTING_REGION must be set \(us or eu\) when NODE_ENV=production/);
+    expect(loadConfig(testEnv({ NODE_ENV: 'production', PAYMENT_PROVIDER: undefined, HOSTING_REGION: 'eu' })).hostingRegion).toBe('eu');
+  });
+
   const SECRETS = ['DATABASE_URL', 'SC_PEPPER_KEYRING', 'CREDENTIAL_ENC_KEYRING', 'HMAC_INDEX_KEY', 'SERVICE_TOKEN_KEY'];
   const garbage: Array<[string, string | undefined]> = [['missing', undefined], ['empty', ''], ['whitespace', '   ']];
   for (const name of [...SECRETS, 'NODE_ENV', 'ALLOWED_ORIGINS', 'WEBAUTHN_RP_ID']) {
