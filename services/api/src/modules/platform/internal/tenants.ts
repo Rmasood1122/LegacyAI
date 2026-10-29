@@ -64,6 +64,11 @@ export async function createTenant(tx: Tx, p: { id: string; name: string; slug: 
   }
 }
 
+/** Whether the copy of `region` serves the company (D43): one kept in that region, or the operator's own company, which every copy has. */
+export function isServedBy(tenant: Pick<TenantRow, 'is_platform' | 'region'>, region: HostingRegion): boolean {
+  return tenant.is_platform || tenant.region === region;
+}
+
 /**
  * How many companies this database holds that are kept in another region than `region` (the operator's own company,
  * which every copy has, is not counted). Requires a transaction opened with platformScope. Start-up refuses a database

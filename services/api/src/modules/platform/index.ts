@@ -25,7 +25,7 @@ export {
   type IdempotencyStore, type NotificationEvent, type Notifier, type RateLimiter, type RateLimitResult,
 } from './internal/support.ts';
 export {
-  assertOwnRegionOnly, companiesOfOtherRegions, createTenant, ExportRegistry, getPlan, getSettings, getTenant, listTenants, toApiTenant, updateSettings,
+  assertOwnRegionOnly, companiesOfOtherRegions, createTenant, isServedBy, ExportRegistry, getPlan, getSettings, getTenant, listTenants, toApiTenant, updateSettings,
   type ExportTable, type TenantRow, type TenantSettings,
 } from './internal/tenants.ts';
 export {

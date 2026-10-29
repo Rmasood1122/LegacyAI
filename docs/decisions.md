@@ -375,7 +375,11 @@ CONSEQUENCES:
   it from `home_region`): it writes its region on every company it creates; it refuses to start on a database that
   holds a company of another region (another copy's database, or another copy's backup restored here); and the policy
   decision point refuses every request for one (`DENY_TENANT_OTHER_REGION`, also when signing in). The operator's own
-  company is in every copy and is never refused for its region.
+  company is in every copy and is never refused for its region. Since 2026-10-29 also: setting up a sign-in method is
+  refused for such a company (`ENROLL_OTHER_REGION`), sign-in records `LOGIN_OTHER_REGION`, and a payment message about
+  a company kept in another region is answered "ignored" and not recorded (with one provider account for both copies,
+  the provider sends each message to both; the right copy records it). A message about a company not in the database
+  at all is still written to the operator's log, as before.
 - Rules that follow, not chosen separately: everything in a copy sits in its home region, including the secrets
   (replicated to that one region, not Google's "automatic" placement - billed the same, read on Google's pricing page
   2026-10-28); the guardrail check fails if anything is placed elsewhere. Moving a company from one region to the other
