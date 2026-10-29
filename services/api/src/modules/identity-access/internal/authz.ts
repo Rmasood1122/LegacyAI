@@ -2,7 +2,7 @@
 // needs, calls decide(), honours usage counters, and writes EVERY decision to the audit log.
 import { actingCardId, type CardSubject, type Decision, type RequestContext, type ResourceRef, type Subject } from '../../../shared/policy-types.ts';
 import type { BillingPort } from '../../billing/index.ts';
-import { getSettings, getTenant, writeAudit, type HostingRegion, type TenantRow, type Tx } from '../../platform/index.ts';
+import { getSettings, getTenant, isServedBy, writeAudit, type HostingRegion, type TenantRow, type Tx } from '../../platform/index.ts';
 import { accessPhase } from './lifecycle.ts';
 import {
   buildResourceFilter, buildResourceFilterSpec, decide, heldGrants, KEY_ONLY_PERMISSIONS, usageKey,
@@ -59,8 +59,8 @@ export class Authorizer {
   }
 
   /** Whether this copy serves the company (D43): one of its own region, or the operator's company that every copy has. */
-  #servedHere(tenant: TenantRow): boolean {
-    return tenant.is_platform || tenant.region === this.#hostingRegion;
+  servesTenant(tenant: TenantRow): boolean {
+    return isServedBy(tenant, this.#hostingRegion);
   }
 
   /** Plugged in once by app.ts. Without it the safe defaults apply (verified only, second reviewer). */
@@ -106,7 +106,7 @@ export class Authorizer {
       ? await this.#knowledgeSettings(tx, subject.tenant_id)
       : {};
     return {
-      now: ctx.now, ip: ctx.ip, tenant: { status: tenant.status, served_here: this.#servedHere(tenant) }, settings: { ...settings, ...knowledge }, matrix: await this.matrix(tx),
+      now: ctx.now, ip: ctx.ip, tenant: { status: tenant.status, served_here: this.servesTenant(tenant) }, settings: { ...settings, ...knowledge }, matrix: await this.matrix(tx),
       companyCard, restrictions, usage, planAllows: plan.allowed === true,
     };
   }
@@ -123,7 +123,7 @@ export class Authorizer {
       ? await this.#knowledgeSettings(tx, tenantId)
       : {};
     return {
-      now: ctx.now, ip: ctx.ip, tenant: { status: tenant.status, served_here: this.#servedHere(tenant) }, settings: { ...(await getSettings(tx, tenantId)), ...knowledge },
+      now: ctx.now, ip: ctx.ip, tenant: { status: tenant.status, served_here: this.servesTenant(tenant) }, settings: { ...(await getSettings(tx, tenantId)), ...knowledge },
       matrix: await this.matrix(tx), companyCard: await loadCompanyCard(tx, tenantId), restrictions: [], usage: new Map(),
       planAllows: plan.allowed === true, keyMaker: await subjectForCard(tx, tenantId, makerCardId),
     };

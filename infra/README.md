@@ -156,7 +156,7 @@ Each region is a **separate, complete copy** of LegacyAI (decision D43). The Eur
 5. **Images and services (Part E):** push the images to `europe-west1-docker.pkg.dev/EU_PROJECT/legacyai`, then set `deploy_services = true` and apply. Terraform gives this copy's API `HOSTING_REGION=eu`.
 6. **The first operator card** of this copy: Part E step 4, against the European database. Companies created in this copy are kept in `eu`; they sign in at **this copy's address**, which is on their cards' QR codes.
 
-**What the European API refuses** (proven by tests on a test database): to start, if its database holds any company kept in `us`; any request, and any sign-in, for a company kept in `us`. The US API refuses the same for `eu` companies. Moving a company from one copy to the other is **not built**.
+**What the European API refuses** (proven by tests on a test database): to start, if its database holds any company kept in `us`; any request, any sign-in, and any setting up of a sign-in method for a company kept in `us`; payment messages about such a company are answered "ignored" and nothing is recorded (the right copy records them). Every scheduled job starts the same way as the API, so it refuses such a database too. The US API refuses the same for `eu` companies. Moving a company from one copy to the other is **not built**.
 
 ---
 

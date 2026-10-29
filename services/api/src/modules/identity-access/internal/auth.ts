@@ -48,7 +48,9 @@ const totpAad = (tenantId: string): string => `totp:${tenantId}`;
 
 type FailReason =
   | 'bad_txn' | 'unknown_card' | 'bad_factor' | 'factor_throttled' | 'bad_sc' | 'locked' | 'state' | 'expired'
-  | 'tenant_inactive' | 'bad_enrollment_token' | 'superseded';
+  | 'tenant_inactive' | 'bad_enrollment_token' | 'superseded'
+  /** the card's company is kept in another region; that region's copy serves it (D43) */
+  | 'other_region';
 
 interface AuthStateRow {
   sc_failed_count: number;
@@ -288,6 +290,7 @@ export class AuthService {
 
       const tenant = await getTenant(tx, tenantId);
       if (!tenant || tenant.status !== 'active') return fail('tenant_inactive', card);
+      if (!this.#d.authorizer.servesTenant(tenant)) return fail('other_region', card);
       const effective = effectiveState(card, ctx.now);
       if (card.kind !== 'person' || (effective !== 'active' && effective !== 'expired')) return fail('state', card);
 
@@ -424,6 +427,9 @@ export class AuthService {
       };
 
       if (card === null) return fail('unknown_card');
+      // a company of another region sets up nothing here (D43), whatever it presents
+      const tenant = await getTenant(tx, tenantId);
+      if (tenant === null || !this.#d.authorizer.servesTenant(tenant)) return fail('other_region');
       if (tokenRow === null) return fail('bad_enrollment_token');
       const state = await this.#authState(tx, card, true);
       if (scResult.proof === null) {
@@ -496,6 +502,8 @@ export class AuthService {
     const ok = await this.#d.db.withTenantTx<boolean>(txn.tenant_id, async (tx) => {
       const card = (await tx.query<CardRow>(`SELECT ${CARD_COLUMNS} FROM cards WHERE id = $1 FOR UPDATE`, [txn.card_id])).rows[0];
       if (!card) return false;
+      const tenant = await getTenant(tx, txn.tenant_id);
+      if (tenant === null || !this.#d.authorizer.servesTenant(tenant)) return false; // D43: another region's copy serves it
       const effective = effectiveState(card, ctx.now);
       if (effective !== 'issued' && effective !== 'active') return false;
       // Prove the new factor works FIRST. A mistyped code or a failed passkey ceremony must not

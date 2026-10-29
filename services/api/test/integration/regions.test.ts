@@ -3,9 +3,14 @@
 // a copy writes its own region on every company it creates; it refuses to start on a database that holds a company
 // of another region; and a company of another region gets nothing - no request, no sign-in - while the operator's
 // own company, which every copy has, keeps working. Synthetic companies only.
+import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createTenant, platformOperator, startApp, superuser, tryLogin, type TestApp } from '../helpers/harness.ts';
+import { signEvent } from '../../src/modules/billing/index.ts';
+import { testEnv } from '../helpers/env.ts';
+import {
+  Client, createTenant, enrollPasskey, issueMember, platformOperator, startApp, superuser, tryLogin, VirtualPasskey, type TestApp,
+} from '../helpers/harness.ts';
 
 let t: TestApp;
 let admin: pg.Client;
@@ -21,6 +26,9 @@ afterAll(async () => {
 
 const regionOf = async (tenantId: string): Promise<string> =>
   ((await admin.query<{ region: string }>('SELECT region FROM tenants WHERE id = $1', [tenantId])).rows[0] as { region: string }).region;
+const reasons = async (tenantId: string): Promise<string[]> =>
+  (await admin.query<{ reason_code: string }>('SELECT reason_code FROM audit_log WHERE tenant_id = $1 ORDER BY seq', [tenantId])).rows.map((r) => r.reason_code);
+const moveTo = (tenantId: string, region: string): Promise<unknown> => admin.query('UPDATE tenants SET region = $2 WHERE id = $1', [tenantId, region]);
 const lastReason = async (tenantId: string): Promise<string | null> =>
   ((await admin.query<{ reason_code: string }>('SELECT reason_code FROM audit_log WHERE tenant_id = $1 ORDER BY seq DESC LIMIT 1', [tenantId])).rows[0]?.reason_code) ?? null;
 
@@ -76,5 +84,81 @@ describe('regional hosting: a copy serves its own region only', () => {
       await eu?.close();
       await admin.query("UPDATE tenants SET region = 'us' WHERE NOT is_platform");
     }
+  });
+
+  it('sign-in records why it was refused: the company is kept in another region', async () => {
+    const company = await createTenant(t, 'region-login');
+    await moveTo(company.tenantId, 'eu');
+    try {
+      const signIn = await tryLogin(t, company.ownerCard.number, company.ownerCard.sc, { passkey: company.ownerPasskey });
+      expect(signIn.res.status).toBe(401);
+      expect(await lastReason(company.tenantId)).toBe('LOGIN_OTHER_REGION');
+    } finally {
+      await moveTo(company.tenantId, 'us');
+    }
+  });
+
+  it('a new card of another region\'s company cannot set up a sign-in method here, with any valid one-time code', async () => {
+    const company = await createTenant(t, 'region-enrol');
+    const fresh = await issueMember(company.owner, [{ role_key: 'expert' }]);
+    await moveTo(company.tenantId, 'eu');
+    try {
+      await expect(enrollPasskey(t, fresh.card)).rejects.toThrow('enrollment begin failed: 401');
+      expect(await reasons(company.tenantId)).toContain('ENROLL_OTHER_REGION');
+    } finally {
+      await moveTo(company.tenantId, 'us');
+    }
+    // the same card and code work once the company is this copy's again: nothing was used up
+    await expect(enrollPasskey(t, fresh.card)).resolves.toBeInstanceOf(VirtualPasskey);
+  });
+
+  it('a set-up begun here is not finished once the company is kept in another region', async () => {
+    const company = await createTenant(t, 'region-enrol2');
+    const fresh = await issueMember(company.owner, [{ role_key: 'expert' }]);
+    const c = new Client(t);
+    const begin = await c.request('POST', '/v1/auth/enrollment/begin', {
+      card_number: fresh.card.number, sc: fresh.card.sc, enrollment_token: fresh.card.enrollmentToken, factor_type: 'passkey', label: 'test device',
+    });
+    expect(begin.status).toBe(200);
+    await moveTo(company.tenantId, 'eu');
+    try {
+      const done = await c.request('POST', '/v1/auth/enrollment/complete', {
+        enrollment_txn: begin.body.enrollment_txn, attestation: new VirtualPasskey().attest(begin.body.webauthn_options),
+      });
+      expect(done.status).toBe(401);
+      expect((await admin.query('SELECT count(*)::int AS n FROM credentials WHERE card_id = $1', [fresh.card.id])).rows[0].n).toBe(0);
+    } finally {
+      await moveTo(company.tenantId, 'us');
+    }
+  });
+
+  it('a payment message about a company this copy does not serve is answered "ignored" and nothing is recorded', async () => {
+    const key = Buffer.from(testEnv().PAYMENT_EVENT_KEY as string, 'base64');
+    const message = (tenantId: string): Record<string, unknown> => {
+      const fields = {
+        version: 'v1', event_id: `evt_${randomUUID()}`, tenant_id: tenantId, invoice_id: randomUUID(), outcome: 'paid', amount_minor: 100, currency: 'USD',
+        sent_at: t.clock.now().toISOString(),
+      };
+      return { ...fields, signature: signEvent(key, fields) };
+    };
+    const send = (e: unknown) => new Client(t).request('POST', '/v1/billing/provider-events', e, { origin: null });
+    const recorded = async (tenantId: string): Promise<number> =>
+      (await admin.query<{ n: number }>('SELECT count(*)::int AS n FROM payment_events WHERE tenant_id = $1', [tenantId])).rows[0]?.n ?? 0;
+    const company = await createTenant(t, 'region-pay');
+    // served here: the message is recorded (an invoice it does not know needs a person's attention)
+    const here = await send(message(company.tenantId));
+    expect(here.status).toBe(200);
+    expect(here.body.status).not.toBe('ignored');
+    expect(await recorded(company.tenantId)).toBe(1);
+    await moveTo(company.tenantId, 'eu');
+    try {
+      const elsewhere = await send(message(company.tenantId));
+      expect(elsewhere.status).toBe(200);
+      expect(elsewhere.body).toEqual({ status: 'ignored' });
+      expect(await recorded(company.tenantId)).toBe(1);
+    } finally {
+      await moveTo(company.tenantId, 'us');
+    }
+    // a company that is not in this database at all is still written to the operator's log, as before (billing tests)
   });
 });

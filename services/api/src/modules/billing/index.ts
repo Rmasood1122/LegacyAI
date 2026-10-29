@@ -132,7 +132,7 @@ export function createBilling(deps: {
   };
 
   return {
-    routes: billingRoutes({ db, billing, rateLimiter: deps.rateLimiter, providerTimeoutMs: deps.providerTimeoutMs }),
+    routes: billingRoutes({ db, billing, rateLimiter: deps.rateLimiter, providerTimeoutMs: deps.providerTimeoutMs, hostingRegion: deps.config.hostingRegion }),
     port: {
       checkLimit: async (query) => {
         if (!SEAT_ACTIONS.has(query.action)) return { allowed: true };

@@ -1039,7 +1039,7 @@ The founder chose this item, a separate complete copy per region, and EU (Belgiu
   European copy itself (no project, database or key exists; `infra/README.md`, Part F, is the founder's procedure).
   Checked per request: everything a signed-in card or an API key does, and signing in. Not checked per request:
   enrolling a sign-in method with a one-time token, the payment provider's messages, and the background jobs; these
-  rely on the start-up check and on new companies getting the copy's region.
+  rely on the start-up check and on new companies getting the copy's region. (Closed in step 41.)
 
 ## Step 40 — Capture from chats: the questions for a lawyer (2026-10-28)
 
@@ -1050,6 +1050,23 @@ questions with what would be built under each answer, and what is needed back. R
 expert's own messages only, from export files, no live connection to the chat tool. No code; nothing is built until
 the answers come back. Laws named in it are marked "for the lawyer to confirm": Claude did not check them, and the
 paper says what the law is nowhere.
+
+## Step 41 — Regional hosting: the remaining paths check the region too (2026-10-29)
+
+The founder chose to close the paths step 39 left unchecked.
+- Setting up a sign-in method with a one-time code: refused, at the start and at the finish, for a company of another
+  region (the same answer as any failed set-up; audit `ENROLL_OTHER_REGION`). The one-time code is not used up.
+- Signing in: refused as before, now with its own reason in the audit log (`LOGIN_OTHER_REGION`; before, the refusal
+  came later and was recorded as `LOGIN_EXPIRED`).
+- Payment messages: a verified message about a company kept in another region is answered "ignored" and nothing is
+  recorded. Before this step such a message was recorded (measured: the test got `recorded`). A message about a company
+  that is not in this database at all is unchanged: it is written to the operator's log (with one provider account for
+  both copies, the operator will see the other copy's companies there).
+- Scheduled jobs: no change needed. Every job starts through the same start-up as the API, so it refuses a database
+  holding another region's company (step 39).
+- Company sign-in (SSO): its start and return only lead into signing in or setting up a method, which now refuse.
+- Tests: 4 new integration tests against the test database; all 4 fail without the change (one per path above), all 8
+  region tests pass with it.
 
 ## Not built yet (from the plan)
 

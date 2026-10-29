@@ -6,7 +6,8 @@
 import { ProblemError, problems } from '../../../shared/errors.ts';
 import type { RequestContext, ResourceRef, CardSubject } from '../../../shared/policy-types.ts';
 import {
-  decodeIdCursor, encodeCursor, getTenant, pageOf, PLATFORM_TENANT_ID, writeAudit, type Database, type RateLimiter, type RouteDef, type Tx,
+  decodeIdCursor, encodeCursor, getTenant, isServedBy, pageOf, PLATFORM_TENANT_ID, writeAudit, type Database, type HostingRegion, type RateLimiter, type RouteDef,
+  type Tx,
 } from '../../platform/index.ts';
 import { isUuid } from '../../../shared/crypto.ts';
 import { notAppliedReason, toApiInvoice, type Billing, type EventResult, type InvoiceRow } from './billing.ts';
@@ -108,7 +109,11 @@ export async function receive(db: Database, billing: Billing, event: PaymentEven
   return outcome === 'applied' ? 'applied' : 'recorded';
 }
 
-export function billingRoutes(deps: { db: Database; billing: Billing; rateLimiter: RateLimiter; providerTimeoutMs?: number }): RouteDef[] {
+export function billingRoutes(deps: {
+  db: Database; billing: Billing; rateLimiter: RateLimiter; providerTimeoutMs?: number;
+  /** The region of this copy: payment messages about companies of another region are not this copy's (D43). */
+  hostingRegion: HostingRegion;
+}): RouteDef[] {
   const { db, billing } = deps;
 
   const planCode = async (tx: Tx, tenantId: string): Promise<string> => {
@@ -214,6 +219,11 @@ export function billingRoutes(deps: { db: Database; billing: Billing; rateLimite
         // company: the per-address one above depends on the proxy setting (TRUST_PROXY) being right.
         const perCompany = await deps.rateLimiter.hit(`payment-event-company:${event.tenantId}`, 60, 60, ctx.now);
         if (!perCompany.allowed) throw problems.tooManyRequests(perCompany.retryAfterSeconds);
+        // A company kept in another region (D43) is that region's copy's: when both copies use one provider account, the
+        // provider sends every message to both, and the other copy records it. 200, so that the provider stops sending it
+        // here; nothing is recorded. (A company not in this database at all is still written to the operator's log.)
+        const company = await db.withTenantTx(event.tenantId, (tx) => getTenant(tx, event.tenantId));
+        if (company !== null && !isServedBy(company, deps.hostingRegion)) return { body: { status: 'ignored' } };
         return { body: { status: await receive(db, billing, event, ctx) } };
       },
     },
