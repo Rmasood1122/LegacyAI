@@ -27,6 +27,7 @@ from app.capture.files import UploadRejected, extract, sniff
 from app.capture.filters import condition
 from app.capture.media import AUDIO, IMAGE, MediaReader, NoMediaReader, extract_media, sniff_media
 from app.capture.redaction import Finding, redact
+from app.capture.scans import extract_pdf
 from app.capture.sealed_chunks import (
     SEALED_COLUMNS,
     Fields,
@@ -203,7 +204,9 @@ def process_upload(db: Database, ctx: ServiceContext, embedder: Embedder, source
             doc = extract_media(media or NoMediaReader(), data, mime)
         else:
             mime = sniff(data, declared_mime)
-            doc = extract(data, mime, limits.max_pdf_pages)
+            # a scanned PDF is read page by page by the same reader as photos (scans.py); text files as before
+            reader = media or NoMediaReader()
+            doc = extract_pdf(reader, data, limits.max_pdf_pages) if mime == "application/pdf" else extract(data, mime, limits.max_pdf_pages)
         numbering: dict[str, dict[str, int]] = {}
         redacted_pages: list[tuple[int, str]] = []
         findings: list[Finding] = []

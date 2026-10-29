@@ -6,7 +6,7 @@ chunking, sealing, search, and that the file itself is kept nowhere. Synthetic d
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 import psycopg
 import pytest
@@ -22,6 +22,7 @@ from app.platform import Database, Logger
 from tests.conftest import World, make_settings, mint, needs_db
 from tests.integration.helpers import chunk_ids_of_source, chunk_texts, search
 from tests.integration.test_item_topics import may_read_topics
+from tests.pdfs import count_bars, make_scanned_pdf
 
 pytestmark = [pytest.mark.db, needs_db]
 
@@ -128,3 +129,56 @@ def test_the_service_uses_its_configured_reader(db: Database, world: World) -> N
 
     assert put(client("fake"))["status"] == "ready"
     assert put(client("none"))["failure_code"] == "ocr_not_available"
+
+
+class ScanReader:
+    """Test stand-in for text recognition on a scanned PDF: the picture of page n (n black bars) reads as PAGES[n]."""
+
+    name = "test-scan"
+    PAGES: ClassVar[dict[int, str]] = {2: "Feed pump P-9 start-up. Open valve V4 fully before starting.",
+             3: "Questions to rae.kim@corp.test or (212) 555-0199 on the night shift."}
+
+    def transcribe(self, data: bytes, mime: str) -> list[tuple[int, str]]:
+        raise AssertionError("not audio")
+
+    def read_image(self, data: bytes, mime: str) -> str:
+        return self.PAGES[count_bars(data)]
+
+
+def test_a_scanned_pdf_is_read_page_by_page_redacted_sealed_and_found(db: Database, world: World, embedder: FakeEmbedder,
+                                                                      admin: psycopg.Connection[dict[str, Any]]) -> None:
+    source_id = new_source(db, world, "Synthetic scanned procedure")
+    assert upload(db, world, embedder, source_id, make_scanned_pdf([2, 3]), "application/pdf", ScanReader())["status"] == "ready"
+    assert source_row(admin, source_id) == {"status": "ready", "failure_code": None, "mime": "application/pdf", "page_count": 2}
+    rows = chunk_texts(admin, "c.source_id = %s", (source_id,))
+    joined = " ".join(r["text"] for r in rows)
+    assert "valve V4" in joined and "night shift" in joined
+    assert "rae.kim@corp.test" not in joined and "555-0199" not in joined and "[EMAIL_1]" in joined
+    assert all(r["sealed"] for r in rows)
+    spans = admin.execute("SELECT page_from, page_to FROM chunks WHERE source_id = %s", (source_id,)).fetchall()
+    assert spans and all(1 <= s["page_from"] <= s["page_to"] <= 2 for s in spans)
+    assert search(db, world.tenant_id, embedder, "how do I start feed pump P-9")
+
+
+def test_a_scanned_pdf_without_a_reader_is_refused_as_before_and_nothing_is_stored(db: Database, world: World, embedder: FakeEmbedder,
+                                                                                  admin: psycopg.Connection[dict[str, Any]]) -> None:
+    source_id = new_source(db, world, "Synthetic scan, no reader")
+    assert upload(db, world, embedder, source_id, make_scanned_pdf([2, 3]), "application/pdf") == {"status": "failed", "failure_code": "looks_like_scan"}
+    assert admin.execute("SELECT count(*) AS n FROM chunks WHERE source_id = %s", (source_id,)).fetchone() == {"n": 0}
+
+
+def test_the_service_sends_scanned_pages_to_its_configured_reader(db: Database, world: World) -> None:
+    def put(reader: str) -> dict[str, Any]:
+        c = TestClient(create_app(Services(make_settings(MEDIA_READER=reader), db, FakeProvider(), FakeEmbedder(), Logger("error"))))
+        source_id = new_source(db, world)
+        token = mint("source.content", tenant_id=world.tenant_id, card_id=world.people["owner"].card_id, person_id=world.people["owner"].id,
+                     roles=["owner"], subject=source_id)
+        res = c.put(f"/internal/sources/{source_id}/content", content=make_scanned_pdf([1]),
+                    headers={"Authorization": f"Bearer {token}", "content-type": "application/pdf"})
+        assert res.status_code == 200, res.text
+        return dict(res.json())
+
+    assert put("none")["failure_code"] == "looks_like_scan"
+    # the stand-in reader of the service reads only pictures carrying its test marker; a drawn page has none: it got there
+    assert put("fake")["failure_code"] == "unreadable_media"
+

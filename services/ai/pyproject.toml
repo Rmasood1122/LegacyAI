@@ -31,7 +31,7 @@ warn_unused_ignores = true
 exclude = ["^\\.venv/"]
 
 [[tool.mypy.overrides]]
-module = ["presidio_analyzer.*", "spacy.*", "fastembed.*", "puremagic.*", "pgvector.*", "snowballstemmer.*"]
+module = ["presidio_analyzer.*", "spacy.*", "fastembed.*", "puremagic.*", "pgvector.*", "snowballstemmer.*", "pypdfium2.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

@@ -983,7 +983,7 @@ real speech or text-recognition model and its evaluation) wait for Gate 2.
     (a .png is no longer the example of a refused file). Whole web suite: 245 passed.
   - Browser (real API, real AI service with no reader): a recording and a photo are refused with the reason shown.
     Whole browser suite: 47 passed, 2 skipped (WebKit sign-in, step 35).
-- Not done: a real reader and its measured accuracy (Gate 2); scanned PDFs (they need their pages turned into images
+- Not done: a real reader and its measured accuracy (Gate 2); scanned PDFs (built in step 42; they needed their pages turned into images
   first: a further library); the voice interviewer. ("Page" was still the word used where an item quotes a recording; fixed in step 38.)
 
 ## Step 37 — The browser tests keep their browsers between runs (2026-10-28)
@@ -1067,6 +1067,30 @@ The founder chose to close the paths step 39 left unchecked.
 - Company sign-in (SSO): its start and return only lead into signing in or setting up a method, which now refuse.
 - Tests: 4 new integration tests against the test database; all 4 fail without the change (one per path above), all 8
   region tests pass with it.
+
+## Step 42 — Scanned PDFs are read like photos of pages (2026-10-29)
+
+The founder chose this item. Until now a PDF whose pages carry almost no text was refused as "looks like a scan".
+- Now, when a reader of pictures of pages is switched on, each page of such a PDF that has no text is drawn as a grey
+  picture (150 dots per inch; a page larger than 2,600 pixels on a side is drawn smaller) and read by that reader, page
+  by page; pages that do have text keep it, and every page keeps its own number. Then it goes on like any document:
+  redaction, passages, sealing, search. Without a reader (the setting everywhere today) nothing changes: the PDF is
+  refused as `looks_like_scan`.
+- New library: pypdfium2 5.13.0 (the PDF engine of Chrome, PDFium; recorded in `docs/DEPENDENCIES.md`; 5.14.0 is newer
+  but under 60 days old). It runs only in a separate process with a time limit and a memory ceiling, like the reading
+  of text. Pillow is not used: the pictures are written as PNG by our own few lines.
+- The documents screen now explains a scan in plain words. It had a message for a code nothing sends (`no_text_layer`)
+  and none for the one the AI service does send (`looks_like_scan`), so people saw "Processing stopped (looks_like_scan)".
+- Tests: AI 10 new without a database (the pictures decode to the same pixels; a page is drawn as a picture of that page,
+  counted by its black bars; a huge page is drawn smaller; no reader means refused as before; only the pages without
+  text go to the reader, with their numbers; a text PDF never reaches it; an empty reading is refused; the page limit
+  comes first; a broken file is refused, not crashed) and 3 against the database (read, redacted, sealed and found; no
+  reader means nothing stored; the service hands scanned pages to its configured reader). Without the change the 10
+  cannot run (the module does not exist) and 2 of the 3 fail. Whole AI suite on a fresh local database: 413 passed, 1
+  left out (the test known to fail on this machine only). Web: 1 test changed (it failed with the old message), whole
+  web suite 246 passed. pip-audit: no known vulnerabilities (with the accepted pillow IDs).
+- Not covered: a real reader and how well it reads (Gate 2); a PDF with some scanned pages but enough text overall is
+  read as text only, as before (its scanned pages are not drawn); pictures inside pages that also have text.
 
 ## Not built yet (from the plan)
 

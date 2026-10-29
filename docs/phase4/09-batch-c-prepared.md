@@ -58,7 +58,9 @@ written design only, and the reason is given.
   evaluation) wait for the founder's choice of a model (Gate 2). Limits that stay: at most 10 MB per file (the company
   setting is 5 MB by default, about 5 minutes of MP3). Knowledge items quoting a recording say "minute" (step 38 of
   the report).
-- **Scanned PDFs** (a PDF with no text layer is refused today as `looks_like_scan`) also need the pages rendered to
+- **Scanned PDFs — update 2026-10-29: built** (report step 42). A PDF that looks like a scan has its pages without text
+  drawn as pictures (pypdfium2) and read by the same reader as photos; without a reader it is still refused as
+  `looks_like_scan`. Previously: a PDF with no text layer was refused, as it also needed the pages rendered to
   images first. That is a further library (to be checked under D2) and is not prepared.
 - **Voice interviewer** (the interviewer speaking and listening) is more than transcription. It needs speech output
   and turn-taking, and nothing of that is prepared.

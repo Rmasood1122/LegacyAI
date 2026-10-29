@@ -99,11 +99,11 @@ export function useAddDocument(): { state: AddDocumentState; add(doc: NewDocumen
 
 const FAILURES: Readonly<Record<string, string>> = {
   consent_missing: 'The contributor has not given consent for documents (or has withdrawn it).',
-  no_text_layer: 'The PDF has no text in it (it is probably a scan). Scanned PDFs are not supported; a photo or scan of each page (PNG or JPEG) can be added instead, once reading pages is switched on.',
+  looks_like_scan: 'The PDF has no text in it (it is probably a scan). Scanned PDFs can be read only once a text-recognition service is switched on for LegacyAI; none is yet. Nothing was kept.',
   voice_not_available: 'Recordings cannot be turned into text yet: no speech-to-text service is switched on for LegacyAI. Nothing was kept.',
   ocr_not_available: 'Photos and scans of pages cannot be read yet: no text-recognition service is switched on for LegacyAI. Nothing was kept.',
   type_mismatch: 'The file is not what its name says (for example, a picture named .mp3).',
-  unreadable_media: 'The recording or picture could not be read.',
+  unreadable_media: 'The recording, picture or scanned page could not be read.',
   empty: 'No text was found in the file.',
   too_large: 'The file is too large.',
   too_many_pages: 'The document has too many pages.',

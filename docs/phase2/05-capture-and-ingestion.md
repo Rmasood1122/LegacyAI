@@ -114,7 +114,7 @@ No multipart upload library is needed, and — more important — **the file is 
 
 **Type sniffing.** The declared type is not trusted. The first bytes are checked with `puremagic` (no system library needed) and by our own strict rules: a PDF must begin with `%PDF-`; a text file must be valid UTF-8 with no NUL bytes and no more than a small share of control characters. Declared type and sniffed type must agree, otherwise the upload is refused with a clear error. Archives, Office files, images, HTML and anything executable are refused.
 
-**Not supported, and said so in the error message:** scanned PDFs (a PDF whose pages yield almost no text is refused as "this looks like a scan; OCR is not available yet"), encrypted PDFs, forms, embedded files (ignored), languages other than English (accepted, but redaction and search are tuned for English — a warning is stored on the source).
+**Not supported, and said so in the error message:** scanned PDFs (a PDF whose pages yield almost no text is refused as "this looks like a scan; OCR is not available yet" — since 2026-10-29 read page by page when a text-recognition reader is switched on, `docs/phase4/REPORT.md` step 42), encrypted PDFs, forms, embedded files (ignored), languages other than English (accepted, but redaction and search are tuned for English — a warning is stored on the source).
 
 ### Safe parsing
 

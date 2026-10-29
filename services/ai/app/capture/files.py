@@ -3,7 +3,8 @@
 The declared type is not trusted: the first bytes are sniffed (puremagic + our own strict
 rules) and must agree. PDFs are parsed in a separate child process with a wall-clock timeout
 and a memory ceiling, so a decompression bomb or a parser loop kills the child, not the service.
-Only text is extracted. A PDF that yields almost no text is refused as a likely scan.
+Only text is extracted. A PDF that yields almost no text is refused as a likely scan, unless a reader of pictures of
+pages is switched on: then its pages are drawn as pictures and read (scans.py).
 """
 
 from __future__ import annotations
@@ -123,7 +124,23 @@ def extract(data: bytes, mime: str, max_pages: int) -> Extracted:
         if not text.strip():
             raise UploadRejected("empty")
         return Extracted(text=text, pages=[(1, text)], page_count=1)
+    pages = parse_pdf(data, max_pages)
+    if looks_like_scan(pages):
+        raise UploadRejected("looks_like_scan")
+    return as_extracted(pages)
 
+
+def looks_like_scan(pages: list[tuple[int, str]]) -> bool:
+    """Almost no text for its number of pages: most likely pictures of pages (a scan)."""
+    return len("".join(t for _, t in pages).strip()) < MIN_CHARS_PER_PAGE * max(1, len(pages)) / 2
+
+
+def as_extracted(pages: list[tuple[int, str]]) -> Extracted:
+    return Extracted(text="\n\n".join(t for _, t in pages), pages=pages, page_count=len(pages))
+
+
+def parse_pdf(data: bytes, max_pages: int) -> list[tuple[int, str]]:
+    """The text of each page (normalised), read in the child process."""
     ctx = mp.get_context("spawn")
     parent, child = ctx.Pipe(duplex=False)
     proc = ctx.Process(target=_parse_pdf_child, args=(data, max_pages, child), daemon=True)
@@ -142,8 +159,4 @@ def extract(data: bytes, mime: str, max_pages: int) -> Extracted:
         parent.close()
     if status != "ok":
         raise UploadRejected(str(payload))
-    pages = [(n, _normalise(t)) for n, t in payload]
-    text = "\n\n".join(t for _, t in pages)
-    if len(text.strip()) < MIN_CHARS_PER_PAGE * max(1, len(pages)) / 2:
-        raise UploadRejected("looks_like_scan")
-    return Extracted(text=text, pages=pages, page_count=len(pages))
+    return [(n, _normalise(t)) for n, t in payload]
