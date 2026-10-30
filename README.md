@@ -4,7 +4,30 @@ Phase 1 — Foundation: identity, access cards, policy decision point, audit log
 
 **Start with `docs/phase1/REPORT.md`** — what was built, what is proven (with test output), what is not, and the decisions that need the founder.
 
-## Run it on your computer
+## Try the whole product on your computer (one command)
+
+You need **Docker Desktop** (already running), **Node.js 24**, **Python 3.12 or newer** and **git**. On Windows, use
+**Git Bash**. Nothing here touches the cloud or costs money; the AI is a stand-in (no AI company is called).
+
+```bash
+bash scripts/try-locally.sh start    # first time 5-15 minutes (downloads); prints your first card ONCE
+```
+
+Then open **http://localhost:8080** in Chrome or Edge:
+1. Under the card number box, click **Set it up**. Type the card number, the 3-digit code and the enrollment token the
+   script printed, and add a passkey (Windows Hello) or an authenticator app on your phone.
+2. Sign in. You are the operator: in **Operator console**, create a company. Its owner's card is shown once.
+3. Sign out, set up the owner's card the same way, and sign in with it: documents, Ask, knowledge, people and the rest.
+
+```bash
+bash scripts/try-locally.sh status   # what is running
+bash scripts/try-locally.sh stop     # stops everything; what you made is erased (the test database keeps nothing)
+```
+
+The script never starts, stops or restarts Docker; it uses only the container `legacyai-postgres`. If something does
+not start, it says which part and where its log is (in the folder `.local/logs`).
+
+## Run the API on its own
 
 You need **Docker Desktop** (running), **Node.js 24** and **git**. Nothing here touches the cloud or costs money.
 
