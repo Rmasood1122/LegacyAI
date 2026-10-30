@@ -88,7 +88,7 @@ describe('documents', () => {
   });
 
   it('lists documents; a card that may only read sees no form', async () => {
-    const api = new FakeApi({ listSources: () => page([doc(), doc({ id: ID(21), title: 'Scan', status: 'failed', failure_code: 'no_text_layer' })]) });
+    const api = new FakeApi({ listSources: () => page([doc(), doc({ id: ID(21), title: 'Scan', status: 'failed', failure_code: 'looks_like_scan' })]) });
     renderScreen(<DocumentsScreen />, { api, session: as('listSources') });
     expect(await screen.findByText('Boiler notes')).toBeTruthy();
     expect(screen.getByText('Failed')).toBeTruthy();
@@ -164,7 +164,7 @@ describe('documents', () => {
     const api = new FakeApi({
       listSources: () => page<KSource>([]),
       createSource: () => ({ id: ID(23), status: 'awaiting_content', title: 'Scan' }),
-      uploadSourceContent: () => ({ status: 'failed', failure_code: 'no_text_layer', chunk_count: null, pending_chunks: null, duplicate_of: null }),
+      uploadSourceContent: () => ({ status: 'failed', failure_code: 'looks_like_scan', chunk_count: null, pending_chunks: null, duplicate_of: null }),
     });
     renderScreen(<DocumentsScreen />, { api, session: as('listSources', 'createSource', 'uploadSourceContent') });
     await user.type(await screen.findByLabelText('Title'), 'Scan');
@@ -175,6 +175,7 @@ describe('documents', () => {
     await user.click(screen.getByRole('button', { name: 'Add document' }));
     expect(await screen.findByText('The document could not be used')).toBeTruthy();
     expect(screen.getByText(/no text in it/)).toBeTruthy();
+    expect(screen.queryByText(/Processing stopped/)).toBeNull();   // the AI service's own code for a scan has its plain words
   });
 
   it('sends a recording or a photo of a page with its type, and explains plainly when it cannot be read (features 7, 25)', async () => {
