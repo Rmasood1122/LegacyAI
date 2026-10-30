@@ -45,3 +45,6 @@ services/ai/eval/out/
 web/playwright-report/
 web/test-results/
 web/e2e-artifacts/
+
+# scripts/try-locally.sh: its logs and process numbers
+.local/
